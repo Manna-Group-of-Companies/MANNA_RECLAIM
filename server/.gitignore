@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# env - holds SUPABASE_SERVICE_KEY, never commit
+# .env.example is committed on purpose
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+
+# logs
+logs/
+*.log
+npm-debug.log*
+pids/
+*.pid
+*.seed
+
+# tests
+coverage/
+.nyc_output/
+
+# runtime artifacts
+uploads/
+tmp/
+temp/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
