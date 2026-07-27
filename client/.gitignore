@@ -1,0 +1,40 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+dist-ssr/
+build/
+
+# vite / bundler caches
+.vite/
+.turbo/
+stats.html
+
+# typescript
+*.tsbuildinfo
+
+# tests
+coverage/
+
+# env - .env.example is committed on purpose
+.env
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+*.local
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# editors / os
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

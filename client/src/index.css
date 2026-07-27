@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans text-base antialiased;
+    background-image: radial-gradient(120% 60% at 50% -10%, #1c2415 0%, #13160f 55%);
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  * {
+    @apply border-line;
+  }
+}
+
+@layer components {
+  /* Tabular figures for every weight / timer readout. */
+  .tnum {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .panel {
+    @apply rounded-card border border-line bg-gradient-to-b from-panel-raised to-panel shadow-card;
+  }
+
+  .field-input {
+    @apply w-full rounded-field border border-line-strong bg-panel-field px-3 py-3 text-[15px]
+           text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
+  }
+
+  .label-caps {
+    @apply mb-2 block text-[11px] font-bold uppercase tracking-[0.12em] text-ink-dim;
+  }
+
+  .safe-top {
+    padding-top: var(--safe-t);
+  }
+
+  .safe-bottom {
+    padding-bottom: var(--safe-b);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
