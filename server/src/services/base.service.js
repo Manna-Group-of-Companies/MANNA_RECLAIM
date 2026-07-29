@@ -44,11 +44,26 @@ const pick = (row, select) => {
   return Object.fromEntries(Object.entries(row).filter(([k]) => keep.has(k)));
 };
 
+/**
+ * Turns a plain `{ field: value }` filter bag into a Mongo query.
+ *
+ * Blank values are dropped so `?shift=` behaves as "no filter". To match on
+ * null (an open run has `ended_at: null`) or on anything else the shorthand
+ * cannot express, hand in an operator object - `{ ended_at: { $eq: null } }` -
+ * or a top-level `$and` / `$or`, both of which pass straight through.
+ */
 const where = (filters = {}) => {
   const query = {};
   for (const [field, value] of Object.entries(filters)) {
+    if (field.startsWith('$')) {
+      query[field] = value;
+      continue;
+    }
     if (value === undefined || value === null || value === '') continue;
-    query[field === 'id' ? '_id' : field] = Array.isArray(value) ? { $in: value } : value;
+    const key = field === 'id' ? '_id' : field;
+    if (Array.isArray(value)) query[key] = { $in: value };
+    else if (typeof value === 'object') query[key] = value;
+    else query[key] = value;
   }
   return query;
 };
@@ -100,6 +115,23 @@ export function crud(collection, { defaultSort = 'created_at', select = '*' } = 
           Model.countDocuments(criteria),
         ]);
         return { rows: rows.map(serialize), total, page, limit };
+      } catch (err) {
+        throw wrapError(err);
+      }
+    },
+
+    /**
+     * Every matching row, ignoring page/limit. The reports aggregate over
+     * thousands of runs, and going through list() would silently cap them at
+     * the 200-row pagination ceiling.
+     */
+    async all(filters = {}, { sort = defaultSort, ascending = false } = {}) {
+      try {
+        const rows = await model(collection)
+          .find(where(filters), projection)
+          .sort({ [sort]: ascending ? 1 : -1 })
+          .lean();
+        return rows.map(serialize);
       } catch (err) {
         throw wrapError(err);
       }

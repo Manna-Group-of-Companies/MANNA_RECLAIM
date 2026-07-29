@@ -1,4 +1,5 @@
 import { TABLES } from '../config/constants.js';
+import { defineLooseModel } from './base.model.js';
 import { User } from './user.model.js';
 import { Machine } from './machine.model.js';
 import { Batch } from './batch.model.js';
@@ -7,11 +8,13 @@ import { Dispatch, DispatchLoad } from './dispatch.model.js';
 import { QualityTest } from './quality.model.js';
 import { Maintenance, BearingLog } from './maintenance.model.js';
 import { Customer, Rate } from './rate.model.js';
+import { EfficiencyNote } from './efficiency.model.js';
 import { Vehicle, Driver, Shift } from './fleet.model.js';
 
 export {
   User, Machine, Batch, Run, Dispatch, DispatchLoad,
   QualityTest, Maintenance, BearingLog, Customer, Rate, Vehicle, Driver, Shift,
+  EfficiencyNote,
 };
 
 /**
@@ -33,6 +36,23 @@ export const models = {
   [TABLES.rates]: Rate,
   [TABLES.vehicles]: Vehicle,
   [TABLES.drivers]: Driver,
+
+  // Collections copied over from Supabase with their original columns. They are
+  // read-only as far as the API is concerned, so a loose schema is enough.
+  [TABLES.sharedState]: defineLooseModel('SharedState', TABLES.sharedState),
+  [TABLES.customerRates]: defineLooseModel('CustomerRate', TABLES.customerRates),
+  [TABLES.priceList]: defineLooseModel('PriceListRow', TABLES.priceList),
+  [TABLES.materialRates]: defineLooseModel('MaterialRate', TABLES.materialRates),
+  [TABLES.costRates]: defineLooseModel('CostRate', TABLES.costRates),
+  [TABLES.conversions]: defineLooseModel('Conversion', TABLES.conversions),
+  [TABLES.formulations]: defineLooseModel('Formulation', TABLES.formulations),
+  [TABLES.machineTargets]: defineLooseModel('MachineTarget', TABLES.machineTargets),
+  [TABLES.efficiencyNotes]: EfficiencyNote,
+  [TABLES.machineShiftEfficiency]: defineLooseModel('MachineShiftEfficiency', TABLES.machineShiftEfficiency),
+  [TABLES.shiftActivity]: defineLooseModel('ShiftActivity', TABLES.shiftActivity),
+  [TABLES.shiftCosting]: defineLooseModel('ShiftCosting', TABLES.shiftCosting),
+  [TABLES.specialBatchDetail]: defineLooseModel('SpecialBatchDetail', TABLES.specialBatchDetail),
+  [TABLES.coarseShiftDetail]: defineLooseModel('CoarseShiftDetail', TABLES.coarseShiftDetail),
 };
 
 export function modelFor(collection) {

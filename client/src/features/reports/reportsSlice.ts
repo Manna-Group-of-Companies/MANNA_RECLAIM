@@ -1,13 +1,32 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { reportService, type DateRange } from '@/api/services/report.service';
+import {
+  reportService,
+  type DateRange,
+  type EfficiencyNotePayload,
+} from '@/api/services/report.service';
 import { toRequestError } from '@/api/axiosClient';
-import type { CostingReport, EfficiencyRow, ProductionReport } from '@/types/models';
+import type {
+  CostingReport,
+  DowntimeDetail,
+  DowntimeReport,
+  EfficiencyRow,
+  ProductionReport,
+  RunFilters,
+  ShiftEfficiency,
+  ShiftOption,
+} from '@/types/models';
 
 interface ReportsState {
   range: DateRange;
   production: ProductionReport | null;
   efficiency: EfficiencyRow[];
   costing: CostingReport | null;
+  /** Days / shifts / machines the history covers, for the pickers. */
+  filters: RunFilters | null;
+  shifts: ShiftOption[];
+  shiftEfficiency: ShiftEfficiency | null;
+  downtime: DowntimeReport | null;
+  downtimeDetail: DowntimeDetail[];
   loading: boolean;
   error: string | null;
 }
@@ -17,9 +36,16 @@ const initialState: ReportsState = {
   production: null,
   efficiency: [],
   costing: null,
+  filters: null,
+  shifts: [],
+  shiftEfficiency: null,
+  downtime: null,
+  downtimeDetail: [],
   loading: false,
   error: null,
 };
+
+const fail = (err: unknown) => toRequestError(err).message;
 
 /** The user Reports tab needs production only; the admin dashboard needs all three. */
 export const fetchProduction = createAsyncThunk(
@@ -28,7 +54,7 @@ export const fetchProduction = createAsyncThunk(
     try {
       return await reportService.production(range);
     } catch (err) {
-      return rejectWithValue(toRequestError(err).message);
+      return rejectWithValue(fail(err));
     }
   },
 );
@@ -39,7 +65,67 @@ export const fetchDashboard = createAsyncThunk(
     try {
       return await reportService.dashboard(range);
     } catch (err) {
-      return rejectWithValue(toRequestError(err).message);
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const fetchRunFilters = createAsyncThunk('reports/filters', async (_, { rejectWithValue }) => {
+  try {
+    return await reportService.filters();
+  } catch (err) {
+    return rejectWithValue(fail(err));
+  }
+});
+
+export const fetchShiftOptions = createAsyncThunk('reports/shifts', async (_, { rejectWithValue }) => {
+  try {
+    return await reportService.shifts();
+  } catch (err) {
+    return rejectWithValue(fail(err));
+  }
+});
+
+export const fetchShiftEfficiency = createAsyncThunk(
+  'reports/shiftEfficiency',
+  async (params: { date: string; shift: string }, { rejectWithValue }) => {
+    try {
+      return await reportService.shiftEfficiency(params);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const addEfficiencyNote = createAsyncThunk(
+  'reports/addNote',
+  async (payload: EfficiencyNotePayload, { rejectWithValue }) => {
+    try {
+      return await reportService.addEfficiencyNote(payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const fetchDowntime = createAsyncThunk(
+  'reports/downtime',
+  async (params: { month?: string } | undefined, { rejectWithValue }) => {
+    try {
+      return await reportService.downtime(params);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const fetchDowntimeDetail = createAsyncThunk(
+  'reports/downtimeDetail',
+  async (params: { month?: string; machineId: string }, { rejectWithValue }) => {
+    try {
+      return await reportService.downtimeDetail(params);
+    } catch (err) {
+      return rejectWithValue(fail(err));
     }
   },
 );
@@ -50,6 +136,9 @@ const reportsSlice = createSlice({
   reducers: {
     setRange: (state, action: { payload: DateRange }) => {
       state.range = action.payload;
+    },
+    clearDowntimeDetail: (state) => {
+      state.downtimeDetail = [];
     },
   },
   extraReducers: (builder) => {
@@ -70,9 +159,46 @@ const reportsSlice = createSlice({
       .addCase(fetchDashboard.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload as string;
+      })
+      .addCase(fetchRunFilters.fulfilled, (state, action) => {
+        state.filters = action.payload;
+      })
+      .addCase(fetchShiftOptions.fulfilled, (state, action) => {
+        state.shifts = action.payload;
+      })
+      .addCase(fetchShiftEfficiency.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(fetchShiftEfficiency.fulfilled, (state, action) => {
+        state.loading = false;
+        state.shiftEfficiency = action.payload;
+      })
+      .addCase(fetchShiftEfficiency.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(addEfficiencyNote.fulfilled, (state, action) => {
+        if (state.shiftEfficiency) {
+          state.shiftEfficiency.notes = [action.payload, ...state.shiftEfficiency.notes];
+        }
+      })
+      .addCase(fetchDowntime.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchDowntime.fulfilled, (state, action) => {
+        state.loading = false;
+        state.downtime = action.payload;
+      })
+      .addCase(fetchDowntime.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(fetchDowntimeDetail.fulfilled, (state, action) => {
+        state.downtimeDetail = action.payload;
       });
   },
 });
 
-export const { setRange } = reportsSlice.actions;
+export const { setRange, clearDowntimeDetail } = reportsSlice.actions;
 export default reportsSlice.reducer;

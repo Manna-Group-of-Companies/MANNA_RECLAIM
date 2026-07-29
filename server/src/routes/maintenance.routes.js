@@ -16,6 +16,7 @@ router.use(authenticate);
 router.get('/', validate({ query: listQuery }), maint.list);
 router.post('/', validate({ body: createMaintenanceSchema }), maint.create);
 router.post('/:id/resolve', validate({ params: idParam, body: resolveSchema }), maint.resolve);
+router.delete('/:id', validate({ params: idParam }), maint.remove);
 
 router.get('/bearings', validate({ query: listQuery }), maint.listBearings);
 router.get('/bearings/due', maint.bearingsDue);

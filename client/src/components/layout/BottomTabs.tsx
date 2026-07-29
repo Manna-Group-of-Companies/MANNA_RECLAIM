@@ -1,41 +1,59 @@
 import { NavLink } from 'react-router-dom';
-import { Boxes, Layers, Scale, Truck, History, BarChart3 } from 'lucide-react';
+import { useAppSelector } from '@/app/hooks';
 import { userPaths } from '@/config/paths';
+import { Icon } from '@/components/ui';
+import type { IconName } from '@/config/icons';
 import { cn } from '@/utils/cn';
 
-/** Same six tabs as the index.html prototype. */
-const tabs = [
-  { to: userPaths.machines, label: 'Machines', Icon: Boxes },
-  { to: userPaths.batches, label: 'Batches', Icon: Layers },
-  { to: userPaths.weigh, label: 'Weigh', Icon: Scale },
-  { to: userPaths.dispatch, label: 'Dispatch', Icon: Truck },
-  { to: userPaths.history, label: 'History', Icon: History },
-  { to: userPaths.reports, label: 'Reports', Icon: BarChart3 },
+interface Tab {
+  to: string;
+  label: string;
+  icon: IconName;
+  /** Which pending count sits on the badge, if any. */
+  badge?: 'weigh' | 'packing' | 'quality' | 'bearing';
+}
+
+/** The eight shop-floor tabs, in the prototype's order. */
+const tabs: Tab[] = [
+  { to: userPaths.machines, label: 'Machines', icon: 'machines' },
+  { to: userPaths.batches, label: 'Batches', icon: 'batches' },
+  { to: userPaths.weigh, label: 'Weigh', icon: 'weigh', badge: 'weigh' },
+  { to: userPaths.packing, label: 'Packing', icon: 'packing', badge: 'packing' },
+  { to: userPaths.dispatch, label: 'Dispatch', icon: 'dispatch' },
+  { to: userPaths.quality, label: 'Quality', icon: 'quality', badge: 'quality' },
+  { to: userPaths.history, label: 'History', icon: 'history' },
+  { to: userPaths.bearing, label: 'Bearing', icon: 'bearing', badge: 'bearing' },
 ];
 
+/**
+ * Badges are the whole point of this bar: they are how the crew knows there is
+ * work waiting on a tab they are not looking at.
+ */
 export function BottomTabs() {
+  const pendingWeigh = useAppSelector((s) => s.runs.pendingWeigh.length);
+  const pendingPack = useAppSelector((s) => s.runs.pendingPack.length);
+  const pendingQuality = useAppSelector((s) => s.quality.pending.length);
+  const bearingsDue = useAppSelector((s) => s.maintenance.due.filter((d) => d.due).length);
+
+  const counts = {
+    weigh: pendingWeigh,
+    packing: pendingPack,
+    quality: pendingQuality,
+    bearing: bearingsDue,
+  } as const;
+
   return (
-    <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 mx-auto flex max-w-[760px] border-t border-black/70 bg-gradient-to-b from-[#211d15] to-[#171410]">
-      {tabs.map(({ to, label, Icon }) => (
-        <NavLink
-          key={to}
-          to={to}
-          className={({ isActive }) =>
-            cn(
-              'relative flex flex-1 flex-col items-center gap-1 px-0.5 pb-2 pt-2.5',
-              isActive ? 'text-brand' : 'text-ink-faint',
-            )
-          }
-        >
-          {({ isActive }) => (
-            <>
-              {isActive && <span className="absolute top-0 h-0.5 w-6 rounded bg-brand" />}
-              <Icon size={22} strokeWidth={1.7} />
-              <span className="text-[9.5px] font-bold uppercase tracking-wider">{label}</span>
-            </>
-          )}
-        </NavLink>
-      ))}
+    <nav className="tabs">
+      {tabs.map(({ to, label, icon, badge }) => {
+        const count = badge ? counts[badge] : 0;
+        return (
+          <NavLink key={to} to={to} className={({ isActive }) => cn(isActive && 'active')}>
+            {count > 0 && <i className="tabbadge">{count}</i>}
+            <Icon name={icon} size={23} />
+            <span>{label}</span>
+          </NavLink>
+        );
+      })}
     </nav>
   );
 }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAppSelector } from '@/app/hooks';
 import { userService } from '@/api/services/user.service';
 import { toRequestError } from '@/api/axiosClient';
-import { Badge, Button, DataTable, Modal, type Column } from '@/components/ui';
+import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
 import type { Role, User } from '@/types/models';
 
@@ -10,6 +11,7 @@ const roles: Role[] = ['worker', 'supervisor', 'manager', 'admin'];
 /** Local state only - user administration is small and does not need a slice. */
 export function UsersPage() {
   const notify = useToast();
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const [rows, setRows] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<{ name: string; pin: string; role: Role } | null>(null);
@@ -27,41 +29,24 @@ export function UsersPage() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshTick]);
 
-  const columns: Column<User>[] = [
-    { key: 'name', header: 'Name', render: (u) => <span className="font-semibold">{u.name}</span> },
-    { key: 'role', header: 'Role', render: (u) => <span className="capitalize">{u.role}</span> },
-    {
-      key: 'active',
-      header: 'State',
-      render: (u) => <Badge tone={u.active ? 'ok' : 'neutral'}>{u.active ? 'active' : 'disabled'}</Badge>,
-    },
-    {
-      key: 'toggle',
-      header: '',
-      align: 'right',
-      render: (u) => (
-        <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              await userService.update(u.id, { active: !u.active });
-              notify(u.active ? 'Account disabled' : 'Account enabled');
-              void load();
-            } catch (err) {
-              notify(toRequestError(err).message, 'err');
-            }
-          }}
-        >
-          {u.active ? 'Disable' : 'Enable'}
-        </Button>
-      ),
-    },
-  ];
+  const toggle = async (user: User) => {
+    try {
+      await userService.update(user.id, { active: !user.active });
+      notify(user.active ? 'Account disabled' : 'Account enabled');
+      void load();
+    } catch (err) {
+      notify(toRequestError(err).message, 'err');
+    }
+  };
 
   const create = async () => {
     if (!draft) return;
+    if (!draft.name.trim() || draft.pin.length < 4) {
+      notify('A name and a PIN of at least 4 digits are needed', 'warn');
+      return;
+    }
     try {
       await userService.create(draft);
       notify('User created');
@@ -73,56 +58,79 @@ export function UsersPage() {
   };
 
   return (
-    <section className="panel p-4">
-      <header className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-ink-dim">Users</h1>
-        <Button variant="primary" size="sm" onClick={() => setDraft({ name: '', pin: '', role: 'supervisor' })}>
-          Add user
-        </Button>
-      </header>
+    <>
+      <div className="mx-0.5 mt-3">
+        <h1 className="text-lg">Users</h1>
+        <div className="sub">
+          Who can sign in, and what they reach. Manager and admin also get this back office.
+        </div>
+      </div>
 
-      <DataTable columns={columns} rows={rows} rowKey={(u) => u.id} loading={loading} empty="No accounts yet" />
+      {loading && <div className="spin">Loading accounts…</div>}
 
-      <Modal
+      {!loading && !rows.length && <div className="empty">No accounts yet.</div>}
+
+      {!loading &&
+        rows.map((user) => (
+          <div key={user.id} className="mrow">
+            <div>
+              <div className="mn">{user.name}</div>
+              <div className="mk capitalize">{user.role}</div>
+            </div>
+            <div className="row gap-2">
+              <span className={`badge ${user.active ? 'ok' : 'none'}`}>
+                {user.active ? 'active' : 'disabled'}
+              </span>
+              <button type="button" className="btn ghost" onClick={() => toggle(user)}>
+                {user.active ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+          </div>
+        ))}
+
+      <button
+        type="button"
+        className="btn block mt-2.5"
+        onClick={() => setDraft({ name: '', pin: '', role: 'supervisor' })}
+      >
+        + Add user
+      </button>
+
+      <BoModal
         open={Boolean(draft)}
         title="New user"
+        subtitle="The PIN is what they type on the shop-floor tablet."
         onClose={() => setDraft(null)}
         footer={
-          <>
-            <Button onClick={() => setDraft(null)}>Cancel</Button>
-            <Button variant="primary" onClick={create}>
-              Create
-            </Button>
-          </>
+          <button type="button" className="btn" onClick={create}>
+            Create
+          </button>
         }
       >
         {draft && (
-          <>
-            <div>
-              <label className="label-caps" htmlFor="u-name">Name</label>
+          <div className="mt-3">
+            <div className="field">
+              <label htmlFor="u-name">Name</label>
               <input
                 id="u-name"
-                className="field-input"
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
               />
             </div>
-            <div>
-              <label className="label-caps" htmlFor="u-pin">PIN</label>
+            <div className="field">
+              <label htmlFor="u-pin">PIN</label>
               <input
                 id="u-pin"
-                className="field-input tnum"
                 inputMode="numeric"
                 maxLength={6}
                 value={draft.pin}
                 onChange={(e) => setDraft({ ...draft, pin: e.target.value.replace(/\D/g, '') })}
               />
             </div>
-            <div>
-              <label className="label-caps" htmlFor="u-role">Role</label>
+            <div className="field">
+              <label htmlFor="u-role">Role</label>
               <select
                 id="u-role"
-                className="field-input"
                 value={draft.role}
                 onChange={(e) => setDraft({ ...draft, role: e.target.value as Role })}
               >
@@ -133,10 +141,10 @@ export function UsersPage() {
                 ))}
               </select>
             </div>
-          </>
+          </div>
         )}
-      </Modal>
-    </section>
+      </BoModal>
+    </>
   );
 }
 

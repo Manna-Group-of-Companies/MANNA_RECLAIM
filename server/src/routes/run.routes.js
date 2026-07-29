@@ -6,6 +6,8 @@ import { idParam, listQuery } from '../validations/common.validation.js';
 import {
   startRunSchema,
   stopRunSchema,
+  weighRunSchema,
+  packRunSchema,
   pauseRunSchema,
   syncRunsSchema,
 } from '../validations/run.validation.js';
@@ -16,10 +18,14 @@ router.use(authenticate);
 
 router.get('/', validate({ query: listQuery }), runs.list);
 router.get('/active', runs.active);
+router.get('/pending-weigh', runs.pendingWeigh);
+router.get('/pending-pack', runs.pendingPack);
 router.get('/shift', runs.byShift);
 router.get('/:id', validate({ params: idParam }), runs.getOne);
 router.post('/start', validate({ body: startRunSchema }), runs.start);
 router.post('/:id/stop', validate({ params: idParam, body: stopRunSchema }), runs.stop);
+router.post('/:id/weigh', validate({ params: idParam, body: weighRunSchema }), runs.weigh);
+router.post('/:id/pack', validate({ params: idParam, body: packRunSchema }), runs.pack);
 router.post('/:id/pause', validate({ params: idParam, body: pauseRunSchema }), runs.pause);
 router.post('/sync', validate({ body: syncRunsSchema }), runs.sync);
 

@@ -2,12 +2,15 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { rateService } from '@/api/services/rate.service';
 import { toRequestError } from '@/api/axiosClient';
 import { PRICE_LIST } from '@/config/constants';
-import type { Rate } from '@/types/models';
+import type { CostRates, Rate } from '@/types/models';
 
 interface RatesState {
   rates: Rate[];
   customers: string[];
   priceList: Record<string, number>;
+  /** The plant's cost inputs - what the back office's Rates tab edits. */
+  costRates: CostRates | null;
+  saving: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -16,6 +19,8 @@ const initialState: RatesState = {
   rates: [],
   customers: [],
   priceList: PRICE_LIST,
+  costRates: null,
+  saving: false,
   loading: false,
   error: null,
 };
@@ -41,6 +46,25 @@ export const saveRate = createAsyncThunk('rates/save', async (payload: Rate, { r
   }
 });
 
+export const fetchCostRates = createAsyncThunk('rates/costRates', async (_, { rejectWithValue }) => {
+  try {
+    return await rateService.costRates();
+  } catch (err) {
+    return rejectWithValue(toRequestError(err).message);
+  }
+});
+
+export const saveCostRates = createAsyncThunk(
+  'rates/saveCostRates',
+  async (data: Record<string, number | null>, { rejectWithValue }) => {
+    try {
+      return await rateService.saveCostRates(data);
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
 const ratesSlice = createSlice({
   name: 'rates',
   initialState,
@@ -59,6 +83,20 @@ const ratesSlice = createSlice({
       })
       .addCase(fetchRateCard.rejected, (state, action) => {
         state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(fetchCostRates.fulfilled, (state, action) => {
+        state.costRates = action.payload;
+      })
+      .addCase(saveCostRates.pending, (state) => {
+        state.saving = true;
+      })
+      .addCase(saveCostRates.fulfilled, (state, action) => {
+        state.saving = false;
+        state.costRates = action.payload;
+      })
+      .addCase(saveCostRates.rejected, (state, action) => {
+        state.saving = false;
         state.error = action.payload as string;
       })
       .addCase(saveRate.fulfilled, (state, action) => {

@@ -9,7 +9,10 @@ export const User = defineModel(
     name: { type: String, required: true, trim: true },
     role: { type: String, enum: Object.values(ROLES), default: ROLES.SUPERVISOR, index: true },
     active: { type: Boolean, default: true },
-    pin_hash: { type: String, required: true, select: true },
+    // `select: false` keeps the hash out of every query that does not ask for
+    // it by name (`+pin_hash`). With `select: true` it overrode the projection
+    // in base.service.js and rode along on GET /users for every account.
+    pin_hash: { type: String, required: true, select: false },
   },
   (schema) => {
     // Case-insensitive uniqueness: "Mathai" and "mathai" are the same account,

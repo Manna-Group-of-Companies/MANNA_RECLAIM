@@ -5,8 +5,11 @@ export const userPaths = {
   machines: '/machines',
   batches: '/batches',
   weigh: '/weigh',
+  packing: '/packing',
   dispatch: '/dispatch',
+  quality: '/quality',
   history: '/history',
+  bearing: '/bearing',
   reports: '/reports',
   settings: '/settings',
 } as const;

@@ -7,12 +7,18 @@ export const created = (res, data = null, message = 'Created') =>
 
 export const noContent = (res) => res.status(204).send();
 
-export const paginated = (res, { rows, total, page, limit }, message = 'OK') =>
+export const paginated = (res, { rows, total, page, limit }, message = 'OK', extraMeta) =>
   res.status(200).json({
     success: true,
     message,
     data: rows,
-    meta: { total, page, limit, pages: limit ? Math.ceil(total / limit) : 1 },
+    meta: {
+      total,
+      page,
+      limit,
+      pages: limit ? Math.ceil(total / limit) : 1,
+      ...(extraMeta ?? {}),
+    },
   });
 
 export default { ok, created, noContent, paginated };

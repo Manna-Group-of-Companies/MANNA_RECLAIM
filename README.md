@@ -3,8 +3,17 @@
 Production management for the reclaim plant, split into a React client and an Express API.
 
 - `client/` - React 18 + TypeScript + Tailwind + Redux Toolkit + Axios. Holds **both** UIs:
-  - **user side** (shop floor, ported from `index.html`) at `/machines`, `/batches`, `/weigh`, `/dispatch`, `/history`, `/reports`
-  - **admin side** (back office, ported from `back.html`) at `/admin/dashboard`, `/admin/history`, `/admin/efficiency`, `/admin/rates`, `/admin/costing`, `/admin/maintenance`, `/admin/bearings`, `/admin/users`
+  - **user side** (shop floor, ported from `index.html`) - the same eight tabs the prototype has:
+    `/machines`, `/batches`, `/weigh`, `/packing`, `/dispatch`, `/quality`, `/history`, `/bearing`,
+    plus `/reports` and `/settings`
+  - **admin side** (back office, ported from `back.html`) - the prototype's six tabs plus two:
+    `/admin/history`, `/admin/efficiency`, `/admin/rates`, `/admin/costing`, `/admin/maintenance`,
+    `/admin/bearings`, and `/admin/dashboard`, `/admin/users`
+
+The two sides look different on purpose. The shop floor is warm green for a tablet in a noisy
+plant; the back office is the cooler, bluer palette of `back.html`, for a desk. Both prototypes
+name their CSS variables the same, so the back-office set is redefined under `.back-office`
+rather than at `:root`, and one app carries both looks without either bleeding into the other.
 - `server/` - Node + Express (JavaScript, ESM) with config / env / controllers / routes / services / middlewares.
 - `index.html`, `back.html` - the original single-file prototypes, kept as the reference for porting.
 
@@ -29,20 +38,20 @@ client/
   src/
     main.tsx                  React root + redux Provider
     App.tsx                   session bootstrap + RouterProvider
-    index.css                 tailwind layers and shared component classes
+    index.css                 index.html's stylesheet, ported class for class
     app/                      store.ts, rootReducer.ts, typed hooks.ts
     api/
       axiosClient.ts          instance, auth header, refresh-on-401, error mapper
       endpoints.ts            every server path in one object
       services/               one typed module per domain
-    config/                   env.ts, constants.ts, paths.ts
+    config/                   env.ts, constants.ts, paths.ts, icons.ts
     components/
-      ui/                     Button, Card, Badge, BottomSheet, Modal, DataTable, StatTile...
+      ui/                     Button, Badge, BottomSheet, Field, Pick, DataTable, StatTile...
       layout/                 UserLayout + Header + BottomTabs, AdminLayout + Sidebar + Topbar
     features/                 redux slices (auth, machines, runs, batches, dispatch,
-                              reports, maintenance, rates, ui) plus feature components
+                              quality, reports, maintenance, rates, ui) plus feature components
     pages/
-      user/                   the six shop-floor tabs, login and settings
+      user/                   the eight shop-floor tabs, login and settings
       admin/                  dashboard, history, efficiency, rates, costing,
                               maintenance, bearings, users, login
     routes/                   router, userRoutes, adminRoutes, ProtectedRoute
@@ -97,6 +106,61 @@ route -> rateLimiter -> authenticate -> authorize -> validate(zod) -> controller
 
 Every response is `{ success, message, data, meta? }`; the axios layer unwraps `data` so slices
 never see the envelope.
+
+## What the shop-floor tabs write
+
+| Tab | Reads | Writes |
+| --- | --- | --- |
+| Machines | `/machines/grouped`, `/runs/active`, `/maintenance?status=open`, `/maintenance/bearings/due` | `/runs/start`, `/runs/:id/stop`, `/runs/:id/pause`, `/maintenance`, `/maintenance/:id/resolve`, `DELETE /maintenance/:id`, `/maintenance/bearings` |
+| Batches | `/batches/open`, `/runs/shift` | `/batches/:id/close` |
+| Weigh | `/runs/pending-weigh` | `/runs/:id/weigh` |
+| Packing | `/runs/pending-pack` | `/runs/:id/pack` |
+| Dispatch | `/dispatches`, `/rates` | `/dispatches` |
+| Quality | `/batches/open`, `/quality-tests`, `/quality-tests/summary` | `/quality-tests` |
+| History | `/runs/shift` | - |
+| Bearing | `/maintenance/bearings/due`, `/maintenance/bearings` | `/maintenance/bearings` |
+
+Two rules the API enforces rather than the screen: a repair cannot be filed without all three
+answers (cause, fix, prevention), and packing more sacks than there is material for is rejected
+instead of being clamped, because that would quietly lose weight from the ledger.
+
+## What the back-office tabs read
+
+| Tab | Reads | Writes |
+| --- | --- | --- |
+| Overview | `/reports/dashboard`, `/maintenance?status=open`, `/maintenance/bearings/due` | - |
+| History | `/reports/filters`, `/runs?date=&machineId=&shift=` | - |
+| Efficiency | `/reports/shifts`, `/reports/shift-efficiency?date=&shift=` | `/reports/efficiency-notes` |
+| Rates | `/rates/cost-rates`, `/rates` | `PUT /rates/cost-rates`, `PUT /rates` |
+| Costing | `/reports/dashboard`, `/rates/cost-rates` (only once unlocked) | - |
+| Maintenance | `/reports/downtime`, `/reports/downtime/detail` | `/maintenance/:id/resolve` |
+| Bearings | `/maintenance/bearings/due`, `/maintenance/bearings` | - |
+| Users | `/users` | `/users`, `PATCH /users/:id` |
+
+### Costing: the passcode
+
+The tab opens locked, as `back.html` had it — default `2525`, settable with `VITE_COSTING_PASSCODE`.
+Nothing is fetched until it is unlocked, so the figures are not sitting in the page waiting to be
+read out of the network tab, and a reload locks it again.
+
+Treat it as a screen against onlookers, not access control: a Vite variable ships inside the
+bundle, so anyone who can open the JS can read it. What actually keeps costing away from the shop
+floor is the `adminOnly` check on `/reports/costing` and on the route.
+
+### Efficiency: how "usual" is decided
+
+The question this view answers is whether *this* shift is worse than the plant normally manages,
+so every figure carries the plant's own baseline: the **median** of the same figure across every
+shift on record. Medians, not means — one catastrophic shift (a burst pipe, a ten-hour power cut)
+would drag a mean down for months and quietly stop flagging anything.
+
+The thresholds live in `server/src/config/constants.js`: production per man-hour below 80% of
+usual, kWh per kg above 125%, batch yield below 85%, utilisation under 70% of the 12-hour shift.
+Every metric ships the arithmetic that produced it, so the screen shows its working rather than
+asking anyone to trust a number, and a flagged card can be answered with a recorded reason.
+
+This is computed server-side (`services/efficiency.service.js`) because the baselines need every
+run ever logged — not something to send to a browser on the plant's connection.
 
 ## Roles
 

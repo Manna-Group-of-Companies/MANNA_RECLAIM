@@ -22,7 +22,7 @@ export interface DataTableProps<T> {
 const alignOf = (align?: 'left' | 'right' | 'center') =>
   align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
 
-/** Horizontally scrollable table for the admin history / ledger views. */
+/** `table.hist` from the prototype - the History tab and the admin ledgers. */
 export function DataTable<T>({
   columns,
   rows,
@@ -44,18 +44,12 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4">
-      <table className="w-full border-collapse text-[12.5px]">
+    <div className="scroll-x -mx-3.5 px-3.5">
+      <table className="hist">
         <thead>
           <tr>
             {columns.map((c) => (
-              <th
-                key={c.key}
-                className={cn(
-                  'border-b border-line px-2 pb-2 text-[9.5px] font-bold uppercase tracking-[0.1em] text-ink-faint',
-                  alignOf(c.align),
-                )}
-              >
+              <th key={c.key} className={alignOf(c.align)}>
                 {c.header}
               </th>
             ))}
@@ -66,13 +60,10 @@ export function DataTable<T>({
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={cn(
-                'border-b border-line/60 last:border-0',
-                onRowClick && 'cursor-pointer hover:bg-panel-raised',
-              )}
+              className={onRowClick ? 'cursor-pointer' : undefined}
             >
               {columns.map((c) => (
-                <td key={c.key} className={cn('px-2 py-2.5 align-middle', alignOf(c.align), c.className)}>
+                <td key={c.key} className={cn(alignOf(c.align), c.className)}>
                   {c.render(row)}
                 </td>
               ))}

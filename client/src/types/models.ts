@@ -35,41 +35,105 @@ export interface Batch {
   machine_id: string;
   formulation?: string | null;
   capacity?: number | null;
+  /** A paired autoclave load can yield more than one grade. */
+  qualities?: Quality[];
   grade?: Quality | null;
+  paired?: boolean;
+  autoclave_done?: boolean;
   status: 'open' | 'closed';
-  opened_at: string;
+  shift_date?: string | null;
+  opened_at: string | null;
   opened_by?: string | null;
   closed_at?: string | null;
   closed_by?: string | null;
   remarks?: string | null;
+  /** Folded in from the costing snapshot, null until the batch is costed. */
+  stage?: string | null;
+  output_kg?: number | null;
+  packed_sacks?: number | null;
+  total_cost?: number | null;
+  cost_per_kg?: number | null;
+  efficiency_pct?: number | null;
 }
 
+/**
+ * A run as the shop-floor tablets record it. `weight_kg`, `ended_at` and
+ * `batch_no` are the stored columns; `out_weight`, `stopped_at`, `batch_id`
+ * and `status` are aliases the API derives so screens read the same names
+ * everywhere. Duration comes from `runtime_min` - the two timestamps are
+ * written seconds apart when the tablet syncs, so subtracting them is wrong.
+ */
 export interface Run {
   id: string;
   machine_id: string;
+  machine?: string | null;
+  kind?: MachineKind | null;
+  line?: string | null;
+  batch_no?: string | null;
   batch_id?: string | null;
+  autoclave_id?: string | null;
+  formulation?: string | null;
+  capacity?: number | null;
   quality?: Quality | null;
+  mesh?: string | null;
+  tyre_type?: string | null;
   shift_date: string;
   shift: Shift;
   supervisor?: string | null;
   workers?: number | null;
+  passes?: number | null;
+  paired?: boolean;
   started_at: string;
+  ended_at?: string | null;
   stopped_at?: string | null;
-  paused?: boolean;
+  runtime_min?: number | null;
+  hours_run?: number | null;
+  weight_kg?: number | null;
   out_weight?: number | null;
+  kwh?: number | null;
+  /**
+   * Meter readings around the run. The crews record the meter rather than a
+   * total, so kWh and hours are the difference where the total is blank -
+   * see utils/format's kwhOf() and hours().
+   */
+  elec_start?: number | null;
+  elec_end?: number | null;
+  hour_start?: number | null;
+  hour_end?: number | null;
+  firewood_kg?: number | null;
+  packed_sacks?: number | null;
+  /** Sub-sack remainder carried in from the previous batch of this grade. */
+  leftout_in?: number | null;
+  /** What this run leaves for the next batch of the same grade. */
+  leftout_out?: number | null;
+  paused?: boolean;
   status: RunStatus;
+  needs_weight?: boolean;
+  needs_pack?: boolean;
   remarks?: string | null;
+}
+
+export interface QualityParam {
+  name: string;
+  value: string;
+  unit?: string;
 }
 
 export interface QualityTest {
   id: string;
+  kind?: string;
+  batch_no?: string | null;
   batch_id?: string | null;
-  run_id?: string | null;
   machine_id?: string | null;
+  quality?: Quality | null;
   grade: Quality;
   verdict: Verdict;
+  params?: QualityParam[];
+  tester?: string | null;
   tested_by?: string | null;
+  ts?: string;
   tested_at: string;
+  notes?: string | null;
   remarks?: string | null;
 }
 
@@ -100,9 +164,22 @@ export interface Dispatch {
   amount?: number | null;
 }
 
+/**
+ * A breakdown. The stored columns are `down_start` / `repaired_at` plus the
+ * write-up; `status`, `severity`, `title` and `logged_at` are derived by the
+ * API from how long the machine was out.
+ */
 export interface MaintenanceLog {
   id: string;
   machine_id: string;
+  machine?: string | null;
+  down_start?: string | null;
+  repaired_at?: string | null;
+  downtime_min?: number | null;
+  downtime_hours?: number | null;
+  root_cause?: string | null;
+  resolution?: string | null;
+  prevention?: string | null;
   kind: 'breakdown' | 'service' | 'inspection' | 'other';
   title: string;
   detail?: string | null;
@@ -113,22 +190,47 @@ export interface MaintenanceLog {
   resolved_at?: string | null;
 }
 
+/** One temperature reading for one bearing position. */
 export interface BearingLog {
   id: string;
   machine_id: string;
+  machine?: string | null;
+  bearing_type?: string | null;
   kind: 'bearing' | 'bush';
+  position?: string | null;
   positions?: string[] | null;
+  temp_c?: number | null;
+  shift_date?: string | null;
+  shift?: Shift | null;
   ts: string;
+  supervisor?: string | null;
   by_user?: string | null;
   remarks?: string | null;
 }
 
+/**
+ * One machine's greasing schedule as the API reports it: what it runs on,
+ * which positions get a reading, and how far past due it is right now.
+ * `dueInMin` is negative once the interval has elapsed.
+ */
 export interface BearingDue {
   machineId: string;
+  machine?: string | null;
+  bearingType: 'bearing' | 'bush';
+  positions: string[];
   intervalH: number;
   lastAt: number | null;
   dueInMin: number;
   due: boolean;
+}
+
+/** Pass rate for one grade over a window - the Quality tab's headline. */
+export interface QualityGradeSummary {
+  grade: string;
+  total: number;
+  pass: number;
+  hold: number;
+  passRate: number;
 }
 
 export interface Rate {
@@ -144,15 +246,122 @@ export interface ProductionReport {
   outKg: number;
   runHours: number;
   kgPerHour: number;
+  kwh: number;
+  firewoodKg: number;
+  packedSacks: number;
 }
 
 export interface EfficiencyRow {
   machineId: string;
+  machine?: string;
   runs: number;
   hours: number;
   outKg: number;
+  workerHours: number;
+  downtimeHours: number;
   kgPerHour: number;
   kgPerWorkerHour: number;
+}
+
+/** What the run history covers, for the back office's pickers. */
+export interface RunFilters {
+  days: string[];
+  shifts: Shift[];
+  machines: { id: string; name: string }[];
+}
+
+export interface ShiftOption {
+  date: string;
+  shifts: Shift[];
+}
+
+/**
+ * One metric on an efficiency card. `baseline` is the plant's own median for
+ * the same figure; `warn` is the server's verdict on whether this shift falls
+ * short of it. `calc` is the arithmetic spelled out, so the screen can show
+ * its working instead of asking anyone to take the number on trust.
+ */
+export interface EfficiencyMetric {
+  key: string;
+  label: string;
+  value: number | null;
+  unit?: string;
+  baseline: number | null;
+  baselineLabel?: string;
+  warn: boolean;
+  calc: {
+    title: string;
+    formula: string;
+    lines: string[];
+    result: string;
+    note: string;
+  } | null;
+}
+
+export interface EfficiencyCard {
+  key: string;
+  metrics: EfficiencyMetric[];
+  /** Refiner cards are keyed by grade... */
+  quality?: Quality;
+  batches?: string[];
+  /** ...grinder cards by machine... */
+  machineId?: string;
+  machine?: string;
+  /** ...and yield cards by batch. */
+  batch?: string;
+  charge?: number | null;
+  out?: number | null;
+  workers?: number;
+  hours?: number | null;
+}
+
+export interface EfficiencyNote {
+  id: string;
+  shift_date: string;
+  shift?: string | null;
+  line: 'refiner' | 'grind';
+  metric?: string | null;
+  reason: string;
+  entered_by?: string | null;
+  created_at?: string;
+}
+
+export interface ShiftEfficiency {
+  date: string | null;
+  shift: string | null;
+  totals: { runs: number; outKg: number | null; kwh: number | null };
+  refiners: EfficiencyCard[];
+  grinders: EfficiencyCard[];
+  yields: EfficiencyCard[];
+  notes: EfficiencyNote[];
+  thresholds: { labour: number; energy: number; yield: number; utilisation: number };
+}
+
+export interface DowntimeReport {
+  month: string;
+  months: string[];
+  totalMinutes: number;
+  events: number;
+  byMachine: { machineId: string; machine: string; minutes: number; hours: number; events: number }[];
+}
+
+export interface DowntimeDetail {
+  id: string;
+  machine_id: string;
+  machine?: string | null;
+  down_start?: string | null;
+  repaired_at?: string | null;
+  downtime_min?: number | null;
+  root_cause?: string | null;
+  resolution?: string | null;
+  prevention?: string | null;
+}
+
+/** The plant's cost inputs, as the Rates tab edits them. */
+export interface CostRates {
+  data: Record<string, number | null>;
+  updatedAt: string | null;
+  updatedBy: string | null;
 }
 
 export interface CostingReport {
@@ -160,4 +369,11 @@ export interface CostingReport {
   autoclaveLoads: number;
   firewoodKg: number;
   revenue: number;
+  dispatchedKg: number;
+  electricityCost: number;
+  labourCost: number;
+  conversionCost: number;
+  batchCost: number;
+  outputKg: number;
+  costPerKg: number;
 }

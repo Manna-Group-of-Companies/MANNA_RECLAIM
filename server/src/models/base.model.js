@@ -21,12 +21,27 @@ const options = {
  * Declares a model with the project-wide conventions applied:
  * string _id, snake_case timestamps, and an explicit collection name that
  * matches the TABLES map in config/constants.js.
+ *
+ * `extra` is merged into the schema options - pass `{ strict: false }` for the
+ * collections the tablets fill with more columns than the server declares.
  */
-export function defineModel(name, collection, definition, configure) {
+export function defineModel(name, collection, definition, configure, extra = {}) {
   if (mongoose.models[name]) return mongoose.models[name];
-  const schema = new mongoose.Schema({ _id: idField, ...definition }, { ...options, collection });
+  const schema = new mongoose.Schema(
+    { _id: idField, ...definition },
+    { ...options, ...extra, collection },
+  );
   configure?.(schema);
   return mongoose.model(name, schema);
+}
+
+/**
+ * A schema-less handle on a collection that came across from Supabase as-is
+ * (the old Postgres views, the rate tables, the shared-state blob). Reads pass
+ * every column through untouched; nothing here is written by the API.
+ */
+export function defineLooseModel(name, collection) {
+  return defineModel(name, collection, {}, undefined, { strict: false, timestamps: false });
 }
 
 export default defineModel;

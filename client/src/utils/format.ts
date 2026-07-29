@@ -10,12 +10,83 @@ export const rupees = (value?: number | null) =>
 export const num = (value?: number | null, digits = 1) =>
   value == null ? '--' : nf(digits).format(value);
 
-/** Elapsed run time as H:MM:SS, matching the prototype timer. */
+/**
+ * A finished run's duration, from the minutes the crew recorded.
+ *
+ * Do NOT compute this from started_at/ended_at: the tablets stamp both when
+ * they flush the row to the server, so the gap between them is a few seconds
+ * regardless of how long the machine actually ran.
+ */
+export const duration = (runtimeMin?: number | null, hoursRun?: number | null) => {
+  const mins = runtimeMin ?? (hoursRun != null ? hoursRun * 60 : null);
+  if (mins == null) return '--';
+  const total = Math.round(mins);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
+};
+
+/** Live timer for a run in progress, matching the prototype's H:MM:SS. */
 export const elapsed = (fromISO: string, toISO?: string | null) => {
   const ms = Math.max(0, (toISO ? new Date(toISO) : new Date()).getTime() - new Date(fromISO).getTime());
   const s = Math.floor(ms / 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+};
+
+/**
+ * Hours a run took, in the back office's order of preference: what the crew
+ * recorded, then the hour meter either side of it, then the runtime. Never the
+ * two timestamps - those are written seconds apart when a tablet syncs.
+ */
+export const hours = (run: {
+  hours_run?: number | null;
+  hour_start?: number | null;
+  hour_end?: number | null;
+  runtime_min?: number | null;
+}) => {
+  if (run.hours_run != null) return Number(run.hours_run);
+  if (run.hour_end != null && run.hour_start != null) {
+    return Math.max(0, Number(run.hour_end) - Number(run.hour_start));
+  }
+  if (run.runtime_min != null) return Number(run.runtime_min) / 60;
+  return null;
+};
+
+/** kWh for a run, from the total or from the meter readings around it. */
+export const kwhOf = (run: {
+  kwh?: number | null;
+  elec_start?: number | null;
+  elec_end?: number | null;
+}) => {
+  if (run.kwh != null) return Number(run.kwh);
+  if (run.elec_end != null && run.elec_start != null) {
+    return Math.max(0, Number(run.elec_end) - Number(run.elec_start));
+  }
+  return null;
+};
+
+/** "3m ago" / "2h 10m ago" - how the bearing sheet dates the last reading. */
+export const ago = (at?: number | string | null) => {
+  if (at == null) return '--';
+  const ms = typeof at === 'number' ? at : new Date(at).getTime();
+  if (Number.isNaN(ms)) return '--';
+  const secs = Math.round((Date.now() - ms) / 1000);
+  if (secs < 60) return `${Math.max(0, secs)}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return `${h}h${rem ? ` ${rem}m` : ''} ago`;
+};
+
+/** Minutes as "2h 10m" - used for a bearing interval or a downtime span. */
+export const minutes = (mins?: number | null) => {
+  if (mins == null) return '--';
+  const total = Math.abs(Math.round(mins));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 };
 
 export const initials = (name?: string | null) =>

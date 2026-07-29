@@ -3,6 +3,14 @@ export const appEnv = {
   apiUrl: import.meta.env.VITE_API_URL ?? '/api/v1',
   appName: import.meta.env.VITE_APP_NAME ?? 'Manna Production Management',
   devtools: import.meta.env.VITE_ENABLE_DEVTOOLS !== 'false',
+  /**
+   * The passcode on the back office's Costing tab, as back.html had it.
+   * Settable so the plant can change it without a code edit - but note it
+   * ships inside the bundle either way, so treat it as a "not in front of a
+   * visitor" screen rather than access control. What actually guards the
+   * costing figures is the manager/admin check on the route and the API.
+   */
+  costingPasscode: import.meta.env.VITE_COSTING_PASSCODE ?? '2525',
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
 } as const;

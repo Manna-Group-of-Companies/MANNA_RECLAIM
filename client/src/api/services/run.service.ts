@@ -6,6 +6,8 @@ import type { Run, Quality, Shift } from '@/types/models';
 export interface StartRunPayload {
   machineId: string;
   batchId?: string | null;
+  batchNo?: string | null;
+  line?: string | null;
   quality?: Quality | null;
   shiftDate?: string;
   shift?: Shift;
@@ -19,9 +21,19 @@ export interface StopRunPayload {
   remarks?: string | null;
 }
 
+export interface PackRunPayload {
+  sacks: number;
+  leftoutIn?: number | null;
+  leftoutOut?: number | null;
+}
+
 export const runService = {
   list: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.root, params),
   listActive: () => requestPaged<Run>(endpoints.runs.active),
+  /** Finished runs on a weighed machine still waiting for their out-weight. */
+  listPendingWeigh: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.pendingWeigh, params),
+  /** Weighed runs that still have full sacks to bag. */
+  listPendingPack: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.pendingPack, params),
   byShift: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.shift, params),
 
   async start(payload: StartRunPayload): Promise<Run> {
@@ -31,6 +43,18 @@ export const runService = {
 
   async stop(id: string, payload: StopRunPayload): Promise<Run> {
     const res = await axiosClient.post<ApiEnvelope<Run>>(endpoints.runs.stop(id), payload);
+    return res.data.data;
+  },
+
+  /** Records the out-weight of a run that has already finished. */
+  async weigh(id: string, outWeight: number): Promise<Run> {
+    const res = await axiosClient.post<ApiEnvelope<Run>>(endpoints.runs.weigh(id), { outWeight });
+    return res.data.data;
+  },
+
+  /** Records the sacks bagged off a weighed run. */
+  async pack(id: string, payload: PackRunPayload): Promise<Run> {
+    const res = await axiosClient.post<ApiEnvelope<Run>>(endpoints.runs.pack(id), payload);
     return res.data.data;
   },
 

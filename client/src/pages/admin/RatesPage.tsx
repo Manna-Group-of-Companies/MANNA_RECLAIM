@@ -1,94 +1,200 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchRateCard, saveRate } from '@/features/rates/ratesSlice';
-import { Button, DataTable, Modal, type Column } from '@/components/ui';
-import { DISPATCH_GRADES } from '@/config/constants';
+import {
+  fetchCostRates,
+  fetchRateCard,
+  saveCostRates,
+  saveRate,
+} from '@/features/rates/ratesSlice';
+import { BoModal } from '@/components/ui';
+import { COST_RATE_GROUPS, DISPATCH_GRADES } from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
-import { num } from '@/utils/format';
+import { dayLong } from '@/utils/date';
 import type { DispatchGrade, Rate } from '@/types/models';
 
-const blank: Rate = { customer: '', grade: 'Coarse', rate: 0, note: '' };
+const blankRate = { customer: '', grade: 'Special' as DispatchGrade, rate: '', note: '' };
 
-/** Customer rate card, editable only from here. */
+/**
+ * back.html's Rates tab: the plant's cost inputs, which the Costing view is
+ * priced from. The customer selling rates live underneath, since they are the
+ * other half of "rates" and have nowhere else to be edited.
+ */
 export function RatesPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const { rates, priceList, loading } = useAppSelector((s) => s.rates);
-  const [draft, setDraft] = useState<Rate | null>(null);
+  const { rates, costRates, saving } = useAppSelector((s) => s.rates);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<typeof blankRate | null>(null);
 
   useEffect(() => {
+    void dispatch(fetchCostRates());
     void dispatch(fetchRateCard());
-  }, [dispatch]);
+  }, [dispatch, refreshTick]);
 
-  const columns: Column<Rate>[] = [
-    { key: 'customer', header: 'Customer', render: (r) => <span className="font-semibold uppercase">{r.customer}</span> },
-    { key: 'grade', header: 'Grade', render: (r) => r.grade },
-    { key: 'rate', header: 'Rate / kg', align: 'right', render: (r) => <span className="tnum text-brand">{num(r.rate, 2)}</span> },
-    {
-      key: 'list',
-      header: 'List',
-      align: 'right',
-      render: (r) => <span className="tnum text-ink-faint">{priceList[r.grade] ?? '--'}</span>,
-    },
-    { key: 'note', header: 'Note', render: (r) => r.note ?? '' },
-  ];
+  // Seed the form once the stored figures arrive, then leave it alone so a
+  // refresh mid-edit cannot silently overwrite what is being typed.
+  useEffect(() => {
+    if (!costRates) return;
+    setValues((current) =>
+      Object.keys(current).length
+        ? current
+        : Object.fromEntries(
+            Object.entries(costRates.data).map(([k, v]) => [k, v == null ? '' : String(v)]),
+          ),
+    );
+  }, [costRates]);
 
   const save = async () => {
-    if (!draft) return;
-    const result = await dispatch(saveRate(draft));
-    notify(saveRate.fulfilled.match(result) ? 'Rate saved' : 'Could not save the rate', saveRate.fulfilled.match(result) ? 'ok' : 'err');
-    setDraft(null);
+    const data = Object.fromEntries(
+      Object.entries(values).map(([k, v]) => [k, v.trim() === '' ? null : Number(v)]),
+    );
+    const bad = Object.entries(data).filter(([, v]) => v != null && Number.isNaN(v as number));
+    if (bad.length) {
+      notify('Every rate has to be a number', 'warn');
+      return;
+    }
+    const result = await dispatch(saveCostRates(data));
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? 'Rates saved' : 'Could not save the rates', okay ? 'ok' : 'err');
+  };
+
+  const saveCustomerRate = async () => {
+    if (!editing) return;
+    const value = Number(editing.rate);
+    if (!editing.customer.trim() || !editing.rate.trim() || Number.isNaN(value) || value <= 0) {
+      notify('A customer and a rate above zero are needed', 'warn');
+      return;
+    }
+    const result = await dispatch(
+      saveRate({
+        customer: editing.customer.trim().toUpperCase(),
+        grade: editing.grade,
+        rate: value,
+        note: editing.note.trim() || null,
+      } as Rate),
+    );
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? 'Rate saved' : 'Could not save the rate', okay ? 'ok' : 'err');
+    if (okay) setEditing(null);
   };
 
   return (
-    <section className="panel p-4">
-      <header className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-sm font-bold uppercase tracking-[0.2em] text-ink-dim">Rate card</h1>
-        <Button variant="primary" size="sm" onClick={() => setDraft(blank)}>
-          Add rate
-        </Button>
-      </header>
+    <>
+      <div className="mx-0.5 mt-3">
+        <h1 className="text-lg">Rates</h1>
+        <div className="sub">
+          Used by the Costing view.
+          {costRates?.updatedAt
+            ? ` Last saved ${dayLong(costRates.updatedAt.slice(0, 10))}${costRates.updatedBy ? ` by ${costRates.updatedBy}` : ''}.`
+            : ''}
+        </div>
+      </div>
 
-      <DataTable
-        columns={columns}
-        rows={rates}
-        rowKey={(r) => `${r.customer}|${r.grade}`}
-        loading={loading}
-        onRowClick={setDraft}
-        empty="No negotiated rates - the standard list price applies"
-      />
+      {COST_RATE_GROUPS.map((group) => (
+        <div key={group.title} className="panel">
+          <div className="grouphead mt-0">
+            {group.title}
+            {group.note && <span className="muted font-normal"> ({group.note})</span>}
+          </div>
+          {group.fields.map((field) => (
+            <div key={field.key} className="field">
+              <label htmlFor={`rt-${field.key}`}>
+                {field.label}
+                {field.unit && <span className="muted font-normal"> ({field.unit})</span>}
+              </label>
+              <input
+                id={`rt-${field.key}`}
+                type="number"
+                inputMode="decimal"
+                placeholder="0"
+                value={values[field.key] ?? ''}
+                onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+              />
+              {field.hint && <div className="sub mt-1">{field.hint}</div>}
+            </div>
+          ))}
+        </div>
+      ))}
 
-      <Modal
-        open={Boolean(draft)}
-        title={draft?.customer ? `${draft.customer} - ${draft.grade}` : 'New rate'}
-        onClose={() => setDraft(null)}
+      <button type="button" className="btn block mt-1" onClick={save} disabled={saving}>
+        {saving ? 'Saving…' : 'Save rates'}
+      </button>
+      <div className="sub mt-2 text-center">Saved figures load automatically for everyone.</div>
+
+      <div className="grouphead">Customer selling rates</div>
+      <div className="panel mt-0 p-0">
+        <table className="tt">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Grade</th>
+              <th className="tnum">₹ / kg</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rates.map((r) => (
+              <tr
+                key={`${r.customer}-${r.grade}`}
+                className="cursor-pointer"
+                onClick={() =>
+                  setEditing({
+                    customer: r.customer,
+                    grade: r.grade,
+                    rate: String(r.rate),
+                    note: r.note ?? '',
+                  })
+                }
+              >
+                <td>{r.customer}</td>
+                <td>{r.grade}</td>
+                <td className="tnum">{r.rate}</td>
+                <td className="muted">{r.note ?? ''}</td>
+              </tr>
+            ))}
+            {!rates.length && (
+              <tr>
+                <td colSpan={4} className="muted">
+                  No negotiated rates — the standard price list applies to everyone.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" className="btn ghost block mt-2.5" onClick={() => setEditing(blankRate)}>
+        + Add a customer rate
+      </button>
+
+      <BoModal
+        open={Boolean(editing)}
+        title={editing?.customer ? `${editing.customer} · ${editing.grade}` : 'New customer rate'}
+        subtitle="A rate here overrides the standard price list for that customer and grade."
+        onClose={() => setEditing(null)}
         footer={
-          <>
-            <Button onClick={() => setDraft(null)}>Cancel</Button>
-            <Button variant="primary" onClick={save}>
-              Save
-            </Button>
-          </>
+          <button type="button" className="btn" onClick={saveCustomerRate}>
+            Save rate
+          </button>
         }
       >
-        {draft && (
-          <>
-            <div>
-              <label className="label-caps" htmlFor="rate-customer">Customer</label>
+        {editing && (
+          <div className="mt-3">
+            <div className="field">
+              <label htmlFor="cr-customer">Customer</label>
               <input
-                id="rate-customer"
-                className="field-input uppercase"
-                value={draft.customer}
-                onChange={(e) => setDraft({ ...draft, customer: e.target.value.toUpperCase() })}
+                id="cr-customer"
+                value={editing.customer}
+                onChange={(e) => setEditing({ ...editing, customer: e.target.value.toUpperCase() })}
               />
             </div>
-            <div>
-              <label className="label-caps" htmlFor="rate-grade">Grade</label>
+            <div className="field">
+              <label htmlFor="cr-grade">Grade</label>
               <select
-                id="rate-grade"
-                className="field-input"
-                value={draft.grade}
-                onChange={(e) => setDraft({ ...draft, grade: e.target.value as DispatchGrade })}
+                id="cr-grade"
+                value={editing.grade}
+                onChange={(e) => setEditing({ ...editing, grade: e.target.value as DispatchGrade })}
               >
                 {DISPATCH_GRADES.map((g) => (
                   <option key={g} value={g}>
@@ -97,29 +203,29 @@ export function RatesPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="label-caps" htmlFor="rate-value">Rate per kg</label>
+            <div className="field">
+              <label htmlFor="cr-rate">Rate per kg</label>
               <input
-                id="rate-value"
-                className="field-input tnum"
+                id="cr-rate"
+                type="number"
                 inputMode="decimal"
-                value={draft.rate}
-                onChange={(e) => setDraft({ ...draft, rate: Number(e.target.value.replace(/[^\d.]/g, '')) })}
+                value={editing.rate}
+                onChange={(e) => setEditing({ ...editing, rate: e.target.value })}
               />
             </div>
-            <div>
-              <label className="label-caps" htmlFor="rate-note">Note</label>
+            <div className="field">
+              <label htmlFor="cr-note">Note</label>
               <input
-                id="rate-note"
-                className="field-input"
-                value={draft.note ?? ''}
-                onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+                id="cr-note"
+                value={editing.note}
+                onChange={(e) => setEditing({ ...editing, note: e.target.value })}
+                placeholder="e.g. ADV PYMT"
               />
             </div>
-          </>
+          </div>
         )}
-      </Modal>
-    </section>
+      </BoModal>
+    </>
   );
 }
 

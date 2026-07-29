@@ -1,22 +1,26 @@
 import type { ReactNode } from 'react';
 
-export function EmptyState({
-  title,
-  hint,
-  icon,
-  action,
-}: {
+export interface EmptyStateProps {
   title: string;
   hint?: string;
-  icon?: ReactNode;
+  /** Raw `<path>` markup for a 24x24 stroked icon, as in the prototype. */
+  icon?: string;
   action?: ReactNode;
-}) {
+}
+
+/**
+ * The prototype's `empty()` helper: a stroked glyph, one line of what is
+ * missing, and one line of how to make it appear.
+ */
+export function EmptyState({ title, hint, icon, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center gap-2 px-4 py-12 text-center text-ink-faint">
-      {icon}
-      <p className="text-[15px] text-ink-dim">{title}</p>
-      {hint && <p className="max-w-xs text-xs leading-relaxed">{hint}</p>}
-      {action && <div className="mt-3">{action}</div>}
+    <div className="empty">
+      {icon && (
+        <svg viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: icon }} />
+      )}
+      <div className="big">{title}</div>
+      {hint && <div className="mx-auto max-w-xs text-xs leading-relaxed">{hint}</div>}
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
 }

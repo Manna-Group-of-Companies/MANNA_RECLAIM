@@ -1,20 +1,51 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { runService, type StartRunPayload, type StopRunPayload } from '@/api/services/run.service';
+import {
+  runService,
+  type PackRunPayload,
+  type StartRunPayload,
+  type StopRunPayload,
+} from '@/api/services/run.service';
 import { toRequestError } from '@/api/axiosClient';
-import type { Run } from '@/types/models';
+import { SACK_KG } from '@/config/constants';
+import type { Run, Shift } from '@/types/models';
 
 interface RunsState {
   active: Run[];
+  /** Finished runs on a weighed machine that still owe an out-weight. */
+  pendingWeigh: Run[];
+  /** Weighed runs that still have full sacks to bag. */
+  pendingPack: Run[];
   shift: Run[];
+  /** Which shift `shift` actually holds - the server falls back to the
+   *  latest one on record when the requested day has no runs. */
+  shiftDate: string | null;
+  shiftName: Shift | null;
   loading: boolean;
   error: string | null;
   /** Runs recorded while offline, replayed by the sync hook. */
   queue: Partial<Run>[];
 }
 
-const initialState: RunsState = { active: [], shift: [], loading: false, error: null, queue: [] };
+const initialState: RunsState = {
+  active: [],
+  pendingWeigh: [],
+  pendingPack: [],
+  shift: [],
+  shiftDate: null,
+  shiftName: null,
+  loading: false,
+  error: null,
+  queue: [],
+};
 
 const fail = (err: unknown) => toRequestError(err).message;
+
+/** Same rule as the server: under one sack left means the run is done packing. */
+const stillPacking = (run: Run) => {
+  const total = (run.weight_kg ?? run.out_weight ?? 0) + (run.leftout_in ?? 0);
+  const packed = (run.packed_sacks ?? 0) * SACK_KG;
+  return run.packed_sacks == null || total - packed >= SACK_KG;
+};
 
 export const fetchActiveRuns = createAsyncThunk('runs/active', async (_, { rejectWithValue }) => {
   try {
@@ -24,11 +55,35 @@ export const fetchActiveRuns = createAsyncThunk('runs/active', async (_, { rejec
   }
 });
 
+export const fetchPendingWeigh = createAsyncThunk(
+  'runs/pendingWeigh',
+  async (_, { rejectWithValue }) => {
+    try {
+      return (await runService.listPendingWeigh({ limit: 100 })).rows;
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const fetchPendingPack = createAsyncThunk('runs/pendingPack', async (_, { rejectWithValue }) => {
+  try {
+    return (await runService.listPendingPack({ limit: 100 })).rows;
+  } catch (err) {
+    return rejectWithValue(fail(err));
+  }
+});
+
 export const fetchShiftRuns = createAsyncThunk(
   'runs/shift',
   async (params: { date?: string; shift?: string } | undefined, { rejectWithValue }) => {
     try {
-      return (await runService.byShift(params)).rows;
+      const { rows, meta } = await runService.byShift({ ...params, limit: 200 });
+      return {
+        rows,
+        shiftDate: meta?.shift_date ?? params?.date ?? null,
+        shiftName: (meta?.shift ?? params?.shift ?? null) as Shift | null,
+      };
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -51,6 +106,39 @@ export const stopRun = createAsyncThunk(
   async ({ id, ...payload }: StopRunPayload & { id: string }, { rejectWithValue }) => {
     try {
       return await runService.stop(id, payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const pauseRun = createAsyncThunk(
+  'runs/pause',
+  async ({ id, paused }: { id: string; paused: boolean }, { rejectWithValue }) => {
+    try {
+      return await runService.pause(id, paused);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const weighRun = createAsyncThunk(
+  'runs/weigh',
+  async ({ id, outWeight }: { id: string; outWeight: number }, { rejectWithValue }) => {
+    try {
+      return await runService.weigh(id, outWeight);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const packRun = createAsyncThunk(
+  'runs/pack',
+  async ({ id, ...payload }: PackRunPayload & { id: string }, { rejectWithValue }) => {
+    try {
+      return await runService.pack(id, payload);
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -84,15 +172,61 @@ const runsSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+      .addCase(fetchPendingWeigh.pending, (state) => {
+        state.loading = true;
+      })
+      .addCase(fetchPendingWeigh.fulfilled, (state, action) => {
+        state.loading = false;
+        state.pendingWeigh = action.payload;
+      })
+      .addCase(fetchPendingWeigh.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
+      })
+      .addCase(fetchPendingPack.fulfilled, (state, action) => {
+        state.pendingPack = action.payload;
+      })
+      .addCase(fetchShiftRuns.pending, (state) => {
+        state.loading = true;
+      })
       .addCase(fetchShiftRuns.fulfilled, (state, action) => {
-        state.shift = action.payload;
+        state.loading = false;
+        state.shift = action.payload.rows;
+        state.shiftDate = action.payload.shiftDate;
+        state.shiftName = action.payload.shiftName;
+      })
+      .addCase(fetchShiftRuns.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload as string;
       })
       .addCase(startRun.fulfilled, (state, action) => {
         state.active.push(action.payload);
       })
+      .addCase(pauseRun.fulfilled, (state, action) => {
+        state.active = state.active.map((r) => (r.id === action.payload.id ? action.payload : r));
+      })
       .addCase(stopRun.fulfilled, (state, action) => {
-        state.active = state.active.filter((r) => r.id !== action.payload.id);
-        state.shift = [action.payload, ...state.shift];
+        const run = action.payload;
+        state.active = state.active.filter((r) => r.id !== run.id);
+        state.shift = [run, ...state.shift];
+        // A weighed machine drops straight onto the Weigh tab when it stops
+        // without a weight.
+        if (run.out_weight == null && run.needs_weight) state.pendingWeigh.unshift(run);
+      })
+      .addCase(weighRun.fulfilled, (state, action) => {
+        const run = action.payload;
+        state.pendingWeigh = state.pendingWeigh.filter((r) => r.id !== run.id);
+        state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
+        // Weighing is what makes a run packable, so it moves queue rather than
+        // leaving the Packing tab a refresh behind.
+        if (stillPacking(run)) state.pendingPack.unshift(run);
+      })
+      .addCase(packRun.fulfilled, (state, action) => {
+        const run = action.payload;
+        state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
+        state.pendingPack = stillPacking(run)
+          ? state.pendingPack.map((r) => (r.id === run.id ? run : r))
+          : state.pendingPack.filter((r) => r.id !== run.id);
       })
       .addCase(flushQueue.fulfilled, (state) => {
         state.queue = [];

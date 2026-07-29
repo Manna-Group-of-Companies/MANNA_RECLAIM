@@ -16,6 +16,28 @@ export const clock = (iso?: string | null) =>
 export const dayMonth = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '--';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * "7 Jul 2026" from a plain 'YYYY-MM-DD'. Parsed by hand rather than through
+ * Date, because `new Date('2026-07-07')` is read as UTC midnight and shows as
+ * the 6th to anyone west of Greenwich.
+ */
+export const dayLong = (day?: string | null) => {
+  if (!day) return '--';
+  const [y, m, d] = String(day).split('-');
+  if (!y || !m || !d) return String(day);
+  return `${parseInt(d, 10)} ${MONTHS[parseInt(m, 10) - 1]} ${y}`;
+};
+
+/** "Jul 2026" from a 'YYYY-MM'. */
+export const monthLong = (month?: string | null) => {
+  if (!month) return '--';
+  const [y, m] = String(month).split('-');
+  if (!y || !m) return String(month);
+  return `${MONTHS[parseInt(m, 10) - 1]} ${y}`;
+};
+
 export const lastNDays = (n: number) => {
   const to = new Date();
   const from = new Date(to.getTime() - (n - 1) * 86400000);

@@ -1,63 +1,162 @@
-import { Card, Badge, QualityChip, Button } from '@/components/ui';
+import { BatchRef, FormChip, Icon, QualityChip } from '@/components/ui';
 import { elapsed, kg } from '@/utils/format';
+import { clock, dayMonth } from '@/utils/date';
 import { useTicker } from '@/hooks/useTicker';
+import { KIND_ACCENT } from '@/config/constants';
 import { cn } from '@/utils/cn';
-import type { Machine, Run } from '@/types/models';
+import type { BearingDue, MaintenanceLog, Machine, Run } from '@/types/models';
 
 export interface MachineCardProps {
   machine: Machine;
   run?: Run;
+  /** The open breakdown, if this machine is currently flagged DOWN. */
+  down?: MaintenanceLog;
+  /** The last run on this machine, shown on the idle line. */
+  last?: Run;
+  bearing?: BearingDue;
   onStart: (machine: Machine) => void;
   onStop: (run: Run) => void;
+  onPause: (run: Run, paused: boolean) => void;
+  onBreakdown: (machine: Machine) => void;
+  onRepair: (log: MaintenanceLog) => void;
+  onBearing: (machine: Machine) => void;
 }
 
-/** One machine row: LED, name, state pill and either the timer or a start CTA. */
-export function MachineCard({ machine, run, onStart, onStop }: MachineCardProps) {
+/**
+ * One machine, in the three states it can be in: running (timer + pause),
+ * down (red rail + repair prompt), or idle (what it last did + a start CTA).
+ * Tapping the card body is the primary action for each state, so the crew can
+ * work it with gloves on; the small square buttons are the secondary ones.
+ */
+export function MachineCard({
+  machine,
+  run,
+  down,
+  last,
+  bearing,
+  onStart,
+  onStop,
+  onPause,
+  onBreakdown,
+  onRepair,
+  onBearing,
+}: MachineCardProps) {
   const running = Boolean(run);
-  useTicker(1000, running && !run?.paused);
+  const paused = Boolean(run?.paused);
+  const isDown = Boolean(down);
+  const accent = machine.accent ?? KIND_ACCENT[machine.kind] ?? 'var(--line2)';
+
+  // Only tick while something is actually counting up.
+  useTicker(1000, (running && !paused) || isDown);
+
+  const pill = isDown ? 'DOWN' : running ? (paused ? 'Paused' : 'Running') : 'Idle';
+  const pillTone = isDown ? 'down' : running ? (paused ? 'paused' : 'run') : '';
+
+  const sub = machine.sub ?? (machine.kind === 'autoclave' && machine.capacity ? `${machine.capacity} kg` : '');
+
+  const lastLine = last
+    ? `last ${last.batch_no ?? last.shift ?? ''}${last.quality ? ` · ${last.quality}` : ''}${
+        last.ended_at ? ` · ${clock(last.ended_at)}` : ''
+      }`
+    : 'no runs yet';
+
+  const openBody = () => {
+    if (isDown && down) return onRepair(down);
+    if (run) return onStop(run);
+    return onStart(machine);
+  };
 
   return (
-    <Card accent={machine.accent ?? undefined} active={running}>
-      <div className="flex items-center gap-3">
-        <span
-          className={cn(
-            'h-3 w-3 flex-none rounded-full',
-            running ? 'bg-brand shadow-[0_0_10px_1px_theme(colors.brand.DEFAULT)] animate-pulse-led' : 'bg-line-strong',
-          )}
-        />
-        <div className="min-w-0 flex-1">
-          <b className="block text-[17px] font-bold">{machine.name}</b>
-          <small className="text-[11.5px] text-ink-faint">{machine.sub ?? machine.group_name}</small>
-        </div>
-        {run?.paused ? <Badge tone="paused">Paused</Badge> : <Badge tone={running ? 'run' : 'neutral'}>{running ? 'Running' : 'Idle'}</Badge>}
+    <div
+      className={cn('mcard', running && 'on', paused && 'paused', isDown && 'down')}
+      style={{ '--accent': accent } as React.CSSProperties}
+    >
+      <div className="mtop">
+        <span className="led" />
+        <button type="button" onClick={openBody} className="mname min-w-0 flex-1 bg-transparent p-0 text-left">
+          <b>{machine.name}</b>
+          {sub && <small>{sub}</small>}
+        </button>
+
+        {bearing && (
+          <button
+            type="button"
+            className={cn('tbtn', bearing.due && 'due')}
+            onClick={() => onBearing(machine)}
+            aria-label={`${bearing.bearingType} temperatures`}
+          >
+            <Icon name="thermo" size={16} strokeWidth={2} />
+          </button>
+        )}
+        {!isDown && (
+          <button
+            type="button"
+            className="wbtn"
+            onClick={() => onBreakdown(machine)}
+            aria-label="Report breakdown"
+          >
+            <Icon name="wrench" size={16} strokeWidth={2} />
+          </button>
+        )}
+        <span className={cn('pill', pillTone)}>{pill}</span>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
-        {run ? (
-          <>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {isDown && down ? (
+        <div className="mbody">
+          <div className="runline">
+            <div className="what">
+              <span className="qchip hold">Breakdown</span>
+              <FormChip>since {clock(down.down_start)}</FormChip>
+            </div>
+            <span className="timer" style={{ color: 'var(--err)' }}>
+              {down.down_start ? elapsed(down.down_start) : '--'}
+            </span>
+          </div>
+          <button type="button" className="pausebtn repair" onClick={() => onRepair(down)}>
+            Log repair
+          </button>
+        </div>
+      ) : run ? (
+        <div className="mbody">
+          <div className="runline">
+            <div className="what">
+              {run.batch_no && <BatchRef>{run.batch_no}</BatchRef>}
+              {run.formulation && <FormChip>{run.formulation}</FormChip>}
+              {run.shift_date && !run.batch_no && <FormChip>{dayMonth(run.shift_date)}</FormChip>}
               {run.quality && <QualityChip quality={run.quality} />}
-              {run.out_weight != null && <span className="tnum text-xs text-ink-dim">{kg(run.out_weight)}</span>}
+              {run.mesh && <FormChip style={{ color: 'var(--steel)' }}>{run.mesh}</FormChip>}
+              {run.out_weight != null && <FormChip>{kg(run.out_weight)}</FormChip>}
             </div>
-            <div className="flex items-center gap-3">
-              <span className={cn('tnum text-2xl font-semibold', run.paused ? 'text-state-pause' : 'text-brand')}>
-                {elapsed(run.started_at)}
-              </span>
-              <Button size="sm" variant="danger" onClick={() => onStop(run)}>
-                Stop
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="text-[13px] text-ink-faint">Not running</span>
-            <Button size="sm" variant="primary" onClick={() => onStart(machine)}>
-              Start
-            </Button>
-          </>
-        )}
-      </div>
-    </Card>
+            <span className={cn('timer', paused && 'paused')}>{elapsed(run.started_at)}</span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={cn('pausebtn', paused && 'paused')}
+              onClick={() => onPause(run, !paused)}
+            >
+              {paused ? '▶ Resume run' : '❚❚ Pause run'}
+            </button>
+            <button
+              type="button"
+              className="pausebtn repair !w-auto px-4"
+              onClick={() => onStop(run)}
+            >
+              Stop ▸
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => onStart(machine)} className="mbody w-full bg-transparent p-0">
+          <div className="idleline">
+            <span>{lastLine}</span>
+            <span className="cta" style={{ '--accent': accent } as React.CSSProperties}>
+              {machine.kind === 'autoclave' ? 'Load' : 'Start'} ▸
+            </span>
+          </div>
+        </button>
+      )}
+    </div>
   );
 }
 

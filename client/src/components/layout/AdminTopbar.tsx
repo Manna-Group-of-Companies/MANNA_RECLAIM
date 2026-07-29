@@ -1,40 +1,63 @@
-import { LogOut, Menu } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { logout } from '@/features/auth/authSlice';
-import { toggleSidebar } from '@/features/ui/uiSlice';
-import { appEnv } from '@/config/env';
+import { adminPaths, userPaths } from '@/config/paths';
+import { cn } from '@/utils/cn';
 
+/** The six back.html tabs, plus the two this port adds. */
+const tabs = [
+  { to: adminPaths.dashboard, label: 'Overview' },
+  { to: adminPaths.history, label: 'History' },
+  { to: adminPaths.efficiency, label: 'Efficiency' },
+  { to: adminPaths.rates, label: 'Rates' },
+  { to: adminPaths.costing, label: 'Costing' },
+  { to: adminPaths.maintenance, label: 'Maintenance' },
+  { to: adminPaths.bearings, label: 'Bearings' },
+  { to: adminPaths.users, label: 'Users' },
+];
+
+/**
+ * back.html's header: what you are looking at on the left, one Refresh on the
+ * right, tab strip underneath. It sticks, because these pages get long and the
+ * strip is the only way between them.
+ */
 export function AdminTopbar() {
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
+  const online = useAppSelector((s) => s.ui.online);
 
   return (
-    <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-bg-soft/95 px-4 py-3 backdrop-blur">
-      <button
-        onClick={() => dispatch(toggleSidebar(undefined))}
-        aria-label="Toggle navigation"
-        className="grid h-9 w-9 place-items-center rounded-field border border-line text-ink-dim lg:hidden"
-      >
-        <Menu size={18} />
-      </button>
-
-      <div>
-        <p className="text-sm font-bold leading-tight">{appEnv.appName}</p>
-        <p className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">Back office</p>
+    <header className="bo-head">
+      <div className="row">
+        <div>
+          <h1>Manna Reports</h1>
+          <div className="sub">
+            Reclaim plant
+            {user?.name ? ` · ${user.name}` : ''}
+            {online ? '' : ' · offline'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" className="refresh" onClick={() => dispatch(requestRefresh())}>
+            ↻ Refresh
+          </button>
+          <NavLink to={userPaths.machines} className="refresh">
+            Shop floor
+          </NavLink>
+          <button type="button" className="refresh" onClick={() => void dispatch(logout())}>
+            Sign out
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1" />
-
-      <span className="hidden text-xs text-ink-dim sm:block">
-        {user?.name} - {user?.role}
-      </span>
-      <button
-        onClick={() => void dispatch(logout())}
-        className="flex items-center gap-2 rounded-field border border-line px-3 py-2 text-xs font-bold text-ink-dim hover:text-ink"
-      >
-        <LogOut size={14} />
-        Sign out
-      </button>
+      <nav className="tabstrip">
+        {tabs.map(({ to, label }) => (
+          <NavLink key={to} to={to} className={({ isActive }) => cn('tab', isActive && 'on')}>
+            {label}
+          </NavLink>
+        ))}
+      </nav>
     </header>
   );
 }

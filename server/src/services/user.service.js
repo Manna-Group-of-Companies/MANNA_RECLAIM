@@ -17,7 +17,8 @@ export const userService = {
       // Collation strength 2 makes this a case-insensitive exact match, which
       // is what the old ilike lookup did.
       const row = await model(TABLES.users)
-        .findOne({ name: String(name) }, 'name role active pin_hash')
+        // `+pin_hash` opts back into the field the schema hides by default.
+        .findOne({ name: String(name) }, 'name role active +pin_hash')
         .collation({ locale: 'en', strength: 2 })
         .lean();
       return row ? serialize(row) : null;

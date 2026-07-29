@@ -6,6 +6,7 @@ import batchesReducer from '@/features/batches/batchesSlice';
 import dispatchReducer from '@/features/dispatch/dispatchSlice';
 import reportsReducer from '@/features/reports/reportsSlice';
 import maintenanceReducer from '@/features/maintenance/maintenanceSlice';
+import qualityReducer from '@/features/quality/qualitySlice';
 import ratesReducer from '@/features/rates/ratesSlice';
 import uiReducer from '@/features/ui/uiSlice';
 
@@ -17,6 +18,7 @@ export const rootReducer = combineReducers({
   dispatch: dispatchReducer,
   reports: reportsReducer,
   maintenance: maintenanceReducer,
+  quality: qualityReducer,
   rates: ratesReducer,
   ui: uiReducer,
 });

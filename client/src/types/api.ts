@@ -11,6 +11,9 @@ export interface PageMeta {
   page: number;
   limit: number;
   pages: number;
+  /** /runs/shift echoes back which shift it resolved to. */
+  shift_date?: string;
+  shift?: string;
 }
 
 export interface FieldError {

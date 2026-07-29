@@ -1,11 +1,15 @@
 export { Button } from './Button';
 export { Card, CardHeader } from './Card';
-export { Badge, QualityChip } from './Badge';
+export { Badge, QualityChip, BatchRef, FormChip } from './Badge';
 export { Spinner, PageLoader } from './Spinner';
 export { EmptyState } from './EmptyState';
 export { BottomSheet } from './BottomSheet';
 export { Modal } from './Modal';
+export { BoModal } from './BoModal';
 export { Toaster } from './Toaster';
 export { StatTile } from './StatTile';
 export { DataTable } from './DataTable';
 export type { Column } from './DataTable';
+export { TextField, SelectField, TextAreaField, FieldRow, FormWarning } from './Field';
+export { Pick, PickGrid, Readout, SheetLabel, ViewHead } from './Pick';
+export { Icon } from './Icon';

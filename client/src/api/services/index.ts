@@ -6,4 +6,5 @@ export { runService } from './run.service';
 export { dispatchService } from './dispatch.service';
 export { rateService } from './rate.service';
 export { maintenanceService } from './maintenance.service';
+export { qualityService } from './quality.service';
 export { reportService } from './report.service';
