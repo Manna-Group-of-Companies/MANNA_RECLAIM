@@ -24,6 +24,9 @@ export interface Machine {
   needs_quality?: boolean;
   weigh?: boolean;
   out_weight?: boolean;
+  /** Runs on a tyre feedstock, and which one it is set up for by default. */
+  tyre?: boolean;
+  def_tyre?: string | null;
   enabled: boolean;
   sort_order?: number;
   sub?: string | null;
@@ -90,6 +93,12 @@ export interface Run {
   hours_run?: number | null;
   weight_kg?: number | null;
   out_weight?: number | null;
+  /**
+   * The individual weighings `weight_kg` was totalled from - material comes off
+   * a machine in more than one barrow. Null on a run weighed before the column
+   * existed, which is one weighing by another name.
+   */
+  weigh_entries?: number[] | null;
   kwh?: number | null;
   /**
    * Meter readings around the run. The crews record the meter rather than a
@@ -107,7 +116,11 @@ export interface Run {
   /** What this run leaves for the next batch of the same grade. */
   leftout_out?: number | null;
   paused?: boolean;
+  /** A special-line pass that yields nothing to weigh - never bagged. */
+  non_production?: boolean | null;
   status: RunStatus;
+  /** The column the tablets write: this machine's output gets weighed later. */
+  needs_weigh?: boolean | null;
   needs_weight?: boolean;
   needs_pack?: boolean;
   remarks?: string | null;
@@ -135,6 +148,9 @@ export interface QualityTest {
   tested_at: string;
   notes?: string | null;
   remarks?: string | null;
+  /** The lab's report, once it has been uploaded - a photo or a PDF. */
+  attachment_url?: string | null;
+  attachment_name?: string | null;
 }
 
 export interface DispatchLoad {
@@ -155,6 +171,8 @@ export interface Dispatch {
   dispatch_date: string;
   invoice_no?: string | null;
   vehicle?: string | null;
+  /** One of the plant's own vehicles, rather than a hired or customer one. */
+  own_vehicle?: boolean | null;
   driver?: string | null;
   total_kg?: number | null;
   status: 'draft' | 'dispatched' | 'invoiced';
@@ -268,6 +286,8 @@ export interface RunFilters {
   days: string[];
   shifts: Shift[];
   machines: { id: string; name: string }[];
+  /** Batch numbers on record, newest first - the History batch picker. */
+  batches: string[];
 }
 
 export interface ShiftOption {

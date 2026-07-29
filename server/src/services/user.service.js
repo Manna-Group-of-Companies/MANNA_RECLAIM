@@ -1,34 +1,30 @@
 import bcrypt from 'bcryptjs';
-import { crud, model, serialize, wrapError } from './base.service.js';
+import { crud, op } from './base.service.js';
 import { TABLES, ROLES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { DEV_USERS, devSeedActive } from '../config/devSeed.js';
 
+/**
+ * `pin_hash` is deliberately outside the default select, so it never rides
+ * along on GET /users. The login path asks for it by name through `withPin`.
+ */
 const base = crud(TABLES.users, { defaultSort: 'name', select: 'id,name,role,active,created_at' });
+const withPin = crud(TABLES.users, { defaultSort: 'name', select: 'id,name,role,active,pin_hash' });
 
 export const userService = {
   ...base,
 
   async findByName(name) {
-    if (devSeedActive()) {
+    if (await devSeedActive()) {
       return DEV_USERS.find((u) => u.name.toLowerCase() === String(name).toLowerCase()) ?? null;
     }
-    try {
-      // Collation strength 2 makes this a case-insensitive exact match, which
-      // is what the old ilike lookup did.
-      const row = await model(TABLES.users)
-        // `+pin_hash` opts back into the field the schema hides by default.
-        .findOne({ name: String(name) }, 'name role active +pin_hash')
-        .collation({ locale: 'en', strength: 2 })
-        .lean();
-      return row ? serialize(row) : null;
-    } catch (err) {
-      throw wrapError(err);
-    }
+    // `ilike` with no wildcard is a case-insensitive exact match: "Mathai" and
+    // "mathai" are the same account, which is what the PIN gate always assumed.
+    return withPin.findOne({ name: op.ilike(String(name)) });
   },
 
   async findById(id) {
-    if (devSeedActive()) {
+    if (await devSeedActive()) {
       const user = DEV_USERS.find((u) => u.id === id);
       if (!user) throw ApiError.notFound('User ' + id + ' not found');
       return user;
@@ -37,7 +33,7 @@ export const userService = {
   },
 
   async list(query, filters) {
-    if (devSeedActive()) {
+    if (await devSeedActive()) {
       const rows = DEV_USERS.map(({ pin_hash: _pin, ...u }) => u);
       return { rows, total: rows.length, page: 1, limit: rows.length };
     }

@@ -9,14 +9,12 @@ import dispatchRoutes from './dispatch.routes.js';
 import rateRoutes from './rate.routes.js';
 import maintenanceRoutes from './maintenance.routes.js';
 import reportRoutes from './report.routes.js';
-import { isDbReady } from '../config/db.js';
+import { dbInfo } from '../config/supabase.js';
 import { ok } from '../utils/ApiResponse.js';
 
 const router = Router();
 
-router.get('/', (_req, res) =>
-  ok(res, { name: 'manna-reclaim-api', db: isDbReady() ? 'ready' : 'not-configured' }),
-);
+router.get('/', (_req, res) => ok(res, { name: 'manna-reclaim-api', db: dbInfo() }));
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);

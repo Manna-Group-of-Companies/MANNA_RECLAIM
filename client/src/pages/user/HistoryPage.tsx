@@ -1,112 +1,664 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchShiftRuns } from '@/features/machines/runsSlice';
+import { fetchRunFilters } from '@/features/reports/reportsSlice';
+import { runService } from '@/api/services/run.service';
+import { toRequestError } from '@/api/axiosClient';
 import {
-  DataTable,
+  BottomSheet,
+  Button,
+  FieldRow,
+  FormWarning,
   PageLoader,
   QualityChip,
   SelectField,
+  SheetLabel,
+  TextAreaField,
   TextField,
   ViewHead,
-  type Column,
 } from '@/components/ui';
-import { SHIFTS } from '@/config/constants';
-import { currentShift, dayMonth, todayISO } from '@/utils/date';
-import { duration, kg } from '@/utils/format';
-import type { Run, Shift } from '@/types/models';
+import {
+  buildPayload,
+  changedFields,
+  draftOf,
+  round2,
+  runMath,
+  text,
+  type Draft,
+} from '@/features/history/runDraft';
+import { QUALITIES, SHIFTS, TYRES, type TyreType } from '@/config/constants';
+import { useToast } from '@/hooks/useToast';
+import { clock24, dayMonth } from '@/utils/date';
+import { hours, kwhOf, num } from '@/utils/format';
+import type { Run } from '@/types/models';
 
-const columns: Column<Run>[] = [
-  { key: 'machine', header: 'Machine', render: (r) => r.machine ?? r.machine_id },
-  {
-    key: 'quality',
-    header: 'Quality',
-    render: (r) => (r.quality ? <QualityChip quality={r.quality} /> : (r.mesh ?? '--')),
-  },
-  {
-    key: 'run',
-    header: 'Run',
-    render: (r) => (
-      <span className="tnum">{r.status === 'running' ? 'live' : duration(r.runtime_min, r.hours_run)}</span>
-    ),
-  },
-  {
-    key: 'out',
-    header: 'Out',
-    align: 'right',
-    render: (r) => <span className="tnum">{kg(r.out_weight ?? r.weight_kg)}</span>,
-  },
-];
+/** "9.3 h" the way the prototype's history column reads it. */
+const runHours = (run: Run) => {
+  const h = hours(run);
+  return h == null ? '—' : `${num(h, 1)} h`;
+};
+
+/** Nothing recorded reads as a dash rather than as an empty gap. */
+const show = (value: ReactNode) => (value == null || value === '' ? '—' : value);
+
+/** "29 Jul 12:35" - the day and the 24-hour clock the shop floor reads. */
+const stamp = (iso?: string | null) => (iso ? `${dayMonth(iso)} ${clock24(iso)}` : null);
+
+/** Run time is edited in minutes, the way the sheet asks for it; kept in hours. */
+const minutesOf = (hoursText: string) => {
+  if (!hoursText.trim()) return '';
+  const h = Number(hoursText);
+  return Number.isNaN(h) ? hoursText : String(Math.round(h * 60));
+};
+
+/** One line of the Full record: what it is on the left, what it reads right. */
+function Det({ k, v }: { k: ReactNode; v: ReactNode }) {
+  return (
+    <div className="detrow">
+      <span className="k">{k}</span>
+      <span className="v">{show(v)}</span>
+    </div>
+  );
+}
 
 /**
- * One shift's runs, with a date and shift picker. Asked for nothing, the
- * server answers with the most recent shift that actually has runs - a plant
- * that has not started today would otherwise open on an empty table.
+ * The prototype's Edit entry sheet: the run opens straight into its own form,
+ * with everything that is not editable read out underneath it.
+ *
+ * The fields on offer follow what was actually recorded. A shiftwise run - the
+ * grinding and coarse lines, measured by the shift rather than by the batch -
+ * has no batch or grade to correct, so it is not asked for one; an autoclave is
+ * timed by its charge rather than by a meter, so it gets neither meter group.
+ *
+ * Both writes rewrite the plant's record, so the sheet is what stands in for
+ * the role check the API used to make: what a reading works out to is shown
+ * under it before it is saved, and the delete names the entry it is about to
+ * remove and waits to be told again.
+ */
+function RunSheet({
+  run,
+  onClose,
+  onSaved,
+  onDeleted,
+}: {
+  run: Run | null;
+  onClose: () => void;
+  onSaved: (run: Run) => void;
+  onDeleted: (id: string) => void;
+}) {
+  const notify = useToast();
+  const machines = useAppSelector((s) => s.machines.items);
+  const [mode, setMode] = useState<'edit' | 'delete'>('edit');
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  // A different run in the sheet starts fresh: its own form, no half-typed
+  // correction carried over, and never mid-delete.
+  const runId = run?.id ?? '';
+  useEffect(() => {
+    setMode('edit');
+    setDraft(run ? draftOf(run) : null);
+    setError('');
+  }, [runId, run]);
+
+  const machine = run ? machines.find((m) => m.id === run.machine_id) : undefined;
+  // The title wears the short name the tablets label the machine with; the
+  // full name and the id are read out under Full record.
+  const label = run ? machine?.short ?? run.machine ?? run.machine_id : '';
+  const when = run ? `${dayMonth(run.shift_date)}${run.shift ? ` · ${run.shift}` : ''}` : '';
+
+  const close = () => {
+    setMode('edit');
+    onClose();
+  };
+
+  const save = async () => {
+    if (!run || !draft) return;
+    const math = runMath(run, draft);
+    if (math.issues.length) return;
+
+    const changed = changedFields(draft, draftOf(run));
+    const payload = buildPayload(draft, changed, math);
+    if (!Object.keys(payload).length) {
+      notify(
+        changed.length ? 'Nothing left to save once the readings are applied' : 'Nothing changed',
+        'warn',
+      );
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      onSaved(await runService.update(run.id, payload));
+      notify('Entry updated', 'ok');
+      close();
+    } catch (err) {
+      const message = toRequestError(err).message;
+      setError(message);
+      notify(message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!run) return;
+    setBusy(true);
+    setError('');
+    try {
+      await runService.remove(run.id);
+      onDeleted(run.id);
+      notify('Entry deleted', 'ok');
+      close();
+    } catch (err) {
+      const message = toRequestError(err).message;
+      setError(message);
+      notify(message, 'err');
+      setMode('edit');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* ---- the delete confirmation, which replaces the form ---- */
+
+  if (mode === 'delete') {
+    return (
+      <BottomSheet
+        open={Boolean(run)}
+        title="Delete this entry?"
+        subtitle={
+          <>
+            <span className="batchref">{label}</span> · {when}
+          </>
+        }
+        led="var(--err)"
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMode('edit')} disabled={busy}>
+              Keep entry
+            </Button>
+            <Button variant="danger" onClick={remove} loading={busy}>
+              Yes, delete
+            </Button>
+          </>
+        }
+      >
+        <div className="hint">
+          Permanently removes this entry from the plant's record. The production, energy and cost
+          figures it counts towards drop with it. This cannot be undone.
+        </div>
+        {error && <FormWarning>{error}</FormWarning>}
+      </BottomSheet>
+    );
+  }
+
+  /* ---- Edit entry ---- */
+
+  const form = () => {
+    if (!run || !draft) return null;
+
+    const math = runMath(run, draft);
+    const { isAuto, isTod, elecPair, hourPair, elecDelta, hourDelta } = math;
+    // Shiftwise: the lines whose output is measured by the shift rather than by
+    // the batch, so there is no batch or grade against the run to correct.
+    const isShiftwise = run.line === 'grind' || run.line === 'coarse';
+    const hasBatchFields = !isShiftwise || Boolean(run.batch_no) || Boolean(run.quality);
+
+    const set = (field: keyof Draft, value: string) => setDraft({ ...draft, [field]: value });
+    const number = (field: keyof Draft, label_: ReactNode, note?: ReactNode, suffix?: string) => (
+      <TextField
+        label={label_}
+        note={note}
+        inputMode="decimal"
+        suffix={suffix}
+        placeholder="—"
+        value={draft[field]}
+        onChange={(e) => set(field, e.target.value)}
+      />
+    );
+
+    const runtimeField = (
+      <TextField
+        label="Run time"
+        note="(min)"
+        inputMode="decimal"
+        placeholder="—"
+        value={hourPair ? String(Math.round((hourDelta ?? 0) * 60)) : minutesOf(draft.hoursRun)}
+        disabled={hourPair}
+        onChange={(e) => {
+          const typed = e.target.value.trim();
+          const mins = Number(typed);
+          set('hoursRun', !typed ? '' : Number.isNaN(mins) ? typed : String(round2(mins / 60)));
+        }}
+      />
+    );
+
+    const tyre = run.tyre_type ? TYRES[run.tyre_type as TyreType] : null;
+
+    return (
+      <>
+        {hasBatchFields && (
+          <>
+            <TextField
+              label={isShiftwise ? 'Coarse batch number' : 'Batch number'}
+              value={draft.batchNo}
+              onChange={(e) => set('batchNo', e.target.value)}
+            />
+            <SelectField
+              label="Quality"
+              value={draft.quality}
+              onChange={(e) => set('quality', e.target.value)}
+            >
+              <option value="">—</option>
+              {QUALITIES.map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </SelectField>
+            <TextField
+              label="Formulation"
+              value={draft.formulation}
+              onChange={(e) => set('formulation', e.target.value)}
+            />
+          </>
+        )}
+
+        <SheetLabel className="!mt-2">Shift</SheetLabel>
+        <FieldRow className="mb-3.5">
+          <SelectField label="Shift" value={draft.shift} onChange={(e) => set('shift', e.target.value)}>
+            {SHIFTS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            label="Shift date"
+            type="date"
+            value={draft.shiftDate}
+            onChange={(e) => set('shiftDate', e.target.value)}
+          />
+        </FieldRow>
+        <TextField
+          label="Supervisor"
+          value={draft.supervisor}
+          onChange={(e) => set('supervisor', e.target.value)}
+        />
+
+        {isAuto ? (
+          <>
+            <SheetLabel>Charge</SheetLabel>
+            <FieldRow className="mb-3.5">
+              {runtimeField}
+              {number('workers', 'Workers')}
+            </FieldRow>
+            {number('capacity', 'Charge', '(kg)')}
+            {number('firewoodKg', 'Firewood', '(kg)')}
+          </>
+        ) : (
+          <>
+            <SheetLabel>Hour meter</SheetLabel>
+            {number('hourStart', 'Start reading', undefined, 'hrs')}
+            {number('hourEnd', 'Stop reading', undefined, 'hrs')}
+            {hourDelta != null && (
+              <div className={`diffout show${hourDelta < 0 ? ' bad' : ''}`}>
+                {hourDelta < 0
+                  ? 'The hour meter reads lower at the stop than at the start.'
+                  : `Run: ${draft.hourEnd} − ${draft.hourStart} = ${hourDelta} hrs`}
+              </div>
+            )}
+            <FieldRow className="mb-3.5 mt-2.5">
+              {runtimeField}
+              {number('workers', 'Workers')}
+            </FieldRow>
+
+            <SheetLabel>Electricity meter</SheetLabel>
+            {number('elecStart', 'Start reading', undefined, 'units')}
+            {number('elecEnd', 'Final reading', undefined, 'units')}
+            {elecDelta != null && (
+              <div className={`diffout show${elecDelta < 0 ? ' bad' : ''}`}>
+                {elecDelta < 0
+                  ? 'The electricity meter reads lower at the end than at the start.'
+                  : `Consumed: ${draft.elecEnd} − ${draft.elecStart} = ${elecDelta} units${
+                      isTod ? ` × 3 = ${round2(elecDelta * 3)} kWh` : ''
+                    }`}
+              </div>
+            )}
+            <TextField
+              label="Energy"
+              note="(kWh) — recalculated when a reading changes"
+              inputMode="decimal"
+              placeholder="—"
+              value={elecPair ? text(math.energy) : draft.kwh}
+              onChange={(e) => set('kwh', e.target.value)}
+              disabled={elecPair}
+              fieldClassName="mt-2.5"
+            />
+          </>
+        )}
+
+        {number('outWeight', 'Output weight', '(kg) — blank = none')}
+        {number('packedSacks', 'Packed sacks')}
+        <TextAreaField
+          label="Remarks"
+          rows={2}
+          value={draft.remarks}
+          onChange={(e) => set('remarks', e.target.value)}
+        />
+
+        <SheetLabel>Full record</SheetLabel>
+        <Det k="Machine" v={`${run.machine ?? machine?.name ?? '—'} · ${run.machine_id}`} />
+        <Det k="Line" v={run.line} />
+        <Det k="Type" v={isAuto ? 'Autoclave' : isShiftwise ? 'Shiftwise' : 'Batch'} />
+        <Det k="Formulation" v={run.formulation} />
+        <Det k="Capacity" v={run.capacity != null ? `${run.capacity} kg` : null} />
+        <Det k="Tyre" v={tyre ? `${tyre.label} ${run.mesh ?? tyre.mesh}` : run.mesh} />
+        {/* The batches merged into a pass and the hand that logged it are not
+            columns the API carries yet - the row is here for when they are. */}
+        <Det k="Mix sources" v={null} />
+        <Det k="Start / end" v={`${show(stamp(run.started_at))} → ${show(stamp(run.ended_at))}`} />
+        <Det k="Start/stops merged" v={run.passes ?? 1} />
+        {Array.isArray(run.weigh_entries) && run.weigh_entries.length > 0 && (
+          <Det k="Weighings" v={run.weigh_entries.join(' + ')} />
+        )}
+        {(run.leftout_in != null || run.leftout_out != null) && (
+          <Det k="Carried in / out" v={`${run.leftout_in ?? 0} → ${run.leftout_out ?? 0} kg`} />
+        )}
+        {run.non_production ? <Det k="Non-production" v="Yes" /> : null}
+        <Det k="Status" v={run.status === 'running' ? 'Running' : 'Logged'} />
+        <Det k="Logged by" v={null} />
+        <Det k="Record id" v={run.id} />
+      </>
+    );
+  };
+
+  return (
+    <BottomSheet
+      open={Boolean(run)}
+      title={`Edit entry — ${label}`}
+      subtitle={
+        <>
+          {when} · <span style={{ color: 'var(--ok)' }}>synced</span>
+        </>
+      }
+      led="var(--elec)"
+      onClose={close}
+      footer={
+        <>
+          <Button variant="ghost" onClick={close} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={save} loading={busy}>
+            Save changes
+          </Button>
+        </>
+      }
+      after={
+        <Button
+          variant="danger"
+          size="lg"
+          className="mt-2.5"
+          onClick={() => setMode('delete')}
+          disabled={busy}
+        >
+          Delete this entry
+        </Button>
+      }
+    >
+      {form()}
+      {error && <FormWarning>{error}</FormWarning>}
+    </BottomSheet>
+  );
+}
+
+/**
+ * The whole run history, not just one shift.
+ *
+ * Every row on record comes down - the plant has well over a thousand and the
+ * crews scroll back through them - so the list is fetched with `all` rather
+ * than a page at a time, and the day / shift / batch / machine pickers narrow
+ * it server-side. Tapping a row opens that entry to correct or to delete.
  */
 export function HistoryPage() {
   const dispatch = useAppDispatch();
-  const { shift, shiftDate, shiftName, loading } = useAppSelector((s) => s.runs);
+  const filters = useAppSelector((s) => s.reports.filters);
+  const queued = useAppSelector((s) => s.runs.queue.length);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+
   const [date, setDate] = useState('');
-  const [name, setName] = useState<Shift | ''>('');
+  const [shift, setShift] = useState('');
+  const [batch, setBatch] = useState('');
+  const [machineId, setMachineId] = useState('');
+  const [rows, setRows] = useState<Run[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<Run | null>(null);
 
   useEffect(() => {
-    void dispatch(fetchShiftRuns(date ? { date, shift: name || undefined } : undefined));
-  }, [dispatch, date, name]);
+    void dispatch(fetchRunFilters());
+  }, [dispatch, refreshTick]);
 
-  // Track back whatever the server resolved to, so the pickers show the shift
-  // actually on screen rather than sitting blank.
   useEffect(() => {
-    if (!date && shiftDate) setDate(shiftDate);
-    if (!name && shiftName) setName(shiftName);
-  }, [shiftDate, shiftName, date, name]);
+    let live = true;
+    setLoading(true);
+    setError('');
+    runService
+      .list({
+        all: 1,
+        date: date || undefined,
+        shift: shift || undefined,
+        batch: batch || undefined,
+        machineId: machineId || undefined,
+      })
+      .then(({ rows: got }) => {
+        if (live) setRows(got);
+      })
+      .catch((err) => {
+        if (live) setError(toRequestError(err).message);
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [date, shift, batch, machineId, refreshTick]);
 
-  const isNow = shiftDate === todayISO() && shiftName === currentShift();
-  const outTotal = shift.reduce((sum, r) => sum + (r.out_weight ?? r.weight_kg ?? 0), 0);
+  // Newest first, on the same clock the shop floor reads: the shift the run
+  // belongs to, then when it actually ended.
+  const sorted = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        if (a.shift_date !== b.shift_date) return a.shift_date < b.shift_date ? 1 : -1;
+        const ea = a.ended_at ?? a.started_at ?? '';
+        const eb = b.ended_at ?? b.started_at ?? '';
+        return ea < eb ? 1 : -1;
+      }),
+    [rows],
+  );
 
-  if (loading && !shift.length) return <PageLoader label="Loading history" />;
+  if (loading && !rows.length) return <PageLoader label="Loading history" />;
 
   return (
     <>
       <ViewHead
         title="History"
-        meta={shiftDate ? `${dayMonth(shiftDate)} · ${shiftName ?? ''}` : '--'}
+        meta={
+          <>
+            {sorted.length} shown · {queued} unsynced ·{' '}
+            <span className="synced yes inline-block align-middle" /> = saved to cloud · tap a row
+            to edit
+          </>
+        }
       />
 
       <div className="histbar">
-        <TextField
-          label="Date"
-          type="date"
+        <SelectField
+          label="Day"
           value={date}
-          max={todayISO()}
           onChange={(e) => setDate(e.target.value)}
           fieldClassName="!mb-0"
-        />
+        >
+          <option value="">All days</option>
+          {filters?.days.map((d) => (
+            <option key={d} value={d}>
+              {dayMonth(d)}
+            </option>
+          ))}
+        </SelectField>
         <SelectField
           label="Shift"
-          value={name}
-          onChange={(e) => setName(e.target.value as Shift)}
+          value={shift}
+          onChange={(e) => setShift(e.target.value)}
           fieldClassName="!mb-0"
         >
+          <option value="">Both shifts</option>
           {SHIFTS.map((s) => (
             <option key={s} value={s}>
               {s}
             </option>
           ))}
         </SelectField>
+        <SelectField
+          label="Batch"
+          value={batch}
+          onChange={(e) => setBatch(e.target.value)}
+          fieldClassName="!mb-0"
+        >
+          <option value="">All batches</option>
+          {filters?.batches.map((b) => (
+            <option key={b} value={b}>
+              #{b}
+            </option>
+          ))}
+        </SelectField>
+        <SelectField
+          label="Machine"
+          value={machineId}
+          onChange={(e) => setMachineId(e.target.value)}
+          fieldClassName="!mb-0"
+        >
+          <option value="">All machines</option>
+          {filters?.machines.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </SelectField>
       </div>
 
-      <div className="histsum">
-        <b>{shift.length}</b> run{shift.length === 1 ? '' : 's'} · <b>{kg(outTotal)}</b> out
-        {isNow ? ' · this shift' : ''}
-      </div>
+      {error && (
+        <div className="histsum text-state-err">Couldn’t load history: {error}</div>
+      )}
 
-      <section className="panel">
-        <DataTable
-          columns={columns}
-          rows={shift}
-          rowKey={(r) => r.id}
-          empty="No runs logged this shift"
-        />
+      <section className="panel scroll-x">
+        <table className="hist min-w-[620px]">
+          <thead>
+            <tr>
+              <th />
+              <th>Machine</th>
+              <th>Batch</th>
+              <th>Super</th>
+              <th>Run (h)</th>
+              <th>Energy</th>
+              <th>Crew</th>
+              <th>Weight</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => {
+              const k = kwhOf(r);
+              const w = r.weight_kg ?? r.out_weight ?? null;
+              const hasMeter = r.elec_start != null || r.elec_end != null;
+              const hasHourMeter = r.hour_start != null || r.hour_end != null;
+              return (
+                <tr
+                  key={r.id}
+                  onClick={() => setSelected(r)}
+                  className="cursor-pointer"
+                  aria-label={`Edit ${r.machine ?? r.machine_id} entry`}
+                >
+                  <td>
+                    <span className="synced yes" title="Saved to cloud" />
+                  </td>
+                  <td>
+                    <b>{r.machine ?? r.machine_id}</b>
+                    <div className="muted text-[11px]">
+                      {dayMonth(r.shift_date)}
+                      {r.shift ? ` · ${r.shift}` : ''}
+                    </div>
+                  </td>
+                  <td>
+                    <span className="qchip shift">{r.shift}</span>
+                    {r.batch_no && <span className="batchref ml-1 text-[11px]">{r.batch_no}</span>}
+                    {r.quality && <QualityChip quality={r.quality} className="ml-1" />}
+                    {r.formulation && <div className="muted text-[10px]">{r.formulation}</div>}
+                  </td>
+                  <td>{r.supervisor ?? <span className="muted">—</span>}</td>
+                  <td className="tnum">
+                    {r.status === 'running' ? 'live' : runHours(r)}
+                    {hasHourMeter && (
+                      <div className="muted text-[10px]">
+                        hr {r.hour_start ?? '—'} → {r.hour_end ?? '—'}
+                      </div>
+                    )}
+                  </td>
+                  <td className="tnum">
+                    {k != null ? `${num(k, 0)} kWh` : '—'}
+                    {r.firewood_kg != null && (
+                      <div className="muted text-[10px]">{r.firewood_kg} kg fw</div>
+                    )}
+                    {hasMeter && (
+                      <div className="muted text-[10px]">
+                        meter {r.elec_start ?? '—'} → {r.elec_end ?? '—'}
+                        {r.machine_id === 'GRD_O' ? ' ×3' : ''}
+                      </div>
+                    )}
+                  </td>
+                  <td className="tnum">{r.workers ?? '—'}</td>
+                  <td className="tnum">
+                    {w != null ? (
+                      `${w} kg`
+                    ) : r.needs_weigh || r.needs_weight ? (
+                      <span className="muted">pending</span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="muted text-right">›</td>
+                </tr>
+              );
+            })}
+            {!sorted.length && !loading && (
+              <tr>
+                <td colSpan={9} className="py-6 text-center">
+                  <span className="muted">No runs match these filters.</span>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </section>
+
+      <RunSheet
+        run={selected}
+        onClose={() => setSelected(null)}
+        onSaved={(saved) => {
+          // The table follows the correction straight away rather than waiting
+          // for the next fetch.
+          setRows((current) => current.map((r) => (r.id === saved.id ? saved : r)));
+          setSelected(null);
+        }}
+        onDeleted={(id) => {
+          setRows((current) => current.filter((r) => r.id !== id));
+          setSelected(null);
+        }}
+      />
     </>
   );
 }

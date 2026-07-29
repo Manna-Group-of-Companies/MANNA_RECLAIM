@@ -21,7 +21,7 @@ rather than at `:root`, and one app carries both looks without either bleeding i
 
 ```bash
 npm install                 # installs both workspaces
-cp server/.env.example server/.env    # fill in MONGODB_URI and the JWT secrets
+cp server/.env.example server/.env    # fill in SUPABASE_URL, a Supabase key and the JWT secrets
 cp client/.env.example client/.env
 npm run dev                 # API on :5000, client on :5173
 ```
@@ -64,8 +64,8 @@ server/
   src/
     server.js                 listen + graceful shutdown
     app.js                    express app, middleware order, /health
-    config/                   env.js, constants.js, logger.js, db.js (mongoose connection)
-    models/                   mongoose schemas, one file per domain + index.js registry
+    config/                   env.js, constants.js, logger.js,
+                              supabase.js (PostgREST client), tables.js (table registry)
     routes/                   index.js mounts one router per domain
     controllers/              request/response only, no data access
     services/                 data access and business rules (base.service.js = CRUD factory)
@@ -74,32 +74,45 @@ server/
     utils/                    ApiError, ApiResponse, asyncHandler, jwt, pagination, shift
 ```
 
-## Copying the Supabase data into Mongo
+## The database
 
-The prototypes wrote to Supabase (Postgres) over PostgREST. `server/scripts/migrate-supabase-to-mongo.js`
-pulls every object into MongoDB, one collection per object, keeping the same name:
+Supabase (Postgres) is the database. The shop-floor tablets have written to it all along, and the
+API reads and writes the same project over PostgREST - there is no copy step and no second store.
 
 ```bash
 cd server
-npm run migrate:supabase -- --dry-run     # read and count, write nothing
-npm run migrate:supabase                  # replace each collection with the Supabase rows
-npm run migrate:supabase -- --tables-only # skip the derived views
-npm run migrate:supabase -- --only=runs,shifts
+npm run db:report              # every object, its row count and anything missing
+npm run db:report -- --columns # with each object's columns
 ```
 
-It needs `SUPABASE_URL` plus `SUPABASE_ANON_KEY` (or `SUPABASE_SERVICE_KEY` once RLS is on) in
-`server/.env`. Rows are stored exactly as PostgREST returns them - no type coercion - so timestamps
-stay ISO strings rather than becoming BSON dates. A row with a unique scalar `id` gets it as `_id`,
-which makes the copy re-runnable; each run replaces the collection unless you pass `--keep`.
+There is no connection to open: PostgREST is HTTP, so `isDbReady()` is only "are the URL and key
+set". `src/config/supabase.js` is the whole driver - filters, paging, retries and the Postgres-error
+mapping - and `src/config/tables.js` says what each table's key and writable columns are. There is
+no schema restated in the server: types, defaults and uniqueness all live in Postgres itself.
 
-The 17 `*_costing`, `*_latest`, `*_efficiency` and similar objects are Postgres **views** - Mongo has
-no equivalent, so what lands there is a snapshot, not something that recomputes. Anything that must
-stay live has to be rebuilt as an aggregation pipeline against the source collections.
+The `*_costing`, `*_latest`, `*_efficiency` objects are Postgres **views**: the report and costing
+services read them directly, so the figures are recomputed by the database on every request rather
+than being a snapshot that has to be refreshed.
+
+### One-time setup
+
+Everything the plant records is already in the project. Two things are not, because the prototype
+hard-coded them - accounts and the machine list - along with a handful of columns the API writes
+that the tablets never created. Paste `supabase/schema.sql` into the Supabase SQL editor once:
+
+```bash
+cd server
+npm run seed        # then load the starting accounts and the 14 machines
+```
+
+Until that runs, the API logs exactly what is missing at boot and serves the in-memory accounts and
+machines from `config/devSeed.js` so the app still works. `users` holds bcrypt PIN hashes and is
+closed to the anon key, so signing in against the real table needs `SUPABASE_SERVICE_KEY`.
 
 ## Request flow
 
 ```
-route -> rateLimiter -> authenticate -> authorize -> validate(zod) -> controller -> service -> mongoose
+route -> rateLimiter -> authenticate -> authorize -> validate(zod) -> controller -> service -> Supabase
                                                                           |
                                                           ApiResponse / ApiError -> errorHandler
 ```
@@ -117,7 +130,7 @@ never see the envelope.
 | Packing | `/runs/pending-pack` | `/runs/:id/pack` |
 | Dispatch | `/dispatches`, `/rates` | `/dispatches` |
 | Quality | `/batches/open`, `/quality-tests`, `/quality-tests/summary` | `/quality-tests` |
-| History | `/runs/shift` | - |
+| History | `/reports/filters`, `/runs?all=1&date=&shift=&batch=&machineId=` | `PATCH /runs/:id`, `DELETE /runs/:id` |
 | Bearing | `/maintenance/bearings/due`, `/maintenance/bearings` | `/maintenance/bearings` |
 
 Two rules the API enforces rather than the screen: a repair cannot be filed without all three
@@ -129,7 +142,7 @@ instead of being clamped, because that would quietly lose weight from the ledger
 | Tab | Reads | Writes |
 | --- | --- | --- |
 | Overview | `/reports/dashboard`, `/maintenance?status=open`, `/maintenance/bearings/due` | - |
-| History | `/reports/filters`, `/runs?date=&machineId=&shift=` | - |
+| History | `/reports/filters`, `/runs?date=&machineId=&shift=` | `PATCH /runs/:id`, `DELETE /runs/:id` |
 | Efficiency | `/reports/shifts`, `/reports/shift-efficiency?date=&shift=` | `/reports/efficiency-notes` |
 | Rates | `/rates/cost-rates`, `/rates` | `PUT /rates/cost-rates`, `PUT /rates` |
 | Costing | `/reports/dashboard`, `/rates/cost-rates` (only once unlocked) | - |
@@ -167,3 +180,9 @@ run ever logged — not something to send to a browser on the plant's connection
 `worker` and `supervisor` use the shop-floor app. `manager` and `admin` additionally reach
 `/admin/*`, enforced twice: `ProtectedRoute adminOnly` on the client and `adminOnly` middleware
 on the server.
+
+The role split is about which app you get, not about who may correct a run: `PATCH /runs/:id`
+and `DELETE /runs/:id` are open to anyone signed in, because the crews find their own mistakes
+first and used to have to wait on the office to put them right. What stands in for the check is
+the History sheet — a correction shows the run time, energy and output it is about to save, and
+a delete names the run and asks again before it goes.

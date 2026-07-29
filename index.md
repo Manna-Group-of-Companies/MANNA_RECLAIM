@@ -2018,6 +2018,13 @@
     if(s.pass>0) return '<span class="qchip shift" style="background:var(--pause);color:#2a1f06">'+s.pass+'/'+s.grades.length+' done</span>';
     return '<span class="qchip shift" style="background:var(--steel);color:#0e1a08">Untested</span>';
   }
+  /* When the batch went into the autoclave — the lab reads this to know how old the material is. */
+  function qcChargedText(b){
+    if(!b) return "";
+    var when = b.startedAt ? fmtDate(b.startedAt) : fmtDay(b.shiftDate);
+    if(!when) return "";
+    return "Charged "+when+(b.shift?" · "+b.shift+" shift":"");
+  }
   function qcGradeStrip(b){
     var s=qcBatchSummary(b);
     return '<div class="bgrade">'+s.grades.map(function(g){
@@ -2044,7 +2051,8 @@
           '<div class="bhead"><div class="l"><span class="batchref" style="font-size:16px">'+esc(b.no)+'</span>'+
             '<span class="formchip">'+esc(b.formulation||"")+'</span></div>'+qcBatchChip(s)+'</div>'+
           qcGradeStrip(b)+
-          '<div class="bhint" style="margin-top:8px">'+hint+' · tap to log per-grade results</div>'+
+          '<div class="bhint" style="margin-top:8px">'+esc(qcChargedText(b))+'</div>'+
+          '<div class="bhint" style="margin-top:2px">'+hint+' · tap to log per-grade results</div>'+
         '</div>';
       }).join("")+'</div>';
     }
@@ -2069,14 +2077,16 @@
     var grades=qcGradesFor(b);
     var rows=grades.map(function(g){
       var t=qcLatestBatchQ(no,g);
-      var status = t ? (t.verdict==="hold"?'<b style="color:var(--err)">HOLD</b>':'<b style="color:var(--ok)">Passed</b>')+((t.params&&t.params.length)?' <span class="muted">· '+t.params.length+' reading'+(t.params.length>1?'s':'')+'</span>':' <span class="muted">· no readings</span>')
+      var status = t ? (t.verdict==="hold"?'<b style="color:var(--err)">HOLD</b>':'<b style="color:var(--ok)">Passed</b>')+
+                       ' <span class="muted">· '+esc(fmtDate(t.ts))+'</span>'+
+                       ((t.params&&t.params.length)?' <span class="muted">· '+t.params.length+' reading'+(t.params.length>1?'s':'')+'</span>':' <span class="muted">· no readings</span>')
                      : '<span class="muted">Untested</span>';
       return '<button class="qgrow" data-qc-grade="'+esc(no)+'|'+esc(g)+'" style="width:100%;text-align:left;background:var(--panel2,#101820);border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;color:var(--ink)">'+
         '<span><span class="qchip q-'+esc(g)+'" style="min-width:78px;display:inline-block;text-align:center">'+esc(g)+'</span></span>'+
         '<span style="flex:1;font-size:13px">'+status+'</span><span style="color:var(--muted);font-size:18px">›</span></button>';
     }).join("");
     openSheet('<div class="sheet-h"><span class="led" style="background:radial-gradient(circle at 35% 30%,#bfe3ff,#3aa0ff)"></span><b>Batch '+esc(no)+'</b></div>'+
-      '<div class="sheet-sub">'+(b&&b.formulation?esc(b.formulation)+' · ':'')+'Each grade is tested separately — tap a grade to log its own parameters and verdict.</div>'+
+      '<div class="sheet-sub">'+(b&&b.formulation?esc(b.formulation)+' · ':'')+(qcChargedText(b)?esc(qcChargedText(b))+' · ':'')+'Each grade is tested separately — tap a grade to log its own parameters and verdict.</div>'+
       rows+
       '<div class="sheet-actions"><button class="btn ghost" data-act="close">Close</button></div>');
     sheet.querySelectorAll("[data-qc-grade]").forEach(function(el){ el.addEventListener("click",function(){ var p=el.getAttribute("data-qc-grade").split("|"); openQcGrade(p[0],p[1]); }); });

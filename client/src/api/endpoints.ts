@@ -29,6 +29,7 @@ export const endpoints = {
     root: '/runs',
     active: '/runs/active',
     pendingWeigh: '/runs/pending-weigh',
+    weighed: '/runs/weighed',
     pendingPack: '/runs/pending-pack',
     shift: '/runs/shift',
     byId: (id: string) => `/runs/${id}`,
@@ -37,12 +38,14 @@ export const endpoints = {
     weigh: (id: string) => `/runs/${id}/weigh`,
     pack: (id: string) => `/runs/${id}/pack`,
     pause: (id: string) => `/runs/${id}/pause`,
+    cancel: (id: string) => `/runs/${id}/cancel`,
     sync: '/runs/sync',
   },
   quality: {
     root: '/quality-tests',
     summary: '/quality-tests/summary',
     byId: (id: string) => `/quality-tests/${id}`,
+    report: (id: string) => `/quality-tests/${id}/report`,
   },
   dispatch: {
     root: '/dispatches',

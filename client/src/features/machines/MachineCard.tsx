@@ -142,7 +142,7 @@ export function MachineCard({
               className="pausebtn repair !w-auto px-4"
               onClick={() => onStop(run)}
             >
-              Stop ▸
+              {machine.kind === 'autoclave' ? 'Unload' : 'Stop'} ▸
             </button>
           </div>
         </div>

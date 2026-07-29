@@ -1,5 +1,6 @@
 import { crud } from './base.service.js';
 import { TABLES } from '../config/constants.js';
+import { ApiError } from '../utils/ApiError.js';
 import { DEV_MACHINES, devSeedActive } from '../config/devSeed.js';
 
 const base = crud(TABLES.machines, { defaultSort: 'sort_order' });
@@ -15,13 +16,22 @@ export const machineService = {
   ...base,
 
   async list(query = {}, filters = {}) {
-    if (devSeedActive()) {
+    if (await devSeedActive()) {
       const rows = DEV_MACHINES.filter(
         (m) => (!filters.kind || m.kind === filters.kind) && m.enabled !== false,
       );
       return { rows, total: rows.length, page: 1, limit: rows.length };
     }
     return base.list(query, filters);
+  },
+
+  async findById(id) {
+    if (await devSeedActive()) {
+      const machine = DEV_MACHINES.find((m) => m.id === id);
+      if (!machine) throw ApiError.notFound('Machine ' + id + ' not found');
+      return machine;
+    }
+    return base.findById(id);
   },
 
   /** The shop-floor screen lists live machines only - the admin side owns `enabled`. */

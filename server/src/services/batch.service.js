@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import { crud, model, wrapError } from './base.service.js';
-import { TABLES } from '../config/constants.js';
+import { crud } from './base.service.js';
+import { TABLES, VIEWS } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { parsePagination } from '../utils/pagination.js';
 
 /**
  * Batches never became their own Supabase table - the tablets keep the whole
- * plant state in one `shared_state` row (_id: "plant") and push batches inside
- * it, which is why the `batches` collection copied over empty. So this service
- * reads out of that blob and folds in the costing snapshot from
- * `special_batch_detail`, which is keyed by batch number.
+ * plant state in one `shared_state` row (id: "plant") and push batches inside
+ * its `doc` JSON. So this service reads out of that blob and folds in the
+ * costing figures from the `special_batch_detail` view, keyed by batch number.
  */
 
 const PLANT = 'plant';
 
-const detail = crud(TABLES.specialBatchDetail, { defaultSort: 'shift_date' });
+const state = crud(TABLES.sharedState, { defaultSort: 'updated_at' });
+const detail = crud(VIEWS.specialBatchDetail, { defaultSort: 'shift_date' });
 
 const iso = (value) => {
   if (value == null || value === '') return null;
@@ -50,14 +50,13 @@ const toBatch = (raw, costing) => ({
   efficiency_pct: costing?.efficiency_pct ?? null,
 });
 
-async function plantDoc() {
-  try {
-    const row = await model(TABLES.sharedState).findById(PLANT).lean();
-    return row?.doc ?? null;
-  } catch (err) {
-    throw wrapError(err);
-  }
+/** The plant blob and the version it was read at, for the write guard below. */
+async function plantState() {
+  const row = await state.findOne({ id: PLANT });
+  return { doc: row?.doc ?? null, version: row?.version ?? 0 };
 }
+
+const plantDoc = async () => (await plantState()).doc;
 
 async function costingByBatchNo() {
   const rows = await detail.all();
@@ -71,19 +70,34 @@ async function loadBatches() {
     .sort((a, b) => String(b.opened_at ?? '').localeCompare(String(a.opened_at ?? '')));
 }
 
-/** Writes the mutated batch array back into the shared-state blob. */
-async function saveBatches(batches) {
-  try {
-    await model(TABLES.sharedState).updateOne(
-      { _id: PLANT },
-      {
-        $set: { 'doc.batches': batches, updated_at: new Date().toISOString() },
-        $inc: { version: 1 },
-      },
-    );
-  } catch (err) {
-    throw wrapError(err);
+/**
+ * Rewrites the batch array inside the plant blob.
+ *
+ * Postgres stores `doc` as one JSON value, so there is no way to patch a
+ * single key of it over PostgREST - the whole document goes back. A tablet
+ * syncing at the same moment would otherwise silently lose its write, so the
+ * update is guarded on the `version` the document was read at and retried
+ * against a fresh copy when that guard misses.
+ */
+async function mutateBatches(mutate, attempt = 1) {
+  const { doc, version } = await plantState();
+  if (!doc) throw ApiError.unavailable('Plant state has not been synced yet');
+
+  const batches = mutate(doc.batches ?? []);
+  const { rows } = await state.updateWhere(
+    { id: PLANT, version },
+    {
+      doc: { ...doc, batches },
+      version: version + 1,
+      updated_at: new Date().toISOString(),
+    },
+  );
+
+  if (!rows.length) {
+    if (attempt >= 3) throw ApiError.conflict('Plant state is being written to; try again');
+    return mutateBatches(mutate, attempt + 1);
   }
+  return batches;
 }
 
 const page = (rows, query) => {
@@ -116,8 +130,6 @@ export const batchService = {
   },
 
   async create(payload) {
-    const doc = await plantDoc();
-    if (!doc) throw ApiError.unavailable('Plant state has not been synced yet');
     const row = {
       id: payload.id ?? randomUUID(),
       no: String(payload.ref ?? payload.no ?? ''),
@@ -125,24 +137,24 @@ export const batchService = {
       paired: Boolean(payload.paired),
       capacity: payload.capacity ?? null,
       qualities: payload.qualities ?? (payload.grade ? [payload.grade] : []),
-      shiftDate: payload.shiftDate ?? null,
+      shiftDate: payload.shiftDate ?? payload.shift_date ?? null,
       startedAt: Date.now(),
       autoclaveId: payload.machineId ?? payload.machine_id ?? null,
       formulation: payload.formulation ?? null,
       autoclaveDone: false,
     };
-    await saveBatches([...(doc.batches ?? []), row]);
+    await mutateBatches((batches) => [...batches, row]);
     return toBatch(row);
   },
 
   async update(id, patch) {
-    const doc = await plantDoc();
-    const batches = doc?.batches ?? [];
-    const index = batches.findIndex((b) => b.id === id);
-    if (index < 0) throw ApiError.notFound('batch ' + id + ' not found');
-    const next = [...batches];
-    next[index] = { ...next[index], ...patch };
-    await saveBatches(next);
+    await mutateBatches((batches) => {
+      const index = batches.findIndex((b) => b.id === id);
+      if (index < 0) throw ApiError.notFound('batch ' + id + ' not found');
+      const next = [...batches];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
     return batchService.findById(id);
   },
 

@@ -7,6 +7,8 @@ export const createDispatchSchema = z.object({
   dispatch_date: isoDate,
   invoice_no: z.string().optional().nullable(),
   vehicle: z.string().optional().nullable(),
+  /** One of the plant's own vehicles, rather than a hired or customer one. */
+  own_vehicle: z.boolean().optional().nullable(),
   driver: z.string().optional().nullable(),
   total_kg: z.coerce.number().min(0).optional().nullable(),
   status: z.enum(['draft', 'dispatched', 'invoiced']).default('draft'),

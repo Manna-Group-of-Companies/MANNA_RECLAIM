@@ -10,6 +10,11 @@ export interface BottomSheetProps {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /**
+   * A row of its own under the actions - where the prototype puts the one
+   * button that must not sit beside the others, like "Delete this entry".
+   */
+  after?: ReactNode;
 }
 
 /**
@@ -24,6 +29,7 @@ export function BottomSheet({
   onClose,
   children,
   footer,
+  after,
 }: BottomSheetProps) {
   useEffect(() => {
     if (!open) return;
@@ -53,6 +59,7 @@ export function BottomSheet({
         {subtitle && <div className="sheet-sub">{subtitle}</div>}
         {children}
         {footer && <div className="sheet-actions">{footer}</div>}
+        {after}
       </div>
     </>
   );

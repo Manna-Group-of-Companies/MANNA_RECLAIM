@@ -1,22 +1,27 @@
 /**
- * Creates the starting name + PIN accounts so the app can be signed into.
+ * Creates the starting name + PIN accounts in Supabase so the app can be
+ * signed into.
  *
  *   node scripts/seed-users.js [flags]
  *
  *   --dry-run    report what would change, write nothing
  *   --reset-pin  also rewrite the PIN of an account that already exists
  *
+ * Needs `public.users`, which supabase/schema.sql creates - and, because that
+ * table holds PIN hashes and is closed to the anon key, SUPABASE_SERVICE_KEY
+ * in server/.env.
+ *
  * Safe to re-run: an account whose name already exists is left alone unless
  * --reset-pin is passed, so this never clobbers a PIN someone has changed.
  * The names and PINs mirror config/devSeed.js, which is what the in-memory
- * fallback serves while MongoDB is unconfigured.
+ * fallback serves until this has been run.
  */
 import bcrypt from 'bcryptjs';
-import mongoose from 'mongoose';
+import { randomUUID } from 'node:crypto';
 import { env } from '../src/config/env.js';
 import { logger } from '../src/config/logger.js';
-import { ROLES } from '../src/config/constants.js';
-import { User } from '../src/models/user.model.js';
+import { request, op } from '../src/config/supabase.js';
+import { ROLES, TABLES } from '../src/config/constants.js';
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
@@ -29,52 +34,60 @@ const SEED_USERS = [
   { name: 'Manager', role: ROLES.MANAGER, pin: '2525' },
 ];
 
-// Matches the unique index on user.model.js, so "mathai" finds "Mathai".
-const CASE_INSENSITIVE = { locale: 'en', strength: 2 };
-
 async function seed({ name, role, pin }) {
-  const existing = await User.findOne({ name }, '_id name role')
-    .collation(CASE_INSENSITIVE)
-    .lean();
+  // `ilike` with no wildcard is the case-insensitive match the unique index on
+  // lower(name) enforces, so "mathai" finds "Mathai".
+  const { rows } = await request(TABLES.users, {
+    select: 'id,name',
+    filters: { name: op.ilike(name) },
+    limit: 1,
+  });
+  const existing = rows[0];
 
   if (existing && !RESET_PIN) return { name, action: 'skipped (already exists)' };
-
   if (DRY_RUN) return { name, action: existing ? 'would reset PIN' : 'would create' };
 
   const pin_hash = await bcrypt.hash(pin, 10);
+
   if (existing) {
-    await User.updateOne({ _id: existing._id }, { $set: { pin_hash, active: true } });
+    await request(TABLES.users, {
+      method: 'PATCH',
+      filters: { id: existing.id },
+      body: { pin_hash, active: true, updated_at: new Date().toISOString() },
+      returning: false,
+    });
     return { name, action: 'PIN reset' };
   }
 
-  await User.create({ name, role, active: true, pin_hash });
+  await request(TABLES.users, {
+    method: 'POST',
+    body: { id: randomUUID(), name, role, active: true, pin_hash },
+    returning: false,
+  });
   return { name, action: 'created' };
 }
 
 async function main() {
-  if (!env.mongo.uri) throw new Error('MONGODB_URI is not set - nothing to seed.');
-
-  await mongoose.connect(env.mongo.uri, {
-    dbName: env.mongo.dbName || undefined,
-    serverSelectionTimeoutMS: env.mongo.serverSelectionTimeoutMS,
-  });
-  logger.info('MongoDB connected [' + mongoose.connection.name + ']');
-
-  // The unique name index may not exist yet on a collection the migration created.
-  await User.syncIndexes();
+  if (!env.supabase.url || !env.supabase.key) {
+    throw new Error('Set SUPABASE_URL and a key in server/.env - nothing to seed.');
+  }
+  if (!process.env.SUPABASE_SERVICE_KEY) {
+    logger.warn('SUPABASE_SERVICE_KEY is not set - `users` is closed to the anon key.');
+  }
 
   for (const user of SEED_USERS) {
     const { name, action } = await seed(user);
     logger.info(name.padEnd(10) + action);
   }
 
-  if (DRY_RUN) logger.warn('--dry-run: no documents were written.');
+  if (DRY_RUN) logger.warn('--dry-run: no rows were written.');
   else logger.info('Done. Sign in with a seeded name and its PIN.');
 }
 
-main()
-  .catch((err) => {
-    logger.error(err.message);
-    process.exitCode = 1;
-  })
-  .finally(() => mongoose.disconnect());
+main().catch((err) => {
+  logger.error(err.message);
+  if (/schema\.sql|does not exist|Could not find/i.test(err.message)) {
+    logger.error('Run supabase/schema.sql in the Supabase SQL editor first.');
+  }
+  process.exitCode = 1;
+});

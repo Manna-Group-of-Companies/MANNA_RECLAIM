@@ -18,6 +18,10 @@ export const record = asyncHandler(async (req, res) =>
   created(res, await qualityService.record({ ...req.body, testedBy: req.body.testedBy ?? req.user?.name }), 'Test recorded'),
 );
 
+export const attachReport = asyncHandler(async (req, res) =>
+  ok(res, await qualityService.attachReport(req.params.id, req.body), 'Report attached'),
+);
+
 export const summary = asyncHandler(async (req, res) =>
   ok(res, await qualityService.summary(req.query)),
 );

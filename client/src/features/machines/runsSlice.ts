@@ -6,13 +6,19 @@ import {
   type StopRunPayload,
 } from '@/api/services/run.service';
 import { toRequestError } from '@/api/axiosClient';
-import { SACK_KG } from '@/config/constants';
+import { SACK_KG, WEIGHED_PAGE } from '@/config/constants';
 import type { Run, Shift } from '@/types/models';
 
 interface RunsState {
   active: Run[];
   /** Finished runs on a weighed machine that still owe an out-weight. */
   pendingWeigh: Run[];
+  /** Runs already weighed, newest first - the Weigh tab's correction list. */
+  weighed: Run[];
+  /** How many there are altogether, so the tab can say "latest 20 of 414". */
+  weighedTotal: number;
+  /** Whether `weighed` holds the whole record or only the newest page of it. */
+  weighedAll: boolean;
   /** Weighed runs that still have full sacks to bag. */
   pendingPack: Run[];
   shift: Run[];
@@ -29,6 +35,9 @@ interface RunsState {
 const initialState: RunsState = {
   active: [],
   pendingWeigh: [],
+  weighed: [],
+  weighedTotal: 0,
+  weighedAll: false,
   pendingPack: [],
   shift: [],
   shiftDate: null,
@@ -60,6 +69,24 @@ export const fetchPendingWeigh = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       return (await runService.listPendingWeigh({ limit: 100 })).rows;
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+/**
+ * The weighed runs behind the Weigh tab's correction list. `all` asks for the
+ * plant's whole record rather than the newest page - what Show all sends.
+ */
+export const fetchWeighed = createAsyncThunk(
+  'runs/weighed',
+  async ({ all = false }: { all?: boolean } = {}, { rejectWithValue }) => {
+    try {
+      const { rows, meta } = await runService.listWeighed(
+        all ? { all: true } : { limit: WEIGHED_PAGE },
+      );
+      return { rows, total: meta?.total ?? rows.length, all };
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -112,6 +139,18 @@ export const stopRun = createAsyncThunk(
   },
 );
 
+export const cancelRun = createAsyncThunk(
+  'runs/cancel',
+  async (id: string, { rejectWithValue }) => {
+    try {
+      await runService.cancel(id);
+      return id;
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 export const pauseRun = createAsyncThunk(
   'runs/pause',
   async ({ id, paused }: { id: string; paused: boolean }, { rejectWithValue }) => {
@@ -125,9 +164,12 @@ export const pauseRun = createAsyncThunk(
 
 export const weighRun = createAsyncThunk(
   'runs/weigh',
-  async ({ id, outWeight }: { id: string; outWeight: number }, { rejectWithValue }) => {
+  async (
+    { id, outWeight, entries }: { id: string; outWeight: number; entries?: number[] },
+    { rejectWithValue },
+  ) => {
     try {
-      return await runService.weigh(id, outWeight);
+      return await runService.weigh(id, outWeight, entries);
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -183,6 +225,14 @@ const runsSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+      .addCase(fetchWeighed.fulfilled, (state, action) => {
+        state.weighed = action.payload.rows;
+        state.weighedTotal = action.payload.total;
+        state.weighedAll = action.payload.all;
+      })
+      .addCase(fetchWeighed.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
       .addCase(fetchPendingPack.fulfilled, (state, action) => {
         state.pendingPack = action.payload;
       })
@@ -202,6 +252,10 @@ const runsSlice = createSlice({
       .addCase(startRun.fulfilled, (state, action) => {
         state.active.push(action.payload);
       })
+      .addCase(cancelRun.fulfilled, (state, action) => {
+        // The row is gone, so the machine goes straight back to idle.
+        state.active = state.active.filter((r) => r.id !== action.payload);
+      })
       .addCase(pauseRun.fulfilled, (state, action) => {
         state.active = state.active.map((r) => (r.id === action.payload.id ? action.payload : r));
       })
@@ -218,8 +272,24 @@ const runsSlice = createSlice({
         state.pendingWeigh = state.pendingWeigh.filter((r) => r.id !== run.id);
         state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
         // Weighing is what makes a run packable, so it moves queue rather than
-        // leaving the Packing tab a refresh behind.
-        if (stillPacking(run)) state.pendingPack.unshift(run);
+        // leaving the Packing tab a refresh behind. A correction to a run that
+        // is already there replaces it - it must not be listed twice.
+        const packing = state.pendingPack.some((r) => r.id === run.id);
+        if (packing) {
+          state.pendingPack = stillPacking(run)
+            ? state.pendingPack.map((r) => (r.id === run.id ? run : r))
+            : state.pendingPack.filter((r) => r.id !== run.id);
+        } else if (stillPacking(run)) {
+          state.pendingPack.unshift(run);
+        }
+        // Same for the weighed list this correction may have come from: a run
+        // weighed for the first time joins it and lifts the count with it.
+        if (state.weighed.some((r) => r.id === run.id)) {
+          state.weighed = state.weighed.map((r) => (r.id === run.id ? run : r));
+        } else {
+          state.weighed.unshift(run);
+          state.weighedTotal += 1;
+        }
       })
       .addCase(packRun.fulfilled, (state, action) => {
         const run = action.payload;

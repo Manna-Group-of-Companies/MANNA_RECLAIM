@@ -1,12 +1,19 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { qualityService, type RecordTestPayload } from '@/api/services/quality.service';
+import {
+  qualityService,
+  type RecordTestPayload,
+  type ReportPayload,
+} from '@/api/services/quality.service';
 import { batchService } from '@/api/services/batch.service';
 import { toRequestError } from '@/api/axiosClient';
+import { batchQc } from './qc';
 import type { Batch, QualityGradeSummary, QualityTest } from '@/types/models';
 
 interface QualityState {
   tests: QualityTest[];
-  /** Open batches with no verdict yet - what the Quality tab works through. */
+  /** Every open batch, tested or not - the Quality tab lists them all. */
+  batches: Batch[];
+  /** Those with a grade still awaiting a verdict - the tab's badge counts these. */
   pending: Batch[];
   summary: QualityGradeSummary[];
   /** Batch numbers the lab has put on hold. Dispatch warns about these. */
@@ -17,6 +24,7 @@ interface QualityState {
 
 const initialState: QualityState = {
   tests: [],
+  batches: [],
   pending: [],
   summary: [],
   held: [],
@@ -41,9 +49,10 @@ export const fetchQualityTests = createAsyncThunk(
  * Which open batches still need the lab.
  *
  * There is no "untested batches" endpoint, so this pairs the open batches
- * against the tests on record and keeps the ones nobody has filed a verdict
- * for. Doing it here rather than per-component means the tab badge and the
- * page always agree.
+ * against the tests on record and works out where each grade stands. A batch is
+ * pending while any one of its grades is untested, and held once the verdict
+ * that stands for any grade is a hold. Doing it here rather than per-component
+ * means the tab badge, the page and Dispatch's warning always agree.
  */
 export const fetchPendingQuality = createAsyncThunk(
   'quality/pending',
@@ -53,12 +62,12 @@ export const fetchPendingQuality = createAsyncThunk(
         batchService.listOpen({ limit: 100 }),
         qualityService.list({ limit: 200 }),
       ]);
-      const tested = new Set(tests.map((t) => String(t.batch_no ?? t.batch_id ?? '')));
-      const held = tests.filter((t) => t.verdict === 'hold').map((t) => String(t.batch_no ?? ''));
+      const state = batches.map((batch) => ({ batch, qc: batchQc(batch, tests) }));
       return {
-        pending: batches.filter((b) => !tested.has(String(b.ref))),
+        batches,
         tests,
-        held: [...new Set(held.filter(Boolean))],
+        pending: state.filter(({ qc }) => !qc.allDone).map(({ batch }) => batch),
+        held: state.filter(({ qc }) => qc.anyHold).map(({ batch }) => String(batch.ref)),
       };
     } catch (err) {
       return rejectWithValue(fail(err));
@@ -90,6 +99,18 @@ export const recordTest = createAsyncThunk(
   },
 );
 
+/** The lab's report, uploaded once the verdict it belongs to is on file. */
+export const attachReport = createAsyncThunk(
+  'quality/report',
+  async (payload: ReportPayload, { rejectWithValue }) => {
+    try {
+      return await qualityService.attachReport(payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 const qualitySlice = createSlice({
   name: 'quality',
   initialState,
@@ -109,6 +130,7 @@ const qualitySlice = createSlice({
         state.error = action.payload as string;
       })
       .addCase(fetchPendingQuality.fulfilled, (state, action) => {
+        state.batches = action.payload.batches;
         state.pending = action.payload.pending;
         state.tests = action.payload.tests;
         state.held = action.payload.held;
@@ -121,6 +143,10 @@ const qualitySlice = createSlice({
         if (action.payload.verdict === 'hold' && action.payload.batch_no) {
           state.held = [...new Set([...state.held, action.payload.batch_no])];
         }
+      })
+      .addCase(attachReport.fulfilled, (state, action) => {
+        const at = state.tests.findIndex((t) => t.id === action.payload.id);
+        if (at >= 0) state.tests[at] = action.payload;
       });
   },
 });

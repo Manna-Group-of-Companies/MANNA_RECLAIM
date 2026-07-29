@@ -37,12 +37,11 @@ export const BEARING_INTERVAL_H = { grind: 2, refiner: 3, prerefiner: 3, coarse:
 export const BUSH_MACHINE_IDS = ['PR1', 'R1', 'R2', 'GRD_K'];
 export const BEARING_POSITIONS = ['1', '2', '3', '4'];
 
-/** MongoDB collection names. Map to models in src/models/index.js. */
+/** Supabase table names. Their columns and keys live in src/config/tables.js. */
 export const TABLES = {
   users: 'users',
   shifts: 'shifts',
   machines: 'machines',
-  batches: 'batches',
   runs: 'runs',
   dispatches: 'dispatches',
   dispatchLoads: 'dispatch_loads',
@@ -51,13 +50,13 @@ export const TABLES = {
   bearingLogs: 'bearing_logs',
   customers: 'customers',
   rates: 'rates',
-  vehicles: 'vehicles',
-  drivers: 'drivers',
 
-  // ---- collections the tablets/Supabase migration actually populated ----
   // The prototype kept batches, leftouts and the seq counter inside one
-  // "plant" blob rather than as their own table, so batch reads go through it.
+  // "plant" blob rather than as their own table, so batch reads go through it -
+  // there is no `batches` table in the project, by design.
   sharedState: 'shared_state',
+  liveState: 'live_state',
+  sessions: 'sessions',
   customerRates: 'customer_rates',
   priceList: 'price_list',
   materialRates: 'material_rates',
@@ -67,13 +66,29 @@ export const TABLES = {
   machineTargets: 'machine_targets',
   // Why a shift under-performed, written by the back office when it flags a dip.
   efficiencyNotes: 'efficiency_notes',
-  // Snapshots of the old Postgres views - already aggregated, so the report
-  // service reads them instead of recomputing from raw runs.
+};
+
+/**
+ * Postgres views. Already aggregated by the database, so the report and
+ * costing services read them instead of recomputing from raw runs. Read-only:
+ * Postgres rebuilds them from the tables above on every query.
+ */
+export const VIEWS = {
   machineShiftEfficiency: 'machine_shift_efficiency',
   shiftActivity: 'shift_activity',
   shiftCosting: 'shift_costing',
+  coarseShiftCosting: 'coarse_shift_costing',
   specialBatchDetail: 'special_batch_detail',
+  specialBatchQuality: 'special_batch_quality',
   coarseShiftDetail: 'coarse_shift_detail',
+  batchCostingSpecial: 'batch_costing_special',
+  monthlyQualityCosting: 'monthly_quality_costing',
+  customerEffectiveRate: 'customer_effective_rate',
+  formulationRm: 'formulation_rm',
+  bearingTempLog: 'bearing_temp_log',
+  qualityLatest: 'quality_latest',
+  dispatchValue: 'dispatch_value',
+  dispatchRevenueByGrade: 'dispatch_revenue_by_grade',
 };
 
 /** Machines whose output is weighed after the run, from the prototype. */
@@ -107,4 +122,4 @@ export const COST_RATE_KEYS = [
   'ohManufacturingPerMonth', 'ohDepreciationPerMonth', 'interestPctPerAnnum',
 ];
 
-export default { ROLES, SHIFTS, QUALITIES, DISPATCH_GRADES, MACHINE_KINDS, PRICE_LIST, TABLES };
+export default { ROLES, SHIFTS, QUALITIES, DISPATCH_GRADES, MACHINE_KINDS, PRICE_LIST, TABLES, VIEWS };

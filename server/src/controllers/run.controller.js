@@ -7,6 +7,7 @@ export const list = asyncHandler(async (req, res) =>
     machine_id: req.query.machineId,
     shift_date: req.query.date,
     shift: req.query.shift,
+    batch_no: req.query.batch ?? req.query.batchNo,
     status: req.query.status,
   })),
 );
@@ -18,6 +19,11 @@ export const active = asyncHandler(async (req, res) =>
 /** Finished runs on a weighed machine that still have no out-weight. */
 export const pendingWeigh = asyncHandler(async (req, res) =>
   paginated(res, await runService.listPendingWeigh(req.query)),
+);
+
+/** Runs already weighed, newest first - the Weigh tab's correction list. */
+export const weighed = asyncHandler(async (req, res) =>
+  paginated(res, await runService.listWeighed(req.query)),
 );
 
 /** Weighed runs that still have full sacks left to bag. */
@@ -45,11 +51,30 @@ export const stop = asyncHandler(async (req, res) =>
 );
 
 export const weigh = asyncHandler(async (req, res) =>
-  ok(res, await runService.weigh(req.params.id, req.body.outWeight), 'Weight recorded'),
+  ok(
+    res,
+    await runService.weigh(req.params.id, req.body.outWeight, req.body.entries),
+    'Weight recorded',
+  ),
 );
 
 export const pack = asyncHandler(async (req, res) =>
   ok(res, await runService.pack(req.params.id, req.body), 'Packing recorded'),
+);
+
+/** Corrects a run already on record (the back office's History tab). */
+export const update = asyncHandler(async (req, res) =>
+  ok(res, await runService.edit(req.params.id, req.body), 'Run updated'),
+);
+
+/** Discards a run started by mistake - nothing is logged against the machine. */
+export const cancel = asyncHandler(async (req, res) =>
+  ok(res, await runService.cancel(req.params.id), 'Run cancelled'),
+);
+
+/** Removes a logged run from the record for good (the History tab's delete). */
+export const remove = asyncHandler(async (req, res) =>
+  ok(res, await runService.discard(req.params.id), 'Run deleted'),
 );
 
 export const pause = asyncHandler(async (req, res) =>

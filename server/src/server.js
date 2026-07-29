@@ -1,31 +1,34 @@
 import { createApp } from './app.js';
 import { env, assertEnv } from './config/env.js';
-import { connectDb, disconnectDb } from './config/db.js';
+import { dbInfo, verifySchema } from './config/supabase.js';
+import { writableRegistry } from './config/tables.js';
 import { logger } from './config/logger.js';
 
 assertEnv();
 
-try {
-  await connectDb();
-} catch (err) {
-  logger.error('MongoDB connection failed:', err.message);
-  // In production a database-less API is useless; in development we keep going
-  // so the dev seed can serve the in-memory accounts and machines.
-  if (env.isProd) process.exit(1);
-  logger.warn('Starting without a database - data routes will return 503.');
+/**
+ * Supabase is reached over HTTP, so there is no connection to open at boot.
+ * What is worth checking is that the project actually has the tables and
+ * columns this server writes to - a missing one would otherwise surface as a
+ * 400 on whichever screen happened to touch it first.
+ */
+if (env.supabase.verifySchema) {
+  const problems = await verifySchema(writableRegistry).catch((err) => {
+    logger.error('Supabase schema check failed:', err.message);
+    return [];
+  });
+  if (!problems.length) logger.info('Supabase schema OK');
 }
 
 const app = createApp();
 const server = app.listen(env.port, () => {
+  logger.info('Database: Supabase [' + dbInfo().host + ']');
   logger.info('API listening on http://localhost:' + env.port + env.apiPrefix + ' [' + env.nodeEnv + ']');
 });
 
 const shutdown = (signal) => () => {
   logger.info(signal + ' received, closing server');
-  server.close(async () => {
-    await disconnectDb().catch(() => {});
-    process.exit(0);
-  });
+  server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10000).unref();
 };
 

@@ -13,10 +13,16 @@ export const apiLimiter = rateLimit({
   handler: json,
 });
 
-/** Tighter budget for PIN / credential endpoints. */
+/**
+ * Tighter budget for PIN / credential endpoints. The point is to slow down
+ * guessing, so a correct sign-in costs nothing — only failures count against
+ * the window. Otherwise a supervisor logging in and out through a shift, or a
+ * dev restarting the client, burns the budget and locks themselves out.
+ */
 export const authLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 20,
+  windowMs: env.rateLimit.authWindowMs,
+  max: env.rateLimit.authMax,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   handler: json,

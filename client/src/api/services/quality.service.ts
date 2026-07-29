@@ -13,6 +13,16 @@ export interface RecordTestPayload {
   shiftDate?: string;
   shift?: Shift;
   remarks?: string | null;
+  /** A report already on file, kept when a grade is tested again. */
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
+}
+
+/** The file itself, handed over as a data URL - see attachReport below. */
+export interface ReportPayload {
+  id: string;
+  name: string;
+  dataUrl: string;
 }
 
 export const qualityService = {
@@ -24,6 +34,19 @@ export const qualityService = {
 
   async record(payload: RecordTestPayload): Promise<QualityTest> {
     const res = await axiosClient.post<ApiEnvelope<QualityTest>>(endpoints.quality.root, payload);
+    return res.data.data;
+  },
+
+  /**
+   * Hangs the lab's report on a test already filed. The file goes up as a data
+   * URL - the sheets read it with FileReader, and the server is the only side
+   * holding a storage key.
+   */
+  async attachReport({ id, name, dataUrl }: ReportPayload): Promise<QualityTest> {
+    const res = await axiosClient.post<ApiEnvelope<QualityTest>>(endpoints.quality.report(id), {
+      name,
+      dataUrl,
+    });
     return res.data.data;
   },
 

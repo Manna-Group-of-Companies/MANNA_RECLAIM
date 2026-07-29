@@ -60,6 +60,8 @@ export function DispatchPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [draft, setDraft] = useState<Item>(blankItem);
   const [customer, setCustomer] = useState('');
+  /** Ours, or hired / the customer's - the plant bills the two differently. */
+  const [ownVehicle, setOwnVehicle] = useState(true);
   const [vehicle, setVehicle] = useState('');
   const [driver, setDriver] = useState('');
   const [saving, setSaving] = useState(false);
@@ -70,6 +72,22 @@ export function DispatchPage() {
   }, [dispatch]);
 
   const customerList = customers.length ? customers : CUSTOMERS;
+
+  /**
+   * The vehicles and drivers already on record, offered as suggestions. Our own
+   * lorries come round again and again, so the yard types a number once and
+   * picks it from then on; a hired vehicle is usually new every time.
+   */
+  const seen = useMemo(() => {
+    const own = new Set<string>();
+    const hired = new Set<string>();
+    const drivers = new Set<string>();
+    for (const load of loads) {
+      if (load.vehicle) (load.own_vehicle ? own : hired).add(load.vehicle);
+      if (load.driver) drivers.add(load.driver);
+    }
+    return { own: [...own], hired: [...hired], drivers: [...drivers] };
+  }, [loads]);
 
   const totals = useMemo(() => {
     let weight = 0;
@@ -99,6 +117,15 @@ export function DispatchPage() {
     setItems([]);
     setDraft(blankItem);
     setCustomer('');
+    setOwnVehicle(true);
+    setVehicle('');
+    setDriver('');
+  };
+
+  /** Switching sides clears the pair - a hired number is not one of ours. */
+  const setVehicleMode = (own: boolean) => {
+    if (own === ownVehicle) return;
+    setOwnVehicle(own);
     setVehicle('');
     setDriver('');
   };
@@ -112,6 +139,16 @@ export function DispatchPage() {
       notify('Pick a customer', 'warn');
       return;
     }
+    if (!vehicle.trim()) {
+      notify(ownVehicle ? 'Pick the vehicle' : 'Enter the vehicle number', 'warn');
+      return;
+    }
+    // Our own lorry always leaves with one of our drivers; on a hired vehicle
+    // the driver is the customer's to name, so it stays optional.
+    if (ownVehicle && !driver.trim()) {
+      notify('Pick the driver for our vehicle', 'warn');
+      return;
+    }
     setSaving(true);
     // The money is left to the server: it prices each row off the rate card
     // when it reads it back, so a later rate correction reprices the history.
@@ -123,6 +160,7 @@ export function DispatchPage() {
             grade: item.grade,
             dispatch_date: todayISO(),
             vehicle: vehicle.trim() || null,
+            own_vehicle: ownVehicle,
             driver: driver.trim() || null,
             total_kg: itemKg(item),
             status: 'dispatched',
@@ -182,8 +220,11 @@ export function DispatchPage() {
               </div>
               <div className="bhint">
                 {load.vehicle ?? 'no vehicle'}
-                {load.driver ? ` · ${load.driver}` : ''} · {kg(load.total_kg)} ·{' '}
-                {dayMonth(load.dispatch_date)}
+                {load.driver ? ` · ${load.driver}` : ''}
+                {load.own_vehicle != null && (
+                  <span className="muted"> ({load.own_vehicle ? 'our vehicle' : 'hired'})</span>
+                )}{' '}
+                · {kg(load.total_kg)} · {dayMonth(load.dispatch_date)}
               </div>
             </div>
           ))}
@@ -314,17 +355,45 @@ export function DispatchPage() {
         </PickGrid>
 
         <SheetLabel>Vehicle</SheetLabel>
+        <div className="mb-2.5 flex gap-2">
+          <Pick
+            className="flex-1"
+            title="Our vehicle"
+            selected={ownVehicle}
+            onClick={() => setVehicleMode(true)}
+          />
+          <Pick
+            className="flex-1"
+            title="Hired / customer"
+            selected={!ownVehicle}
+            onClick={() => setVehicleMode(false)}
+          />
+        </div>
+        <datalist id="dl-vehicles">
+          {(ownVehicle ? seen.own : seen.hired).map((no) => (
+            <option key={no} value={no} />
+          ))}
+        </datalist>
+        <datalist id="dl-drivers">
+          {seen.drivers.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
         <div className="field-inline">
           <TextField
-            label="Vehicle number"
-            placeholder="e.g. KL-43-TT-9090"
+            label={ownVehicle ? 'Our vehicle' : 'Vehicle number'}
+            list="dl-vehicles"
+            autoComplete="off"
+            placeholder={ownVehicle ? 'e.g. KL-17-AB-1234' : 'e.g. KL-43-TT-9090'}
             value={vehicle}
             onChange={(e) => setVehicle(e.target.value.toUpperCase())}
             fieldClassName="!mb-0"
           />
           <TextField
             label="Driver"
-            note="opt."
+            note={ownVehicle ? undefined : 'opt.'}
+            list="dl-drivers"
+            autoComplete="off"
             placeholder="driver name"
             value={driver}
             onChange={(e) => setDriver(e.target.value)}

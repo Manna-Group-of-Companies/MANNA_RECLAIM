@@ -1,4 +1,4 @@
-import { crud } from './base.service.js';
+import { crud, op } from './base.service.js';
 import {
   TABLES,
   BEARING_INTERVAL_H,
@@ -75,8 +75,8 @@ export const maintenanceService = {
   async list(query = {}, filters = {}) {
     const { status, ...rest } = filters;
     const criteria = { ...rest };
-    if (status === 'open') criteria.repaired_at = { $eq: null };
-    if (status === 'closed') criteria.repaired_at = { $ne: null };
+    if (status === 'open') criteria.repaired_at = op.isNull();
+    if (status === 'closed') criteria.repaired_at = op.notNull();
     return decorateList(await base.list(query, criteria));
   },
 

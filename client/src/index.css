@@ -775,6 +775,37 @@
     font-family: var(--mono);
     display: block;
   }
+  /* Divider between the weigh queue and the scale record under it, carrying
+     how much of that record is on screen and the way to see the rest. */
+  .wsec {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 22px 2px 10px;
+  }
+  .wsec b {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .wsec small {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+  .wsec button {
+    flex: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--elec);
+    text-decoration: underline;
+  }
   .weighlist {
     display: flex;
     flex-direction: column;
@@ -922,6 +953,30 @@
     flex-wrap: wrap;
     gap: 6px;
     margin-top: 9px;
+  }
+  /* One grade of a batch inside the QC sheet: its chip, where it stands, in. */
+  .qcrow {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    padding: 11px 13px;
+    margin-bottom: 8px;
+    color: var(--ink);
+    text-align: left;
+    font-size: 13px;
+  }
+  .qcrow:active {
+    transform: scale(0.99);
+  }
+  .qcrow .chev {
+    color: var(--ink-faint);
+    font-size: 18px;
+    flex: none;
   }
 
   /* ---------- bearing schedule ---------- */
@@ -1117,6 +1172,31 @@
     font-family: var(--mono);
     pointer-events: none;
   }
+  /* The arithmetic under a meter field: end − start = what was used. */
+  .diffout {
+    display: none;
+    margin: 7px 0 2px;
+    font-size: 12.5px;
+    color: var(--steel);
+    background: #10201a;
+    border: 1px solid #244338;
+    border-radius: 9px;
+    padding: 7px 11px;
+  }
+  .diffout.show {
+    display: block;
+  }
+  .diffout b {
+    color: var(--ink);
+  }
+  .diffout.bad {
+    background: #2c1816;
+    border-color: #5a2c1d;
+    color: #f0b3ab;
+  }
+  .diffout.bad b {
+    color: var(--err);
+  }
   .formwarn {
     display: none;
     margin: 2px 0 4px;
@@ -1184,14 +1264,17 @@
   }
 
   /* ---------- history ---------- */
+  /* Two pickers to a row: four of them side by side would squeeze the day and
+     batch numbers off the end of a phone. */
   .histbar {
-    display: flex;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
     margin: 0 2px 12px;
   }
   .histbar .field {
-    flex: 1;
     margin-bottom: 0;
+    min-width: 0;
   }
   .histsum {
     background: #10201a;
@@ -1237,6 +1320,40 @@
   .synced.yes {
     background: var(--ok);
     box-shadow: 0 0 6px -1px var(--ok);
+  }
+  /* The run detail behind a history row. A run carries more than the `.ro`
+     cards can show without filling the sheet, so it reads as a dense list:
+     what it is on the left, what it reads - in the mono the figures elsewhere
+     wear - on the right. */
+  .detrow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 9px 2px;
+    border-bottom: 1px solid #2a2519;
+  }
+  .detrow:last-child {
+    border-bottom: none;
+  }
+  .detrow .k {
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    flex: none;
+  }
+  .detrow .v {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    text-align: right;
+  }
+  .detrow .v small {
+    display: block;
+    font-family: inherit;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    margin-top: 2px;
   }
 
   /* ---------- reports ---------- */

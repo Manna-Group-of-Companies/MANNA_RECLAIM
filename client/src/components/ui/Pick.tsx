@@ -13,10 +13,24 @@ export interface PickProps {
   sub?: ReactNode;
   /** `cap` renders the title in mono at 20px, for autoclave capacities. */
   tone?: 'default' | 'q' | 'cap';
+  /**
+   * A colour swatch before the title, the same one the grade wears on its chip
+   * and in the batch grid - the crews pick a grade by its colour before they
+   * read its name.
+   */
+  dot?: string;
   className?: string;
 }
 
-export function Pick({ selected = false, onClick, title, sub, tone = 'default', className }: PickProps) {
+export function Pick({
+  selected = false,
+  onClick,
+  title,
+  sub,
+  tone = 'default',
+  dot,
+  className,
+}: PickProps) {
   return (
     <button
       type="button"
@@ -24,7 +38,10 @@ export function Pick({ selected = false, onClick, title, sub, tone = 'default', 
       aria-pressed={selected}
       className={cn('pick', tone !== 'default' && tone, selected && 'sel', className)}
     >
-      <b>{title}</b>
+      <b>
+        {dot && <span className="qdot" style={{ background: dot }} />}
+        {title}
+      </b>
       {sub && <small>{sub}</small>}
     </button>
   );

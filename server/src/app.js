@@ -5,7 +5,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 
 import { env } from './config/env.js';
-import { isDbReady } from './config/db.js';
+import { dbInfo } from './config/supabase.js';
 import routes from './routes/index.js';
 import { requestLogger } from './middlewares/requestLogger.middleware.js';
 import { apiLimiter } from './middlewares/rateLimiter.middleware.js';
@@ -36,13 +36,20 @@ export function createApp() {
     }),
   );
   app.use(compression());
-  app.use(express.json({ limit: '2mb' }));
+  // A lab report is a phone photo or a PDF, handed over as a base64 data URL -
+  // nothing else the API takes comes near that size, so only that one route
+  // gets the larger ceiling (8 MB of file is ~11 MB of base64).
+  const standardBody = express.json({ limit: '2mb' });
+  const reportBody = express.json({ limit: '12mb' });
+  app.use((req, res, next) =>
+    (/\/quality-tests\/[^/]+\/report$/.test(req.path) ? reportBody : standardBody)(req, res, next),
+  );
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
   app.use(requestLogger);
 
   app.get('/health', (_req, res) =>
-    res.json({ success: true, status: 'up', env: env.nodeEnv, db: isDbReady() }),
+    res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo() }),
   );
 
   app.use(env.apiPrefix, apiLimiter, routes);

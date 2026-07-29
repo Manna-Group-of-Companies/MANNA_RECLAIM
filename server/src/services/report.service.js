@@ -1,6 +1,7 @@
 import { crud } from './base.service.js';
-import { TABLES, FIREWOOD_KG_PER_LOAD } from '../config/constants.js';
+import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD } from '../config/constants.js';
 import { rateService } from './rate.service.js';
+import { fromRow as dispatchFromRow } from './dispatch.service.js';
 
 /**
  * Everything here reads the columns the tablets actually write.
@@ -13,11 +14,11 @@ import { rateService } from './rate.service.js';
  */
 
 const runs = crud(TABLES.runs, { defaultSort: 'shift_date' });
-const machineEfficiency = crud(TABLES.machineShiftEfficiency, { defaultSort: 'shift_date' });
-const shiftCosting = crud(TABLES.shiftCosting, { defaultSort: 'shift_date' });
-const specialBatches = crud(TABLES.specialBatchDetail, { defaultSort: 'shift_date' });
-const coarseShifts = crud(TABLES.coarseShiftDetail, { defaultSort: 'shift_date' });
-const dispatches = crud(TABLES.dispatches, { defaultSort: 'dispatch_date' });
+const machineEfficiency = crud(VIEWS.machineShiftEfficiency, { defaultSort: 'shift_date' });
+const shiftCosting = crud(VIEWS.shiftCosting, { defaultSort: 'shift_date' });
+const specialBatches = crud(VIEWS.specialBatchDetail, { defaultSort: 'shift_date' });
+const coarseShifts = crud(VIEWS.coarseShiftDetail, { defaultSort: 'shift_date' });
+const dispatches = crud(TABLES.dispatches, { defaultSort: 'dispatched_at' });
 
 const round = (n, d = 2) => +Number(n || 0).toFixed(d);
 const sum = (rows, field) => rows.reduce((s, r) => s + Number(r[field] || 0), 0);
@@ -43,18 +44,21 @@ const monthOf = (value) => (value ? String(value).slice(0, 7) : '');
 
 export const reportService = {
   /**
-   * Which days and machines the run history actually covers. The back office
-   * needs it to fill its pickers, and deriving it here means the browser never
-   * has to download every run to find out what months exist.
+   * Which days, machines and batches the run history actually covers. Both the
+   * back office and the shop-floor History tab need it to fill their pickers,
+   * and deriving it here means the browser never has to download every run to
+   * find out what months exist.
    */
   async runFilters() {
     const rows = await runs.all({}, { sort: 'shift_date' });
     const days = new Set();
     const machines = new Map();
     const shifts = new Set();
+    const batches = new Set();
     for (const r of rows) {
       if (r.shift_date) days.add(r.shift_date);
       if (r.shift) shifts.add(r.shift);
+      if (r.batch_no) batches.add(String(r.batch_no));
       if (r.machine_id && !machines.has(r.machine_id)) {
         machines.set(r.machine_id, r.machine ?? r.machine_id);
       }
@@ -63,6 +67,14 @@ export const reportService = {
       days: [...days].sort().reverse(),
       shifts: [...shifts].sort(),
       machines: [...machines].map(([id, name]) => ({ id, name })).sort((a, b) => (a.id < b.id ? -1 : 1)),
+      // Newest batch first, numerically where the number is one - the crews
+      // count batches up, so #128 belongs above #99 rather than under it.
+      batches: [...batches].sort((a, b) => {
+        const na = parseFloat(a);
+        const nb = parseFloat(b);
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) return nb - na;
+        return a < b ? 1 : -1;
+      }),
     };
   },
 
@@ -193,12 +205,13 @@ export const reportService = {
 
     let revenue = 0;
     let dispatched = 0;
-    for (const d of dispatchRows) {
-      const date = d.dispatch_date ?? d.dispatched_at?.slice(0, 10);
+    for (const raw of dispatchRows) {
+      const d = dispatchFromRow(raw);
+      const date = d.dispatch_date;
       if (from && date < from) continue;
       if (to && date > to) continue;
-      const kgs = Number(d.total_kg ?? d.weight_kg ?? 0);
-      const { rate } = await rateService.rateForAsync(d.customer, d.grade ?? d.quality);
+      const kgs = Number(d.total_kg ?? 0);
+      const { rate } = await rateService.rateForAsync(d.customer, d.grade);
       revenue += kgs * Number(rate || 0);
       dispatched += kgs;
     }

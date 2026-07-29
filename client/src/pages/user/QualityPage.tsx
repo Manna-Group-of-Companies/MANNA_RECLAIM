@@ -1,45 +1,94 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
+  attachReport,
   fetchPendingQuality,
   fetchQualitySummary,
   recordTest,
 } from '@/features/quality/qualitySlice';
+import { batchQc, batchQcChip, type BatchQc, type GradeStatus } from '@/features/quality/qc';
 import {
   BatchRef,
   BottomSheet,
   Button,
   EmptyState,
+  FieldRow,
   FormChip,
   PageLoader,
+  Pick,
   QualityChip,
   SheetLabel,
   TextAreaField,
   TextField,
   ViewHead,
 } from '@/components/ui';
-import { QC_PARAMS, QUALITIES, SUPERVISORS } from '@/config/constants';
+import { QC_PARAM_SUGGEST, QC_REPORT_MAX_BYTES, SUPERVISORS } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
-import { currentShift, dayMonth, lastNDays, todayISO } from '@/utils/date';
+import { currentShift, dayLong, dayMonth, lastNDays, todayISO } from '@/utils/date';
 import { cn } from '@/utils/cn';
-import type { Batch, Quality, Verdict } from '@/types/models';
+import type { Batch, Quality, QualityParam, QualityTest, Verdict } from '@/types/models';
 
 /**
- * The lab's tab. A verdict is filed per grade on a batch: pass, or hold. A
- * hold does not block anything by itself - it flags the batch on Dispatch so
+ * The lab's tab. A batch is tested grade by grade - each one gets its own
+ * readings, its own verdict and its own report - so the tab opens on the
+ * batches, a batch opens on its grades, and a grade opens on the test itself.
+ *
+ * A hold does not block anything by itself: it flags the batch on Dispatch so
  * whoever is loading the vehicle has to make the call knowingly.
  */
+
+/** The test being written up, until it is filed. */
+interface Draft {
+  batch: Batch;
+  grade: Quality;
+  params: QualityParam[];
+  verdict: Verdict;
+  testedBy: string;
+  notes: string;
+  /** A report already on file - kept unless a new file replaces it. */
+  attachmentUrl: string;
+  attachmentName: string;
+  file: { name: string; type: string; dataUrl: string } | null;
+}
+
+const emptyEntry = { name: '', value: '', unit: '' };
+
+/** When the batch went into the autoclave - how old the material is. */
+const chargedText = (batch: Batch) => {
+  const when = batch.opened_at ? dayMonth(batch.opened_at) : batch.shift_date ? dayLong(batch.shift_date) : null;
+  return [batch.machine_id, when && `charged ${when}`].filter(Boolean).join(' · ');
+};
+
+const readings = (test: QualityTest) => {
+  const count = test.params?.length ?? 0;
+  return count ? `${count} reading${count > 1 ? 's' : ''}` : 'no readings';
+};
+
+const chipStyle = (tone: ReturnType<typeof batchQcChip>['tone']) =>
+  tone === 'ok'
+    ? { background: 'var(--ok)', color: '#06210a' }
+    : tone === 'part'
+      ? { background: 'var(--pause)', color: '#2a1f06' }
+      : undefined;
+
+/** "2 grades awaiting test", "All grades passed", "1 grade on hold". */
+const batchHint = (qc: BatchQc) => {
+  if (!qc.allDone) return `${qc.untested} grade${qc.untested > 1 ? 's' : ''} awaiting test`;
+  if (qc.anyHold) return `${qc.hold} grade${qc.hold > 1 ? 's' : ''} on hold`;
+  return 'All grades passed';
+};
+
 export function QualityPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const { pending, tests, summary, loading } = useAppSelector((s) => s.quality);
+  const { batches, pending, tests, summary, loading } = useAppSelector((s) => s.quality);
   const supervisor = useAppSelector((s) => s.ui.supervisor);
 
+  /** The batch whose grades are listed, and the grade being written up. */
   const [target, setTarget] = useState<Batch | null>(null);
-  const [verdicts, setVerdicts] = useState<Partial<Record<Quality, Verdict>>>({});
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState('');
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [entry, setEntry] = useState(emptyEntry);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -47,59 +96,119 @@ export function QualityPage() {
     void dispatch(fetchQualitySummary(lastNDays(30)));
   }, [dispatch]);
 
-  const open = (batch: Batch) => {
-    setTarget(batch);
-    setVerdicts({});
-    setValues({});
-    setNotes('');
+  /** Newest batch first, each with where its grades stand. */
+  const cards = useMemo(
+    () =>
+      [...batches]
+        .sort((a, b) => (b.opened_at ?? '').localeCompare(a.opened_at ?? ''))
+        .map((batch) => ({ batch, qc: batchQc(batch, tests) })),
+    [batches, tests],
+  );
+
+  const openGrades = target ? (cards.find((c) => c.batch.id === target.id)?.qc ?? null) : null;
+
+  const openGrade = (batch: Batch, status: GradeStatus) => {
+    const prev = status.test;
+    setEntry(emptyEntry);
+    setDraft({
+      batch,
+      grade: status.grade,
+      // A re-test starts from what was measured last time rather than blank.
+      params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
+      verdict: prev?.verdict ?? 'pass',
+      testedBy: prev?.tested_by ?? prev?.tester ?? supervisor ?? SUPERVISORS[0],
+      notes: '',
+      attachmentUrl: prev?.attachment_url ?? '',
+      attachmentName: prev?.attachment_name ?? '',
+      file: null,
+    });
+  };
+
+  const addParam = () => {
+    const name = entry.name.trim();
+    const value = entry.value.trim();
+    if (!name) return notify('Name the parameter', 'warn');
+    if (!value) return notify('Enter the value', 'warn');
+    setDraft((d) =>
+      d ? { ...d, params: [...d.params, { name, value, unit: entry.unit.trim() || undefined }] } : d,
+    );
+    setEntry(emptyEntry);
+  };
+
+  const removeParam = (at: number) =>
+    setDraft((d) => (d ? { ...d, params: d.params.filter((_, i) => i !== at) } : d));
+
+  const pickFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > QC_REPORT_MAX_BYTES) return notify('File too large (max 8 MB)', 'warn');
+    const reader = new FileReader();
+    reader.onload = () =>
+      setDraft((d) =>
+        d ? { ...d, file: { name: file.name, type: file.type, dataUrl: String(reader.result) } } : d,
+      );
+    reader.onerror = () => notify('Could not read that file', 'err');
+    reader.readAsDataURL(file);
   };
 
   const save = async () => {
-    if (!target) return;
-    const filed = Object.entries(verdicts) as [Quality, Verdict][];
-    if (!filed.length) {
-      notify('Mark at least one grade pass or hold', 'warn');
+    if (!draft) return;
+    const notes = draft.notes.trim();
+    if (!draft.params.length && !notes && !draft.file && !draft.attachmentUrl) {
+      notify('Add at least one test parameter for this grade', 'warn');
       return;
     }
-    const params = QC_PARAMS.map((p) => ({
-      name: p.name,
-      value: (values[p.name] ?? '').trim(),
-      unit: p.unit,
-    })).filter((p) => p.value);
 
     setSaving(true);
-    const results = await Promise.all(
-      filed.map(([grade, verdict]) =>
-        dispatch(
-          recordTest({
-            batchNo: target.ref,
-            grade,
-            verdict,
-            params,
-            testedBy: supervisor || SUPERVISORS[0],
-            shiftDate: todayISO(),
-            shift: currentShift(),
-            remarks: notes.trim() || null,
-          }),
-        ),
-      ),
+    const filed = await dispatch(
+      recordTest({
+        batchNo: draft.batch.ref,
+        machineId: draft.batch.machine_id,
+        grade: draft.grade,
+        verdict: draft.verdict,
+        params: draft.params,
+        testedBy: draft.testedBy.trim() || supervisor || SUPERVISORS[0],
+        shiftDate: todayISO(),
+        shift: currentShift(),
+        remarks: notes || null,
+        // A new file replaces the old report; without one the old still stands.
+        attachmentUrl: draft.file ? null : draft.attachmentUrl || null,
+        attachmentName: draft.file ? null : draft.attachmentName || null,
+      }),
     );
-    setSaving(false);
 
-    const failed = results.filter((r) => r.meta.requestStatus !== 'fulfilled').length;
-    if (failed) {
-      notify(`${failed} of ${filed.length} verdicts could not be saved`, 'err');
+    if (!recordTest.fulfilled.match(filed)) {
+      setSaving(false);
+      notify(`Could not file the verdict for ${draft.grade}`, 'err');
       return;
     }
-    notify(`${target.ref} · ${filed.length} verdict${filed.length > 1 ? 's' : ''} filed`, 'ok');
-    setTarget(null);
+
+    let reportFailed = false;
+    if (draft.file) {
+      const uploaded = await dispatch(
+        attachReport({ id: filed.payload.id, name: draft.file.name, dataUrl: draft.file.dataUrl }),
+      );
+      reportFailed = !attachReport.fulfilled.match(uploaded);
+      if (!reportFailed) void dispatch(fetchPendingQuality());
+    }
+    setSaving(false);
+
+    const verdict = draft.verdict === 'hold' ? 'held' : 'passed';
+    notify(
+      reportFailed
+        ? `${draft.batch.ref} · ${draft.grade} ${verdict} — the report did not upload`
+        : `${draft.batch.ref} · ${draft.grade} ${verdict}`,
+      reportFailed || draft.verdict === 'hold' ? 'warn' : 'ok',
+    );
+    setDraft(null); // back to the batch's grades
   };
 
-  if (loading && !pending.length && !tests.length) return <PageLoader label="Loading quality" />;
+  if (loading && !batches.length && !tests.length) return <PageLoader label="Loading quality" />;
 
   return (
     <>
-      <ViewHead title="Quality" meta={`${pending.length} awaiting`} />
+      <ViewHead title="Quality" meta={`${pending.length} awaiting test`} />
 
       {summary.length > 0 && (
         <div className="panel mb-3">
@@ -122,31 +231,60 @@ export function QualityPage() {
         </div>
       )}
 
-      {!pending.length ? (
+      {!cards.length ? (
         <EmptyState
           icon={icons.quality}
-          title="Nothing awaiting a verdict"
-          hint="Every open batch has been tested. New batches appear here as they are charged."
+          title="Nothing to test yet"
+          hint="Once a special batch is loaded it shows up here for you to log results, grade by grade."
         />
       ) : (
-        <div className="stack">
-          {pending.map((batch) => (
-            <div key={batch.id} className="wcard">
-              <div className="info">
-                <div className="row1">
-                  <BatchRef>{batch.ref}</BatchRef>
-                  {batch.formulation && <FormChip>{batch.formulation}</FormChip>}
-                </div>
-                <small>
-                  {batch.machine_id ?? '--'} · charged {batch.shift_date ?? dayMonth(batch.opened_at)}
-                </small>
-              </div>
-              <Button variant="elec" onClick={() => open(batch)}>
-                Test ▸
-              </Button>
-            </div>
-          ))}
-        </div>
+        <>
+          <SheetLabel className="mx-0.5 mb-2 mt-1">
+            Special batches <span className="muted normal-case tracking-normal">— pass / hold per grade</span>
+          </SheetLabel>
+          <div className="stack">
+            {cards.map(({ batch, qc }) => {
+              const chip = batchQcChip(qc);
+              const charged = chargedText(batch);
+              return (
+                <button
+                  key={batch.id}
+                  type="button"
+                  className="bcard w-full text-left"
+                  onClick={() => setTarget(batch)}
+                >
+                  <div className="bhead">
+                    <div className="l">
+                      <BatchRef className="text-base">{batch.ref}</BatchRef>
+                      {batch.formulation && <FormChip>{batch.formulation}</FormChip>}
+                    </div>
+                    <span
+                      className={cn('qchip', chip.tone === 'hold' && 'hold', chip.tone === 'none' && 'shift')}
+                      style={chipStyle(chip.tone)}
+                    >
+                      {chip.label}
+                    </span>
+                  </div>
+
+                  <div className="bgrade">
+                    {qc.grades.map((g) => (
+                      <span
+                        key={g.grade}
+                        className={cn('gradetag', g.verdict === 'hold' ? 'hold' : g.verdict && 'pass')}
+                      >
+                        <i className="gd" />
+                        {g.grade}
+                      </span>
+                    ))}
+                  </div>
+
+                  {charged && <div className="bhint mt-2">{charged}</div>}
+                  <div className="bhint mt-0.5">{batchHint(qc)} · tap to log per-grade results</div>
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {tests.length > 0 && (
@@ -168,7 +306,7 @@ export function QualityPage() {
                   </span>
                   <span className="muted text-[11px]">{dayMonth(test.tested_at)}</span>
                 </div>
-                {(test.params?.length ?? 0) > 0 && (
+                {((test.params?.length ?? 0) > 0 || test.attachment_url) && (
                   <div className="mlog-b">
                     {test.params?.map((p) => (
                       <span key={p.name}>
@@ -176,6 +314,16 @@ export function QualityPage() {
                         {p.unit ?? ''}{' '}
                       </span>
                     ))}
+                    {test.attachment_url && (
+                      <a
+                        href={test.attachment_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'var(--elec)' }}
+                      >
+                        report ✓
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
@@ -184,70 +332,238 @@ export function QualityPage() {
         </>
       )}
 
+      {/* The batch: which of its grades have been tested, and which have not. */}
       <BottomSheet
-        open={Boolean(target)}
-        title={target ? `QC — ${target.ref}` : ''}
-        subtitle={target ? `${target.formulation ?? 'no formulation'} · ${target.machine_id ?? '--'}` : undefined}
-        led="radial-gradient(circle at 35% 30%,#9fe0ea,var(--elec))"
+        open={Boolean(target) && !draft}
+        title={target ? `Batch ${target.ref}` : ''}
+        subtitle={
+          target
+            ? [target.formulation, chargedText(target)]
+                .filter(Boolean)
+                .concat('Each grade is tested separately — tap a grade to log its own parameters and verdict.')
+                .join(' · ')
+            : undefined
+        }
+        led="radial-gradient(circle at 35% 30%,#bfe3ff,#3aa0ff)"
         onClose={() => setTarget(null)}
         footer={
+          <Button variant="ghost" onClick={() => setTarget(null)}>
+            Close
+          </Button>
+        }
+      >
+        {target &&
+          openGrades?.grades.map((status) => (
+            <button
+              key={status.grade}
+              type="button"
+              className="qcrow"
+              onClick={() => openGrade(target, status)}
+            >
+              <QualityChip quality={status.grade} className="min-w-[78px] text-center" />
+              <span className="flex-1">
+                {status.test ? (
+                  <>
+                    <b style={{ color: status.verdict === 'hold' ? 'var(--err)' : 'var(--ok)' }}>
+                      {status.verdict === 'hold' ? 'HOLD' : 'Passed'}
+                    </b>
+                    <span className="muted">
+                      {' · '}
+                      {dayMonth(status.test.tested_at)} · {readings(status.test)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="muted">Untested</span>
+                )}
+              </span>
+              <span className="chev">›</span>
+            </button>
+          ))}
+      </BottomSheet>
+
+      {/* One grade of that batch: its readings, its verdict, its report. */}
+      <BottomSheet
+        open={Boolean(draft)}
+        title={draft ? `Batch ${draft.batch.ref} · ${draft.grade}` : ''}
+        subtitle={
+          draft
+            ? [draft.batch.formulation, 'Log this grade’s test parameters, then mark Pass or Hold.']
+                .filter(Boolean)
+                .join(' · ')
+            : undefined
+        }
+        led="radial-gradient(circle at 35% 30%,#bfe3ff,#3aa0ff)"
+        onClose={() => setDraft(null)}
+        footer={
           <>
-            <Button variant="ghost" onClick={() => setTarget(null)}>
+            <Button variant="ghost" onClick={() => setDraft(null)}>
               Cancel
             </Button>
             <Button variant="primary" onClick={save} loading={saving}>
-              File verdict
+              Save result
             </Button>
           </>
         }
       >
-        <SheetLabel>Verdict per grade</SheetLabel>
-        {QUALITIES.map((grade) => (
-          <div key={grade} className="qgrow">
-            <QualityChip quality={grade} className="w-[86px] text-center" />
-            {(['pass', 'hold'] as Verdict[]).map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={cn('gbtn', v, verdicts[grade] === v && 'sel')}
-                onClick={() =>
-                  setVerdicts({ ...verdicts, [grade]: verdicts[grade] === v ? undefined : v })
-                }
-              >
-                {v === 'pass' ? 'Pass' : 'Hold'}
-              </button>
-            ))}
-          </div>
-        ))}
+        {draft && (
+          <>
+            <datalist id="qc-names">
+              {QC_PARAM_SUGGEST.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
 
-        <SheetLabel>Measured values</SheetLabel>
-        <div className="field-inline flex-wrap">
-          {QC_PARAMS.map((param) => (
-            <TextField
-              key={param.name}
-              label={param.name}
-              inputMode="decimal"
-              suffix={param.unit || undefined}
-              placeholder="—"
-              value={values[param.name] ?? ''}
-              onChange={(e) => setValues({ ...values, [param.name]: e.target.value })}
-              fieldClassName="min-w-[45%] flex-1 !mb-2"
+            <SheetLabel>
+              Test readings <span className="muted normal-case tracking-normal">— for this grade</span>
+            </SheetLabel>
+            {draft.params.length ? (
+              draft.params.map((param, at) => (
+                <div key={`${param.name}-${at}`} className="weighrow mb-2">
+                  <span>
+                    <b>{param.name}</b> · {param.value}
+                    {param.unit ? ` ${param.unit}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    className="wdel"
+                    aria-label={`Remove ${param.name}`}
+                    onClick={() => removeParam(at)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="hint my-1">No readings yet. Add each test parameter and its value.</div>
+            )}
+
+            <FieldRow className="mt-1.5 items-stretch">
+              <TextField
+                label="Parameter"
+                list="qc-names"
+                autoComplete="off"
+                placeholder="e.g. Mooney viscosity"
+                value={entry.name}
+                onChange={(e) => setEntry({ ...entry, name: e.target.value })}
+                fieldClassName="!mb-0 flex-[1.3]"
+              />
+              <TextField
+                label="Value"
+                inputMode="decimal"
+                placeholder="0"
+                value={entry.value}
+                onChange={(e) => setEntry({ ...entry, value: e.target.value })}
+                fieldClassName="!mb-0"
+              />
+              <TextField
+                label="Unit"
+                autoComplete="off"
+                placeholder="opt."
+                value={entry.unit}
+                onChange={(e) => setEntry({ ...entry, unit: e.target.value })}
+                fieldClassName="!mb-0 flex-[.7]"
+              />
+              <Button variant="elec" className="flex-none self-end" onClick={addParam}>
+                + Add
+              </Button>
+            </FieldRow>
+
+            <SheetLabel className="mt-4">Verdict</SheetLabel>
+            <div className="mb-1.5 flex gap-2">
+              <Pick
+                className="flex-1"
+                selected={draft.verdict !== 'hold'}
+                onClick={() => setDraft({ ...draft, verdict: 'pass' })}
+                title="Pass"
+                sub="fit for dispatch"
+              />
+              <Pick
+                className="flex-1"
+                selected={draft.verdict === 'hold'}
+                onClick={() => setDraft({ ...draft, verdict: 'hold' })}
+                title="Hold"
+                sub="unfit — warn dispatch"
+              />
+            </div>
+
+            <FieldRow className="mt-2.5">
+              <TextField
+                label="Tested by"
+                autoComplete="off"
+                placeholder="QC name"
+                value={draft.testedBy}
+                onChange={(e) => setDraft({ ...draft, testedBy: e.target.value })}
+              />
+            </FieldRow>
+
+            <TextAreaField
+              label="Notes"
+              note="opt."
+              rows={2}
+              placeholder="observations / reason for hold"
+              value={draft.notes}
+              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
             />
-          ))}
-        </div>
 
-        <TextAreaField
-          label="Notes"
-          note="opt."
-          rows={2}
-          placeholder="Anything the plant should know"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-        />
-        <div className="hint">
-          A hold does not stop a dispatch — it flags the batch so whoever loads it decides
-          deliberately.
-        </div>
+            <SheetLabel className="mt-1.5">
+              Lab report <span className="muted normal-case tracking-normal">opt. — photo or PDF</span>
+            </SheetLabel>
+            {draft.file ? (
+              <div className="weighrow">
+                <span>
+                  {draft.file.type.startsWith('image') && (
+                    <img
+                      src={draft.file.dataUrl}
+                      alt=""
+                      className="mr-2 inline-block h-8 w-8 rounded-md object-cover align-middle"
+                    />
+                  )}
+                  {draft.file.name} <small className="muted">new</small>
+                </span>
+                <button
+                  type="button"
+                  className="wdel"
+                  aria-label="Remove the report"
+                  onClick={() => setDraft({ ...draft, file: null })}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              draft.attachmentUrl && (
+                <div className="weighrow">
+                  <span>
+                    Report:{' '}
+                    <a
+                      href={draft.attachmentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--elec)' }}
+                    >
+                      view
+                    </a>{' '}
+                    <small className="muted">{draft.attachmentName}</small>
+                  </span>
+                </div>
+              )
+            )}
+            <label className="btn ghost block mt-1.5 cursor-pointer">
+              {draft.file || draft.attachmentUrl ? 'Replace report' : 'Attach photo / PDF'}
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                capture="environment"
+                className="hidden"
+                onChange={pickFile}
+              />
+            </label>
+
+            <div className="hint mt-2">
+              A hold does not stop a dispatch — it flags the batch so whoever loads it decides
+              deliberately.
+            </div>
+          </>
+        )}
       </BottomSheet>
     </>
   );

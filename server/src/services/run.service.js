@@ -1,4 +1,6 @@
-import { crud, model, wrapError } from './base.service.js';
+import { crud, op } from './base.service.js';
+import { machineService } from './machine.service.js';
+import { absentSchema } from '../config/supabase.js';
 import { TABLES, SACK_KG } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { currentShift, todayISO } from '../utils/shift.js';
@@ -24,6 +26,9 @@ export const decorate = (row) => {
     // Whether a run still owes a weight depends on its machine, which a single
     // row cannot answer - listPendingWeigh() sets this once it has that list.
     needs_weight: false,
+    // Null on every run weighed before the column existed, and on a project
+    // that has not run supabase/schema.sql - the total is all there is of those.
+    weigh_entries: Array.isArray(row.weigh_entries) ? row.weigh_entries : null,
     packed_sacks: row.packed_sacks ?? null,
     leftout_in: row.leftout_in ?? null,
     leftout_out: row.leftout_out ?? null,
@@ -32,16 +37,98 @@ export const decorate = (row) => {
 
 const decorateList = (result) => ({ ...result, rows: result.rows.map(decorate) });
 
-/** Machine ids whose runs are weighed after the fact, read once per call. */
-async function weighedMachineIds() {
-  try {
-    const rows = await model(TABLES.machines)
-      .find({ $or: [{ out_weight: true }, { weigh: true }] }, '_id')
-      .lean();
-    return rows.map((m) => m._id);
-  } catch (err) {
-    throw wrapError(err);
+const round2 = (value) => Math.round(value * 100) / 100;
+
+/** What a meter pair says was used. Null unless both ends are on record. */
+const meterDiff = (start, end) =>
+  start == null || end == null ? null : round2(Math.max(0, Number(end) - Number(start)));
+
+/**
+ * The energy a meter pair accounts for, in kWh.
+ *
+ * Soorya has no energy meter of its own, so its figure is read off a TOD meter
+ * that shows one phase only: the true 3-phase energy is the difference times
+ * three, and the raw readings stay as they were read.
+ */
+function derivedKwh(machineId, elecStart, elecEnd) {
+  const used = meterDiff(elecStart, elecEnd);
+  if (used == null) return null;
+  return round2(machineId === 'GRD_O' ? used * 3 : used);
+}
+
+/**
+ * The energy to record when stopping. A difference entered by hand wins over
+ * the meter pair - it is what the crew reaches for when the readings themselves
+ * are not to be had.
+ */
+function kwhOf(run, payload) {
+  if (payload.kwh != null) {
+    return round2(run.machine_id === 'GRD_O' ? Number(payload.kwh) * 3 : Number(payload.kwh));
   }
+  return derivedKwh(run.machine_id, run.elec_start, payload.elecEnd);
+}
+
+/** Hours run, from the figure the crew entered or from the hour meter. */
+function hoursOf(run, payload) {
+  if (payload.hoursRun != null) return round2(Number(payload.hoursRun));
+  return meterDiff(run.hour_start, payload.hourEnd);
+}
+
+/**
+ * The production line a machine's runs belong to. The back office's efficiency
+ * figures are grouped by it - refiner passes as `special`, the grinders as
+ * `grind` - so a run that leaves it unset would go unreported.
+ */
+function lineFor(kind) {
+  if (kind === 'grind') return 'grind';
+  if (kind === 'coarse') return 'coarse';
+  if (kind === 'refiner' || kind === 'prerefiner') return 'special';
+  return null;
+}
+
+/**
+ * The filter that keeps non-production runs off a list.
+ *
+ * Written as an `or` rather than `non_production.eq.false` because the column
+ * is one of the ones supabase/schema.sql adds: every run the tablets recorded
+ * before it existed reads null there, and all of those were production. On a
+ * project that has not been migrated yet the column cannot be filtered on at
+ * all, so the list falls back to showing everything rather than erroring.
+ */
+function productionOnly() {
+  const missing = absentSchema()[TABLES.runs] ?? [];
+  if (missing.includes('non_production')) return {};
+  return { or: ['non_production.is.null', 'non_production.eq.false'] };
+}
+
+/** Editable field -> the column it is stored in, for the History tab's edits. */
+const EDITABLE_COLUMNS = {
+  batchNo: 'batch_no',
+  formulation: 'formulation',
+  quality: 'quality',
+  shiftDate: 'shift_date',
+  shift: 'shift',
+  supervisor: 'supervisor',
+  workers: 'workers',
+  elecStart: 'elec_start',
+  elecEnd: 'elec_end',
+  hourStart: 'hour_start',
+  hourEnd: 'hour_end',
+  outWeight: 'weight_kg',
+  firewoodKg: 'firewood_kg',
+  capacity: 'capacity',
+  packedSacks: 'packed_sacks',
+  remarks: 'remarks',
+};
+
+/**
+ * Machine ids whose runs are weighed after the fact, read once per call.
+ * Goes through machineService rather than the table so the Weigh tab still
+ * works off the in-memory machine list until supabase/schema.sql has been run.
+ */
+async function weighedMachineIds() {
+  const { rows } = await machineService.list({ limit: 200, order: 'asc' });
+  return rows.filter((m) => m.out_weight || m.weigh).map((m) => m.id);
 }
 
 /**
@@ -50,22 +137,29 @@ async function weighedMachineIds() {
  * an empty table for the whole first half of the shift.
  */
 async function latestShiftWithRuns() {
-  try {
-    const [row] = await model(TABLES.runs)
-      .find({ shift_date: { $ne: null } }, 'shift_date shift started_at')
-      .sort({ shift_date: -1, started_at: -1 })
-      .limit(1)
-      .lean();
-    return row ? { date: row.shift_date, shift: row.shift } : null;
-  } catch (err) {
-    throw wrapError(err);
-  }
+  const row = await base.findOne({ shift_date: op.notNull() }, { sort: 'shift_date' });
+  return row ? { date: row.shift_date, shift: row.shift } : null;
 }
 
 export const runService = {
   ...base,
 
+  /**
+   * Runs matching the filters, one page at a time - or every last one of them
+   * when the caller asks for `all`. The History tab shows the plant's whole
+   * record rather than a page of it, and that is already well past the 200-row
+   * pagination ceiling.
+   */
   async list(query = {}, filters = {}) {
+    if (query.all === true || query.all === '1' || query.all === 'true' || query.limit === 'all') {
+      const rows = (
+        await base.all(filters, {
+          sort: query.sort || undefined,
+          ascending: String(query.order || 'desc').toLowerCase() === 'asc',
+        })
+      ).map(decorate);
+      return { rows, total: rows.length, page: 1, limit: rows.length };
+    }
     return decorateList(await base.list(query, filters));
   },
 
@@ -75,24 +169,49 @@ export const runService = {
 
   /** Runs still in progress: started, not yet ended. */
   async listActive(query = {}) {
-    return decorateList(await base.list(query, { ended_at: { $eq: null } }));
+    return decorateList(await base.list(query, { ended_at: op.isNull() }));
   },
 
   /**
    * Finished runs on a weighed machine that nobody has put a weight against.
    * This is what the Weigh tab lists - the prototype's `pendingWeigh()`.
+   *
+   * A non-production run is left out: it produced nothing to put on the scale,
+   * so listing it would leave a row nobody can ever clear.
    */
   async listPendingWeigh(query = {}) {
     const machineIds = await weighedMachineIds();
     if (!machineIds.length) return { rows: [], total: 0, page: 1, limit: 0 };
     const result = await base.list(
       { order: 'desc', sort: 'ended_at', ...query },
-      { machine_id: machineIds, weight_kg: { $eq: null } },
+      { machine_id: machineIds, weight_kg: op.isNull(), ...productionOnly() },
     );
     return {
       ...result,
       rows: result.rows.map((row) => ({ ...decorate(row), needs_weight: true })),
     };
+  },
+
+  /**
+   * The other half of the Weigh tab: runs on a weighed machine that already
+   * have a weight against them, newest first, so a figure typed wrong can be
+   * found and put right.
+   *
+   * The count comes back alongside the page - the tab says "latest 20 of 414"
+   * rather than pretending the page is the whole record - and `all` fetches
+   * every one of them for the tab's Show all.
+   */
+  async listWeighed(query = {}) {
+    const machineIds = await weighedMachineIds();
+    if (!machineIds.length) return { rows: [], total: 0, page: 1, limit: 0 };
+    const filters = { machine_id: machineIds, weight_kg: op.gt(0), ...productionOnly() };
+
+    if (query.all === true || query.all === '1' || query.all === 'true' || query.limit === 'all') {
+      const rows = (await base.all(filters, { sort: 'ended_at' })).map(decorate);
+      return { rows, total: rows.length, page: 1, limit: rows.length };
+    }
+    const result = await base.list({ order: 'desc', sort: 'ended_at', limit: 20, ...query }, filters);
+    return { ...result, rows: result.rows.map(decorate) };
   },
 
   /**
@@ -111,12 +230,16 @@ export const runService = {
     const result = await base.list(
       { order: 'desc', sort: 'ended_at', limit: 200, ...query },
       {
-        weight_kg: { $gt: 0 },
-        $or: [{ quality: { $nin: [null, ''] } }, { line: 'coarse' }],
+        weight_kg: op.gt(0),
+        or: ['quality.not.is.null', 'line.eq.coarse'],
       },
     );
     const rows = result.rows
       .map((row) => ({ ...decorate(row), needs_pack: true }))
+      // A blank quality is not a grade, so it only belongs here on the coarse
+      // line. Postgres cannot tell '' from a grade in the `or` above, so the
+      // last word on it is here.
+      .filter((row) => row.quality || row.line === 'coarse')
       .filter((row) => {
         const total = Number(row.weight_kg || 0) + Number(row.leftout_in || 0);
         const packed = Number(row.packed_sacks || 0) * SACK_KG;
@@ -135,9 +258,7 @@ export const runService = {
 
     if (!date) {
       const today = todayISO();
-      const hasToday = await model(TABLES.runs)
-        .exists({ shift_date: today })
-        .catch((err) => { throw wrapError(err); });
+      const hasToday = await base.exists({ shift_date: today });
       if (hasToday) {
         date = today;
         shift = shift || currentShift();
@@ -153,40 +274,55 @@ export const runService = {
   },
 
   async start(payload) {
-    let inProgress;
-    try {
-      inProgress = await model(TABLES.runs)
-        .exists({ machine_id: payload.machineId, ended_at: null });
-    } catch (err) {
-      throw wrapError(err);
-    }
+    const inProgress = await base.exists({
+      machine_id: payload.machineId,
+      ended_at: op.isNull(),
+    });
     if (inProgress) throw ApiError.conflict('That machine already has a run in progress');
 
-    let machine = null;
-    try {
-      machine = await model(TABLES.machines).findById(payload.machineId).lean();
-    } catch (err) {
-      throw wrapError(err);
-    }
-    if (!machine) throw ApiError.notFound('Unknown machine ' + payload.machineId);
+    const machine = await machineService
+      .findById(payload.machineId)
+      .catch(() => { throw ApiError.notFound('Unknown machine ' + payload.machineId); });
+
+    // The coarse-line machines can be turned onto the special line for a batch,
+    // so the tablet says which line this run is on and the machine's own kind is
+    // only the fallback.
+    const nonProduction = payload.nonProduction === true;
+    const isAutoclave = machine.kind === 'autoclave';
+    const startedAt = payload.startedAt || new Date().toISOString();
 
     const row = await base.create({
       machine_id: payload.machineId,
       machine: machine.name ?? null,
       kind: machine.kind ?? null,
-      line: payload.line ?? null,
+      line: payload.line ?? lineFor(machine.kind),
       batch_no: payload.batchNo ?? payload.batchId ?? null,
+      formulation: payload.formulation ?? null,
+      tyre_type: payload.tyreType ?? null,
+      mesh: payload.mesh ?? null,
       quality: payload.quality || null,
       capacity: machine.capacity ?? null,
       shift_date: payload.shiftDate || todayISO(),
       shift: payload.shift || currentShift(),
       supervisor: payload.supervisor ?? null,
       workers: payload.workers ?? null,
+      // An autoclave run belongs to the vessel it was charged in, and says
+      // whether that charge was shared with the twin autoclave. It is timed by
+      // its charge rather than by a meter, so the load time is kept under its
+      // own name as well - the column the tablets have always written.
+      autoclave_id: isAutoclave ? machine.id : null,
+      paired: payload.paired ?? false,
+      loaded_at: isAutoclave ? startedAt : null,
       passes: 1,
-      started_at: payload.startedAt || new Date().toISOString(),
+      started_at: startedAt,
+      // Meter readings taken as the machine starts; the stop pair turns them
+      // into the run's kWh and hours - see efficiency.service's runKwh().
+      elec_start: payload.elecStart ?? null,
+      hour_start: payload.hourStart ?? null,
       ended_at: null,
       weight_kg: null,
-      needs_weigh: Boolean(machine.out_weight || machine.weigh),
+      non_production: nonProduction,
+      needs_weigh: !nonProduction && Boolean(machine.out_weight || machine.weigh),
     });
     return decorate(row);
   },
@@ -197,11 +333,23 @@ export const runService = {
     const ended = payload.stoppedAt || new Date().toISOString();
     const started = run.started_at ? new Date(run.started_at).getTime() : null;
     const runtimeMin = started ? Math.round((new Date(ended).getTime() - started) / 60000) : null;
+    // What the crew recorded, then the hour meter, then the clock. The minutes
+    // follow the hours whenever the hours came from a reading: the two describe
+    // the same run, and screens that show minutes read that column first.
+    const recordedHours = hoursOf(run, payload);
+    const hoursRun =
+      recordedHours ?? run.hours_run ?? (runtimeMin != null ? +(runtimeMin / 60).toFixed(2) : null);
 
     const row = await base.update(id, {
       ended_at: ended,
-      runtime_min: run.runtime_min ?? runtimeMin,
-      hours_run: run.hours_run ?? (runtimeMin != null ? +(runtimeMin / 60).toFixed(2) : null),
+      // See start(): an autoclave keeps its own discharge time alongside.
+      unloaded_at: run.kind === 'autoclave' ? ended : run.unloaded_at,
+      runtime_min: recordedHours != null ? Math.round(recordedHours * 60) : run.runtime_min ?? runtimeMin,
+      hours_run: hoursRun,
+      elec_end: payload.elecEnd ?? run.elec_end,
+      hour_end: payload.hourEnd ?? run.hour_end,
+      kwh: kwhOf(run, payload) ?? run.kwh,
+      firewood_kg: payload.firewoodKg ?? run.firewood_kg,
       weight_kg: payload.outWeight ?? run.weight_kg,
       workers: payload.workers ?? run.workers,
       remarks: payload.remarks ?? run.remarks,
@@ -209,13 +357,109 @@ export const runService = {
     return decorate(row);
   },
 
-  /** Records the out-weight of an already finished run (the Weigh tab). */
-  async weigh(id, outWeight) {
+  /**
+   * Corrects a run already on record - the back office's History tab.
+   *
+   * Energy and hours follow the readings: change a meter and the difference is
+   * worked out again, so the figure the reports add up can never drift from the
+   * readings it is supposed to come from. Sending `kwh` or `hoursRun` outright
+   * overrides that, for the runs whose readings were never written down.
+   */
+  async edit(id, payload = {}) {
+    const run = await base.findById(id);
+
+    const patch = {};
+    for (const [field, column] of Object.entries(EDITABLE_COLUMNS)) {
+      if (payload[field] !== undefined) patch[column] = payload[field];
+    }
+
+    // Worked out against the run as it will read once this patch lands, not as
+    // it reads now - an edit that moves only the start reading still has to
+    // re-derive against the end that is already on the row.
+    const after = { ...run, ...patch };
+    const touchedElec = payload.elecStart !== undefined || payload.elecEnd !== undefined;
+    const touchedHour = payload.hourStart !== undefined || payload.hourEnd !== undefined;
+
+    if (payload.kwh !== undefined) {
+      patch.kwh = payload.kwh == null ? null : round2(Number(payload.kwh));
+    } else if (touchedElec) {
+      patch.kwh = derivedKwh(after.machine_id, after.elec_start, after.elec_end);
+    }
+
+    if (payload.hoursRun !== undefined || touchedHour) {
+      const hours =
+        payload.hoursRun !== undefined
+          ? payload.hoursRun == null
+            ? null
+            : round2(Number(payload.hoursRun))
+          : meterDiff(after.hour_start, after.hour_end);
+      patch.hours_run = hours;
+      // Keep the minutes in step, so the detail view cannot show an hours
+      // figure and a run time that disagree.
+      if (hours != null) patch.runtime_min = Math.round(hours * 60);
+    }
+
+    if (!Object.keys(patch).length) return decorate(run);
+    return decorate(await base.update(id, patch));
+  },
+
+  /**
+   * Throws away a run that was started by mistake: the row goes, and nothing is
+   * logged against the machine. Only ever open runs - a finished one is part of
+   * the plant's record, and taking it out would move production and cost
+   * figures that have already been reported.
+   */
+  async cancel(id) {
+    const run = await base.findById(id);
+    if (run.ended_at) throw ApiError.conflict('That run is already logged - it cannot be cancelled');
+    await base.remove(id);
+    return { id, machine_id: run.machine_id, machine: run.machine ?? null };
+  },
+
+  /**
+   * Takes a run off the record for good - the History tab's delete.
+   *
+   * cancel() is for a run that never really happened and is still open; this is
+   * for one that was logged and should not have been: the same pass entered
+   * twice, or a row put against the wrong machine. Production, energy and cost
+   * figures are all added up from these rows, so it is the back office's call
+   * (see run.routes) and what the row was carrying comes back to the caller so
+   * the screen can say what was removed.
+   */
+  async discard(id) {
+    const run = await base.findById(id);
+    await base.remove(id);
+    return {
+      id,
+      machine_id: run.machine_id,
+      machine: run.machine ?? null,
+      shift_date: run.shift_date ?? null,
+      shift: run.shift ?? null,
+      batch_no: run.batch_no ?? null,
+      weight_kg: run.weight_kg ?? null,
+    };
+  },
+
+  /**
+   * Records the out-weight of an already finished run (the Weigh tab), and
+   * corrects one that is already weighed - the shop floor puts its own scale
+   * right, so this is the same call rather than the back office's edit().
+   *
+   * `entries` are the individual weighings the total came off, kept so a later
+   * correction can show what went on the scale. They are stored as sent even
+   * where they do not add up to `outWeight`: the two answer different questions,
+   * and quietly rewriting either would lose what the crew recorded.
+   */
+  async weigh(id, outWeight, entries) {
     const run = await base.findById(id);
     if (outWeight == null || Number.isNaN(Number(outWeight))) {
       throw ApiError.badRequest('A weight in kg is required');
     }
-    return decorate(await base.update(id, { weight_kg: Number(outWeight) }));
+    const patch = { weight_kg: Number(outWeight) };
+    if (entries !== undefined) {
+      patch.weigh_entries = Array.isArray(entries) && entries.length ? entries.map(Number) : null;
+    }
+    return decorate(await base.update(id, patch));
   },
 
   /**

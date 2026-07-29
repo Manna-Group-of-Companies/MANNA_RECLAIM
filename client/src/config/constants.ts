@@ -42,8 +42,50 @@ export const QUALITY_CLASS: Record<Quality, string> = {
 
 export const FIREWOOD_KG_PER_LOAD = 550;
 
+/** A coarse load is a shorter cook than a special one, so it burns less. */
+export const FIREWOOD_KG_PER_COARSE_LOAD = 400;
+
+/**
+ * What an autoclave can be charged with. A special load opens a batch the
+ * refiners then work through; a coarse load feeds the coarse line for the shift
+ * and never becomes a batch of its own. `grade` is the chip the pick wears -
+ * the grade itself is decided at the refiner, not at the autoclave.
+ */
+export interface AutoclaveForm {
+  name: string;
+  capacity: number;
+  type: 'special' | 'coarse';
+  grade?: Quality;
+}
+
+export const AUTOCLAVE_FORMS: AutoclaveForm[] = [
+  { name: 'Special 2200', capacity: 2200, type: 'special', grade: 'Special' },
+  { name: 'Special 2500', capacity: 2500, type: 'special', grade: 'Special' },
+  { name: 'DRC 2200', capacity: 2200, type: 'special', grade: 'DRC' },
+  { name: 'DRC 2500', capacity: 2500, type: 'special', grade: 'DRC' },
+  { name: 'Coarse 2200', capacity: 2200, type: 'coarse' },
+  { name: 'Coarse 2500', capacity: 2500, type: 'coarse' },
+];
+
+/** The formulations that fit this vessel - specials first, then coarse. */
+export const autoclaveFormsFor = (capacity?: number | null): AutoclaveForm[] =>
+  capacity == null ? [] : AUTOCLAVE_FORMS.filter((f) => f.capacity === capacity);
+
+/**
+ * Two hands charge two autoclaves between them, so a paired load costs one
+ * worker; charged on its own it takes both.
+ */
+export const autoclaveWorkers = (paired: boolean) => (paired ? 1 : 2);
+
 /** One packed sack. Anything under this is carried into the next batch. */
 export const SACK_KG = 50;
+
+/**
+ * How many weighed runs the Weigh tab lists before its Show all. The plant has
+ * years of them and a correction is nearly always to something weighed this
+ * shift, so the tab opens on the newest handful rather than the whole record.
+ */
+export const WEIGHED_PAGE = 20;
 
 /** A bearing over this is drawn in red on the back office's trend charts. */
 export const BEARING_TEMP_LIMIT_C = 80;
@@ -56,6 +98,49 @@ export const KIND_ACCENT: Record<string, string> = {
   prerefiner: 'var(--elec)',
   refiner: 'var(--elec)',
 };
+
+/** The two feedstocks the grinding line runs on, and the crumb each yields. */
+export const TYRES = {
+  truck: { label: 'Truck tyre', mesh: '30#' },
+  bike: { label: 'Bike tyre', mesh: '20#' },
+} as const;
+
+export type TyreType = keyof typeof TYRES;
+
+/** The clock each shift covers, shown under the shift picks. */
+export const SHIFT_HOURS: Record<Shift, string> = {
+  Day: '08:30 – 20:30',
+  Night: '20:30 – 08:30',
+};
+
+/**
+ * The crew a machine usually runs with, prefilled at stop so the common case is
+ * a glance rather than a keystroke. The grinders run one hand by day and two by
+ * night; everything shiftwise that is not listed runs two.
+ */
+export const defaultWorkers = (machineId: string, shift: Shift, shiftwise: boolean): number | null => {
+  switch (machineId) {
+    case 'PR1':
+    case 'PR2':
+      return 3;
+    case 'R1':
+    case 'R3':
+      return 2;
+    case 'R2':
+    case 'R4':
+      return 3;
+    case 'CRK':
+      return 2;
+    case 'GRD_K':
+    case 'GRD_S':
+      return shift === 'Night' ? 2 : 1;
+    default:
+      return shiftwise ? 2 : null;
+  }
+};
+
+/** Soorya is metered on one phase only - see the note on both its sheets. */
+export const TOD_MACHINE_ID = 'GRD_O';
 
 /** Supervisors who sign for a shift. Mirrors the prototype's SUPERVISORS. */
 export const SUPERVISORS = ['Mathai', 'Rahul', 'Devanand'];
@@ -133,10 +218,23 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
   },
 ];
 
-/** The lab's measured values per test, as the prototype's QC sheet asks them. */
-export const QC_PARAMS = [
-  { name: 'Moisture', unit: '%' },
-  { name: 'Ash', unit: '%' },
-  { name: 'Acetone extract', unit: '%' },
-  { name: 'Specific gravity', unit: '' },
+/**
+ * What the lab usually measures, offered as suggestions rather than as fields:
+ * a test names its own readings, so a new one needs no change here. Mirrors the
+ * prototype's QC_PARAM_SUGGEST.
+ */
+export const QC_PARAM_SUGGEST = [
+  'Specific gravity',
+  'Mooney viscosity',
+  'Ash %',
+  'Acetone extract %',
+  'Tensile (MPa)',
+  'Elongation %',
+  'Hardness (Shore A)',
+  'Fineness / mesh',
+  'Moisture %',
+  'Contamination',
 ];
+
+/** A lab report has to fit the upload route's body limit. */
+export const QC_REPORT_MAX_BYTES = 8 * 1024 * 1024;

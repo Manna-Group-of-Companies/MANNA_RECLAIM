@@ -1,14 +1,21 @@
 import bcrypt from 'bcryptjs';
 import { env } from './env.js';
-import { isDbReady } from './db.js';
+import { request, isDbReady } from './supabase.js';
 import { logger } from './logger.js';
-import { ROLES } from './constants.js';
+import { ROLES, TABLES } from './constants.js';
 
 /**
- * Development-only seed so the app is usable before MongoDB is wired up.
- * Active ONLY when the database is unconfigured and NODE_ENV is not
- * production - see devSeedActive(). Delete this file (and the two fallbacks
- * in user.service.js / machine.service.js) once the real tables exist.
+ * Development-only seed for the two things Supabase does not have yet.
+ *
+ * The plant's data - runs, batches, quality, bearings, rates - all came across
+ * from the tablets and lives in Supabase. Accounts and the machine list never
+ * did: the prototype hard-coded both, so `users` and `machines` are created by
+ * supabase/schema.sql rather than copied.
+ *
+ * Until that SQL has been run, these in-memory rows keep login and the machine
+ * screens working. Once the tables are there the fallback switches itself off -
+ * see devSeedActive(). Delete this file, and the two fallbacks in
+ * user.service.js / machine.service.js, when the plant is fully on Supabase.
  */
 
 const SEED_PINS = [
@@ -29,9 +36,9 @@ export const DEV_USERS = SEED_PINS.map((u, i) => ({
 /** The 14 machines defined in the index.html prototype. */
 export const DEV_MACHINES = [
   { id: 'CRK', name: 'Cracker', short: 'CRK', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - tyre prep (mixed)', accent: '#9bb0c4', enabled: true, sort_order: 1 },
-  { id: 'GRD_K', name: 'Grinder 1', short: 'Grind 1', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 30# default', accent: '#9bb0c4', out_weight: true, enabled: true, sort_order: 2 },
-  { id: 'GRD_S', name: 'Grinder 2', short: 'Grind 2', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 20# default', accent: '#9bb0c4', out_weight: true, enabled: true, sort_order: 3 },
-  { id: 'GRD_O', name: 'Soorya Grinder', short: 'Soorya', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise', accent: '#9bb0c4', out_weight: true, enabled: true, sort_order: 4 },
+  { id: 'GRD_K', name: 'Grinder 1', short: 'Grind 1', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 30# default', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', enabled: true, sort_order: 2 },
+  { id: 'GRD_S', name: 'Grinder 2', short: 'Grind 2', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 20# default', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'bike', enabled: true, sort_order: 3 },
+  { id: 'GRD_O', name: 'Soorya Grinder', short: 'Soorya', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', enabled: true, sort_order: 4 },
   { id: 'AC_A', name: 'Autoclave A', short: 'AC-A', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2500, accent: '#e0762e', enabled: true, sort_order: 5 },
   { id: 'AC_M', name: 'Autoclave M', short: 'AC-M', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2200, accent: '#e0762e', enabled: true, sort_order: 6 },
   { id: 'AC_N', name: 'Autoclave N', short: 'AC-N', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2200, accent: '#e0762e', enabled: false, sort_order: 7 },
@@ -45,13 +52,35 @@ export const DEV_MACHINES = [
 ];
 
 let warned = false;
+/** Whether Supabase has the accounts/machines tables. Probed once per process. */
+let tablesPresent = null;
 
-export function devSeedActive() {
-  if (env.isProd || isDbReady()) return false;
+async function supabaseHasSeedTables() {
+  if (tablesPresent !== null) return tablesPresent;
+  try {
+    await Promise.all([
+      request(TABLES.users, { select: 'id', limit: 0 }),
+      request(TABLES.machines, { select: 'id', limit: 0 }),
+    ]);
+    tablesPresent = true;
+  } catch {
+    tablesPresent = false;
+  }
+  return tablesPresent;
+}
+
+/**
+ * True only while Supabase is still missing `users`/`machines`, and never in
+ * production - a plant running on hard-coded PINs is not something to fail
+ * quietly into.
+ */
+export async function devSeedActive() {
+  if (env.isProd || !isDbReady()) return false;
+  if (await supabaseHasSeedTables()) return false;
   if (!warned) {
     warned = true;
     logger.warn('DEV SEED ACTIVE - in-memory accounts and machines are being served.');
-    logger.warn('Set MONGODB_URI to switch to the real database.');
+    logger.warn('Run supabase/schema.sql, then `npm run seed`, to move them into Supabase.');
   }
   return true;
 }

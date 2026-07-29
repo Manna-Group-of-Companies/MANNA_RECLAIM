@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "migrate:supabase": "node scripts/migrate-supabase-to-mongo.js",
+    "db:report": "node scripts/supabase-report.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",
     "seed": "npm run seed:users && npm run seed:machines"
@@ -22,7 +22,6 @@
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
     "zod": "^3.23.8"
   },

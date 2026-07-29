@@ -1,221 +1,173 @@
-import { modelFor } from '../models/index.js';
-import { newId } from '../models/base.model.js';
-import { isDbReady } from '../config/db.js';
+import { randomUUID } from 'node:crypto';
+import { request, fetchAll, op, isDbReady } from '../config/supabase.js';
+import { keyOf, pickColumns } from '../config/tables.js';
 import { ApiError } from '../utils/ApiError.js';
 import { parsePagination } from '../utils/pagination.js';
 
-/** Resolves a collection name to its model, refusing early when Mongo is down. */
-export function model(collection) {
-  if (!isDbReady()) throw ApiError.unavailable('Database is not configured');
-  return modelFor(collection);
-}
+export { op, isDbReady };
 
-/** Mongo stores `_id`; the API has always spoken `id`. */
-export const serialize = (row) => {
-  if (!row) return row;
-  const { _id, ...rest } = row;
-  return _id === undefined ? rest : { id: _id, ...rest };
-};
-
-const toDoc = ({ id, _id, ...rest } = {}) => {
-  const key = id ?? _id;
-  return key === undefined || key === null ? rest : { _id: key, ...rest };
-};
-
-/** Patches must never rewrite the immutable _id. */
-const toPatch = ({ id: _id0, _id: _id1, ...rest } = {}) => rest;
-
-const fieldList = (select) =>
-  !select || select === '*'
-    ? null
-    : String(select).split(',').map((s) => s.trim()).filter(Boolean);
-
-/** `select: 'id,name,role'` -> a mongoose projection. */
-const projectionFor = (select) => {
-  const fields = fieldList(select);
-  return fields ? fields.map((f) => (f === 'id' ? '_id' : f)).join(' ') : undefined;
-};
-
-/** Same restriction applied to an already-serialized row (create/update paths). */
-const pick = (row, select) => {
-  const fields = fieldList(select);
-  if (!fields || !row) return row;
-  const keep = new Set(fields);
-  return Object.fromEntries(Object.entries(row).filter(([k]) => keep.has(k)));
-};
+/** Client-generated ids: the tablets work offline and name their own rows. */
+export const newId = randomUUID;
 
 /**
- * Turns a plain `{ field: value }` filter bag into a Mongo query.
+ * The repetitive half of a domain service, built over Supabase.
  *
- * Blank values are dropped so `?shift=` behaves as "no filter". To match on
- * null (an open run has `ended_at: null`) or on anything else the shorthand
- * cannot express, hand in an operator object - `{ ended_at: { $eq: null } }` -
- * or a top-level `$and` / `$or`, both of which pass straight through.
+ * Domain files spread the result and add their own behaviour on top:
+ *
+ *   export const runService = { ...crud(TABLES.runs), start, stop };
+ *
+ * `select` narrows what comes back; `defaultSort` is the column list() falls
+ * back to when the request does not name one.
  */
-const where = (filters = {}) => {
-  const query = {};
-  for (const [field, value] of Object.entries(filters)) {
-    if (field.startsWith('$')) {
-      query[field] = value;
-      continue;
+export function crud(table, { defaultSort = 'created_at', select = '*' } = {}) {
+  const key = keyOf(table);
+  const notFound = (id) => ApiError.notFound(`${table} ${id} not found`);
+
+  /**
+   * Tables keyed on something other than `id` - customers on `name`, the price
+   * list on `grade` - still answer with an `id`, because that is what the
+   * client models and the REST routes are written against.
+   */
+  const serialize = (row) => {
+    if (!row || key === null || key === 'id') return row ?? null;
+    return { id: row[key], ...row };
+  };
+
+  /** The mirror image: an incoming `id` addresses whatever the key column is. */
+  const toRow = ({ id, ...rest } = {}) => {
+    const row = { ...rest };
+    if (id !== undefined && key !== null && row[key] === undefined) row[key] = id;
+    return pickColumns(table, row);
+  };
+
+  /** Nothing may rewrite the key column on a patch. */
+  const toPatch = (patch = {}) => {
+    const { id: _id, ...rest } = patch;
+    const row = pickColumns(table, rest);
+    if (key !== null) delete row[key];
+    return row;
+  };
+
+  const byKey = (id) => {
+    if (key === null) {
+      throw ApiError.badRequest(`${table} has no single-column key; filter on its columns instead`);
     }
-    if (value === undefined || value === null || value === '') continue;
-    const key = field === 'id' ? '_id' : field;
-    if (Array.isArray(value)) query[key] = { $in: value };
-    else if (typeof value === 'object') query[key] = value;
-    else query[key] = value;
-  }
-  return query;
-};
-
-/** Turns driver/validation failures into the ApiError shape the handler expects. */
-export function wrapError(err) {
-  if (err instanceof ApiError) return err;
-  if (err?.code === 11000 || err?.code === 11001) {
-    return ApiError.conflict('A record with that value already exists', err.keyValue);
-  }
-  if (err?.name === 'ValidationError') {
-    const details = Object.values(err.errors ?? {}).map((e) => ({
-      field: e.path,
-      message: e.message,
-    }));
-    return ApiError.unprocessable('Validation failed', details);
-  }
-  if (err?.name === 'CastError') {
-    return ApiError.badRequest('Invalid value for ' + err.path, { value: err.value });
-  }
-  return new ApiError(500, err?.message || 'Database error');
-}
-
-/**
- * Builds the repetitive half of a domain service. Domain files spread the
- * result and add their own behaviour on top.
- *
- *   export const batchService = { ...crud(TABLES.batches), close };
- */
-export function crud(collection, { defaultSort = 'created_at', select = '*' } = {}) {
-  const projection = projectionFor(select);
-  const notFound = (id) => ApiError.notFound(collection + ' ' + id + ' not found');
+    return { [key]: id };
+  };
 
   return {
-    table: collection,
-    model: () => model(collection),
+    table,
+    key,
 
     async list(query = {}, filters = {}) {
       const { from, sort, ascending, page, limit } = parsePagination(query);
-      const Model = model(collection);
-      const criteria = where(filters);
-      try {
-        const [rows, total] = await Promise.all([
-          Model.find(criteria, projection)
-            .sort({ [sort || defaultSort]: ascending ? 1 : -1 })
-            .skip(from)
-            .limit(limit)
-            .lean(),
-          Model.countDocuments(criteria),
-        ]);
-        return { rows: rows.map(serialize), total, page, limit };
-      } catch (err) {
-        throw wrapError(err);
-      }
+      const { rows, total } = await request(table, {
+        select,
+        filters,
+        order: sort || defaultSort,
+        ascending,
+        offset: from,
+        limit,
+        count: true,
+      });
+      return { rows: rows.map(serialize), total, page, limit };
     },
 
     /**
      * Every matching row, ignoring page/limit. The reports aggregate over
-     * thousands of runs, and going through list() would silently cap them at
-     * the 200-row pagination ceiling.
+     * thousands of runs, and going through list() would cap them at the
+     * 200-row pagination ceiling - or, straight off request(), at whatever
+     * max-rows the PostgREST instance enforces.
      */
     async all(filters = {}, { sort = defaultSort, ascending = false } = {}) {
-      try {
-        const rows = await model(collection)
-          .find(where(filters), projection)
-          .sort({ [sort]: ascending ? 1 : -1 })
-          .lean();
-        return rows.map(serialize);
-      } catch (err) {
-        throw wrapError(err);
-      }
+      const rows = await fetchAll(table, { select, filters, order: sort, ascending });
+      return rows.map(serialize);
     },
 
     async findById(id) {
-      let row;
-      try {
-        row = await model(collection).findById(id, projection).lean();
-      } catch (err) {
-        throw wrapError(err);
-      }
-      if (!row) throw notFound(id);
-      return serialize(row);
+      const { rows } = await request(table, { select, filters: byKey(id), limit: 1 });
+      if (!rows.length) throw notFound(id);
+      return serialize(rows[0]);
+    },
+
+    /** The first matching row, or null - for the "is there one of these" checks. */
+    async findOne(filters = {}, { sort = defaultSort, ascending = false } = {}) {
+      const { rows } = await request(table, { select, filters, order: sort, ascending, limit: 1 });
+      return rows.length ? serialize(rows[0]) : null;
+    },
+
+    async exists(filters = {}) {
+      const { total } = await request(table, {
+        select: key ?? '*',
+        filters,
+        limit: 1,
+        count: true,
+      });
+      return total > 0;
     },
 
     async create(payload) {
-      try {
-        const doc = await model(collection).create(toDoc(payload));
-        return pick(serialize(doc.toObject()), select);
-      } catch (err) {
-        throw wrapError(err);
-      }
+      const row = toRow(payload);
+      // Postgres would fill a uuid default, but the offline tablets name their
+      // own rows, so the id is ours to generate on both paths.
+      if (key === 'id' && row.id === undefined) row.id = newId();
+      const { rows } = await request(table, { method: 'POST', select, body: row });
+      return serialize(rows[0]);
     },
 
     async update(id, patch) {
-      let row;
-      try {
-        row = await model(collection)
-          .findByIdAndUpdate(id, { $set: toPatch(patch) }, {
-            new: true,
-            runValidators: true,
-            projection,
-          })
-          .lean();
-      } catch (err) {
-        throw wrapError(err);
-      }
-      if (!row) throw notFound(id);
-      return serialize(row);
+      const body = toPatch(patch);
+      if (!Object.keys(body).length) return this.findById(id);
+      const { rows } = await request(table, {
+        method: 'PATCH',
+        select,
+        filters: byKey(id),
+        body,
+      });
+      if (!rows.length) throw notFound(id);
+      return serialize(rows[0]);
+    },
+
+    /**
+     * Update by filter rather than by key, answering with whatever it touched.
+     * An empty `rows` means nothing matched - which is how the callers that
+     * guard on a version column detect that someone else wrote first.
+     */
+    async updateWhere(filters, patch) {
+      const body = toPatch(patch);
+      if (!Object.keys(body).length) return { rows: [] };
+      const { rows } = await request(table, { method: 'PATCH', select, filters, body });
+      return { rows: rows.map(serialize) };
     },
 
     /**
      * Idempotent bulk write used by the offline sync endpoints. `onConflict` is
-     * the comma-separated key the rows are matched on ('id', 'customer,grade').
+     * the comma-separated column list the rows are matched on ('id',
+     * 'customer,grade'), and it has to carry a unique constraint in Postgres.
      */
-    async upsertMany(rows, onConflict = 'id') {
+    async upsertMany(rows, onConflict = key ?? 'id') {
       if (!rows?.length) return [];
-      const Model = model(collection);
-      const keys = String(onConflict).split(',').map((s) => s.trim()).filter(Boolean);
-      const filters = [];
-
-      const ops = rows.map((raw) => {
-        const { _id, ...doc } = toDoc(raw);
-        const filter = {};
-        for (const key of keys) {
-          const path = key === 'id' ? '_id' : key;
-          const value = path === '_id' ? _id : doc[path];
-          if (value !== undefined && value !== null) filter[path] = value;
-        }
-        // Nothing to match on - fall back to a brand new row.
-        if (!Object.keys(filter).length) filter._id = _id ?? newId();
-        filters.push(filter);
-
-        const update = { $set: doc };
-        if (filter._id === undefined) update.$setOnInsert = { _id: _id ?? newId() };
-        return { updateOne: { filter, update, upsert: true } };
+      const body = rows.map((raw) => {
+        const row = toRow(raw);
+        if (key === 'id' && row.id === undefined) row.id = newId();
+        return row;
       });
-
-      try {
-        await Model.bulkWrite(ops, { ordered: false });
-        const saved = await Model.find({ $or: filters }, projection).lean();
-        return saved.map(serialize);
-      } catch (err) {
-        throw wrapError(err);
-      }
+      const { rows: saved } = await request(table, {
+        method: 'POST',
+        select,
+        body,
+        onConflict,
+      });
+      return saved.map(serialize);
     },
 
     async remove(id) {
-      try {
-        await model(collection).findByIdAndDelete(id).lean();
-      } catch (err) {
-        throw wrapError(err);
-      }
+      await request(table, {
+        method: 'DELETE',
+        filters: byKey(id),
+        select: null,
+        returning: false,
+      });
       return { id };
     },
   };
