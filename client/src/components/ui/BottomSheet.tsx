@@ -37,27 +37,37 @@ export function BottomSheet({
   const sheetRef = useRef<HTMLDivElement>(null);
   /** Where focus was before the sheet took it, so it can be handed back. */
   const opener = useRef<HTMLElement | null>(null);
+  /**
+   * Read through a ref, never a dependency: callers pass a fresh closure on
+   * every render, and re-running the effects below on each keystroke would tear
+   * focus out of the field being typed into.
+   */
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [open]);
 
-    // A sheet that opens without taking focus leaves the keyboard back on the
-    // page behind it - the next Tab walks the page, not the form just opened.
+  // A sheet that opens without taking focus leaves the keyboard back on the
+  // page behind it - the next Tab walks the page, not the form just opened.
+  // Strictly on the open/close edge: moving focus mid-edit would fight the user.
+  useEffect(() => {
+    if (!open) return;
     opener.current = document.activeElement as HTMLElement | null;
     const focusable = sheetRef.current?.querySelector<HTMLElement>(
       'input, select, textarea, button:not(.sheet-x)',
     );
     (focusable ?? sheetRef.current)?.focus({ preventScroll: true });
-
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-      opener.current?.focus?.({ preventScroll: true });
-    };
-  }, [open, onClose]);
+    return () => opener.current?.focus?.({ preventScroll: true });
+  }, [open]);
 
   return (
     <>
