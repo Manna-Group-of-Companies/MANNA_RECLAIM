@@ -4,13 +4,20 @@ import { userPaths } from '@/config/paths';
 import { Icon } from '@/components/ui';
 import { cn } from '@/utils/cn';
 
-/** The white plate and wordmark from the top of the prototype. */
+/**
+ * The company mark at the top of the prototype.
+ *
+ * The tile keeps Manna's green - it is the company's identity, not a theme
+ * colour, and it reads cleanly against the dark bar. The wordmark beside it
+ * does not: it was drawn as dark green on white, which is invisible here, so
+ * the two runs of text take --ink and --ink-faint and follow the theme.
+ */
 function BrandPlate() {
   return (
     <div className="brandplate">
       <svg
         viewBox="0 0 210 44"
-        style={{ height: 30, width: 'auto', display: 'block' }}
+        className="brandmark"
         role="img"
         aria-label="Manna Production Management"
       >
@@ -33,10 +40,10 @@ function BrandPlate() {
           <polyline points="1 20 1 14 7 14" />
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
         </g>
-        <text x="50" y="26" fontSize="20" fontWeight="800" fill="#2f6b1b" letterSpacing="-0.3">
+        <text x="50" y="26" fontSize="20" fontWeight="800" fill="var(--ink)" letterSpacing="-0.3">
           Manna
         </text>
-        <text x="51" y="38" fontSize="8.3" fontWeight="700" letterSpacing="2" fill="#5f6b53">
+        <text x="51" y="38" fontSize="8.3" fontWeight="700" letterSpacing="2" fill="var(--ink-faint)">
           PRODUCTION MGMT
         </text>
       </svg>

@@ -14,11 +14,37 @@ const base = crud(TABLES.runs, { defaultSort: 'started_at' });
  * here carrying both: the real columns untouched, plus the derived aliases the
  * client models are written against.
  */
+/**
+ * The batches a special-line pass drew from, the one being refined first and
+ * any tailings mixed into it after. The tablets kept them in four columns
+ * rather than a list, so they are read back out as one.
+ */
+const sourcesOf = (row) =>
+  [row.src1, row.src2, row.src3, row.src4]
+    .map((value) => (value == null ? '' : String(value).trim()))
+    .filter(Boolean);
+
+/** The same list on the way in: de-duplicated, and capped at the four columns. */
+const sourceColumns = (sources) => {
+  const list = (Array.isArray(sources) ? sources : [])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+    .filter((value, i, all) => all.indexOf(value) === i)
+    .slice(0, 4);
+  return {
+    src1: list[0] ?? null,
+    src2: list[1] ?? null,
+    src3: list[2] ?? null,
+    src4: list[3] ?? null,
+  };
+};
+
 export const decorate = (row) => {
   if (!row) return row;
   const open = !row.ended_at;
   return {
     ...row,
+    sources: sourcesOf(row),
     status: open ? 'running' : 'done',
     stopped_at: row.ended_at ?? null,
     out_weight: row.weight_kg ?? null,
@@ -87,6 +113,76 @@ function lineFor(kind) {
 }
 
 /**
+ * The lines that keep one record per machine per shift rather than one per
+ * start: the coarse line and the grinding line are run *for a shift*, so a
+ * machine stopped for a blockage and started again half an hour later is still
+ * the same shift's work and belongs on the same row.
+ *
+ * A coarse autoclave charge is the exception. It carries a batch number of its
+ * own, and two charges cooked in one shift are two loads however they are
+ * counted - so anything with a batch against it stays its own row.
+ */
+const SHIFTWISE_LINES = ['coarse', 'grind'];
+
+const mergesByShift = (run) =>
+  SHIFTWISE_LINES.includes(run.line) &&
+  run.kind !== 'autoclave' &&
+  !run.autoclave_id &&
+  !run.batch_no &&
+  Boolean(run.shift_date && run.shift);
+
+/** Adds two figures that may each be missing; null only when both are. */
+const addNum = (a, b) =>
+  a == null && b == null ? null : round2(Number(a ?? 0) + Number(b ?? 0));
+
+/** A crew is a headcount, not a running total - the shift ran with the most. */
+const maxNum = (a, b) => {
+  if (a == null) return b ?? null;
+  if (b == null) return a;
+  return Math.max(Number(a), Number(b));
+};
+
+const entriesOf = (row) => (Array.isArray(row?.weigh_entries) ? row.weigh_entries : []);
+
+/**
+ * The shift's record with one more start/stop folded into it.
+ *
+ * `record` is what the shift already had, `run` the row this stop was logged on
+ * and `leg` that stop's own figures. Everything spent - energy, firewood, time,
+ * output - is the shift's total across every start of it; the crew is a
+ * headcount rather than a running total, so the shift ran with the most of them
+ * it ever had at once; and the meters bracket the whole shift, keeping the
+ * reading it opened on and taking the latest one as its close.
+ */
+export function mergePatch(record, run, leg) {
+  const entries = [...entriesOf(record), ...entriesOf(run)];
+  return {
+    ended_at: leg.ended_at,
+    // What History reports as "3 start/stops combined".
+    passes: (Number(record.passes) || 1) + 1,
+    kwh: addNum(record.kwh, leg.kwh),
+    firewood_kg: addNum(record.firewood_kg, leg.firewood_kg),
+    runtime_min: addNum(record.runtime_min, leg.runtime_min),
+    hours_run: addNum(record.hours_run, leg.hours_run),
+    weight_kg: addNum(record.weight_kg, leg.weight_kg),
+    workers: maxNum(record.workers, leg.workers),
+    elec_start: record.elec_start ?? run.elec_start,
+    hour_start: record.hour_start ?? run.hour_start,
+    elec_end: leg.elec_end ?? record.elec_end,
+    hour_end: leg.hour_end ?? record.hour_end,
+    // Loads banked on either row are the same shift's output.
+    weigh_entries: entries.length ? entries : null,
+    needs_weigh: Boolean(record.needs_weigh || run.needs_weigh),
+    // Filled in from this leg only where the shift had nothing on record.
+    formulation: record.formulation ?? run.formulation,
+    tyre_type: record.tyre_type ?? run.tyre_type,
+    mesh: record.mesh ?? run.mesh,
+    supervisor: record.supervisor ?? run.supervisor,
+    remarks: leg.remarks ?? record.remarks,
+  };
+}
+
+/**
  * The filter that keeps non-production runs off a list.
  *
  * Written as an `or` rather than `non_production.eq.false` because the column
@@ -139,6 +235,26 @@ async function weighedMachineIds() {
 async function latestShiftWithRuns() {
   const row = await base.findOne({ shift_date: op.notNull() }, { sort: 'shift_date' });
   return row ? { date: row.shift_date, shift: row.shift } : null;
+}
+
+/**
+ * The record this machine's earlier start/stops in the same shift are already
+ * on, if there is one. The oldest is taken deliberately: it holds the reading
+ * the shift opened on, which is the one that has to survive the merge.
+ */
+async function shiftRecordFor(run) {
+  if (!mergesByShift(run)) return null;
+  return base.findOne(
+    {
+      machine_id: run.machine_id,
+      line: run.line,
+      shift_date: run.shift_date,
+      shift: run.shift,
+      ended_at: op.notNull(),
+      id: op.neq(run.id),
+    },
+    { sort: 'started_at', ascending: true },
+  );
 }
 
 export const runService = {
@@ -319,6 +435,9 @@ export const runService = {
       // into the run's kWh and hours - see efficiency.service's runKwh().
       elec_start: payload.elecStart ?? null,
       hour_start: payload.hourStart ?? null,
+      // The special line can refine one batch with the tailings of others mixed
+      // into it; the batch being refined is the first of them.
+      ...sourceColumns(payload.sources),
       ended_at: null,
       weight_kg: null,
       non_production: nonProduction,
@@ -327,24 +446,36 @@ export const runService = {
     return decorate(row);
   },
 
+  /**
+   * Logs a run off the machine.
+   *
+   * On the batch lines that is the end of it - the row is closed where it
+   * stands. On the coarse and grinding lines it is not: those are run for a
+   * shift, so a machine started again inside the same shift is folded back into
+   * the record that shift already has rather than opening a second one. The row
+   * this stop was logged on then goes, and the merged record comes back
+   * carrying `merged_from` so the tablet knows which id it replaced.
+   */
   async stop(id, payload = {}) {
     const run = await base.findById(id);
     if (run.ended_at) throw ApiError.conflict('Run is not in progress');
     const ended = payload.stoppedAt || new Date().toISOString();
     const started = run.started_at ? new Date(run.started_at).getTime() : null;
-    const runtimeMin = started ? Math.round((new Date(ended).getTime() - started) / 60000) : null;
+    const clockMin = started ? Math.round((new Date(ended).getTime() - started) / 60000) : null;
     // What the crew recorded, then the hour meter, then the clock. The minutes
     // follow the hours whenever the hours came from a reading: the two describe
     // the same run, and screens that show minutes read that column first.
     const recordedHours = hoursOf(run, payload);
     const hoursRun =
-      recordedHours ?? run.hours_run ?? (runtimeMin != null ? +(runtimeMin / 60).toFixed(2) : null);
+      recordedHours ?? run.hours_run ?? (clockMin != null ? +(clockMin / 60).toFixed(2) : null);
 
-    const row = await base.update(id, {
+    // This start/stop on its own, before anything is decided about where it
+    // gets filed.
+    const leg = {
       ended_at: ended,
       // See start(): an autoclave keeps its own discharge time alongside.
       unloaded_at: run.kind === 'autoclave' ? ended : run.unloaded_at,
-      runtime_min: recordedHours != null ? Math.round(recordedHours * 60) : run.runtime_min ?? runtimeMin,
+      runtime_min: recordedHours != null ? Math.round(recordedHours * 60) : run.runtime_min ?? clockMin,
       hours_run: hoursRun,
       elec_end: payload.elecEnd ?? run.elec_end,
       hour_end: payload.hourEnd ?? run.hour_end,
@@ -353,8 +484,36 @@ export const runService = {
       weight_kg: payload.outWeight ?? run.weight_kg,
       workers: payload.workers ?? run.workers,
       remarks: payload.remarks ?? run.remarks,
-    });
-    return decorate(row);
+    };
+
+    const record = await shiftRecordFor(run);
+    if (!record) return decorate(await base.update(id, leg));
+
+    const merged = await base.update(record.id, mergePatch(record, run, leg));
+    await base.remove(run.id);
+    return { ...decorate(merged), merged_from: run.id };
+  },
+
+  /**
+   * Banks one more load against a run that is still going - the running tally
+   * the coarse refiner and the grinders keep, so each barrow is recorded as it
+   * comes off instead of being remembered until the shift ends.
+   *
+   * The whole list is sent each time, which makes adding and removing the same
+   * write. Nothing is weighed here: `weight_kg` stays empty, the run still
+   * reaches the Weigh tab when it stops, and the tally is what that tab opens
+   * with.
+   */
+  async tally(id, entries = []) {
+    const run = await base.findById(id);
+    if (run.ended_at) {
+      throw ApiError.conflict('That run is already logged - weigh it from the Weigh tab');
+    }
+    const list = (Array.isArray(entries) ? entries : [])
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map(round2);
+    return decorate(await base.update(id, { weigh_entries: list.length ? list : null }));
   },
 
   /**

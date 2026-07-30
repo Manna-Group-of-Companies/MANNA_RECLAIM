@@ -20,6 +20,8 @@ export const storageKeys = {
   user: 'manna.user',
   theme: 'manna.theme',
   offlineQueue: 'manna.offlineQueue',
+  /** The name the tablet is signing records with - see hooks/useSupervisor. */
+  supervisor: 'manna.supervisor',
 } as const;
 
 export default appEnv;

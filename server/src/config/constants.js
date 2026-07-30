@@ -3,11 +3,20 @@
 export const ROLES = {
   WORKER: 'worker',
   SUPERVISOR: 'supervisor',
+  LAB: 'lab',
   MANAGER: 'manager',
   ADMIN: 'admin',
 };
 
 export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
+
+/**
+ * The lab keeps the quality record, and nobody else writes to it: a supervisor
+ * has no way to sign off on a test they did not run. Admins are here because
+ * they can already delete a test - being able to correct one is the lesser
+ * power, and locking them out would leave a bad row with no way back.
+ */
+export const QUALITY_WRITE_ROLES = [ROLES.LAB, ...ADMIN_ROLES];
 
 export const SHIFTS = { DAY: 'Day', NIGHT: 'Night' };
 
@@ -15,6 +24,20 @@ export const SHIFTS = { DAY: 'Day', NIGHT: 'Night' };
 export const SHIFT_WINDOW = { dayStart: 510, dayEnd: 1230 };
 
 export const QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC'];
+
+/**
+ * The grades a batch is tracked as yielding: the rows of the batch card's grid,
+ * what the supervisor may mark, and what the close rule counts.
+ *
+ * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
+ * else - a run can be logged as DRC, the lab can test it, and it keeps its own
+ * quality chip - so nothing but the batch card and its rules leaves it alone.
+ *
+ * Kept as a list of its own rather than as a filter at each use, because the grid
+ * the crew reads, the marked count the chip shows and the close rule all have to
+ * be counting the same set. Mirrors BATCH_QUALITIES in the client's constants.
+ */
+export const BATCH_QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium'];
 
 export const DISPATCH_GRADES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Coarse', 'Sillsheet'];
 
@@ -97,6 +120,23 @@ export const WEIGHED_KINDS = ['grind', 'coarse', 'refiner'];
 /** The refiner passes a special-line grade goes through, and the grinders. */
 export const REFINER_IDS = ['PR2', 'R1', 'R3', 'R4'];
 export const GRINDER_IDS = ['CRK', 'GRD_K', 'GRD_S', 'GRD_O'];
+
+/**
+ * The refiner line split into the stages a batch's grade is tracked through -
+ * the three columns of the batch card's grade grid.
+ *
+ * A grade is refined on R3, or on R1 when R3 is down and stands in for it, then
+ * finished on R4. R4 is the only one of them that weighs, so logging a run there
+ * is also what settles which grade the batch actually yielded - see
+ * batch.service's markQuality().
+ *
+ * The pre-refiners are not a stage: they break a charge down before the grades
+ * are split out of it, so a batch reports which of them it went through rather
+ * than tracking them per grade.
+ */
+export const PRE_REFINER_IDS = ['PR1', 'PR2'];
+export const REFINE_STAGE_IDS = ['R3', 'R1'];
+export const FINAL_REFINER_IDS = ['R4'];
 
 /** A shift is 12 hours; a bearing over this many degrees is flagged. */
 export const SHIFT_MINUTES = 720;

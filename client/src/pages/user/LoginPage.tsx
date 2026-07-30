@@ -3,25 +3,29 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { clearError, login } from '@/features/auth/authSlice';
 import { Button } from '@/components/ui';
-import { userPaths } from '@/config/paths';
+import { homeFor } from '@/config/paths';
 import { appEnv } from '@/config/env';
 
 /** Name + PIN gate, same idea as the login overlay in the prototype. */
 export function LoginPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { status, error } = useAppSelector((s) => s.auth);
+  const { status, error, user } = useAppSelector((s) => s.auth);
   const [name, setName] = useState('');
   const [pin, setPin] = useState('');
 
   useEffect(() => () => void dispatch(clearError()), [dispatch]);
 
-  if (status === 'authenticated') return <Navigate to={userPaths.machines} replace />;
+  // Where they land is their role's own home: the lab has no Machines tab, and
+  // sending it there would only be turned around by the guard on that page.
+  if (status === 'authenticated') return <Navigate to={homeFor(user?.role)} replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const result = await dispatch(login({ name: name.trim(), pin }));
-    if (login.fulfilled.match(result)) navigate(userPaths.machines, { replace: true });
+    if (login.fulfilled.match(result)) {
+      navigate(homeFor(result.payload.user.role), { replace: true });
+    }
   };
 
   return (

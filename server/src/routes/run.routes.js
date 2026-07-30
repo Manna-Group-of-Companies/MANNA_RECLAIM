@@ -8,6 +8,7 @@ import {
   stopRunSchema,
   updateRunSchema,
   weighRunSchema,
+  tallyRunSchema,
   packRunSchema,
   pauseRunSchema,
   syncRunsSchema,
@@ -37,6 +38,7 @@ router.patch('/:id', validate({ params: idParam, body: updateRunSchema }), runs.
 router.delete('/:id', validate({ params: idParam }), runs.remove);
 router.post('/:id/stop', validate({ params: idParam, body: stopRunSchema }), runs.stop);
 router.post('/:id/weigh', validate({ params: idParam, body: weighRunSchema }), runs.weigh);
+router.post('/:id/tally', validate({ params: idParam, body: tallyRunSchema }), runs.tally);
 router.post('/:id/pack', validate({ params: idParam, body: packRunSchema }), runs.pack);
 router.post('/:id/pause', validate({ params: idParam, body: pauseRunSchema }), runs.pause);
 router.post('/:id/cancel', validate({ params: idParam }), runs.cancel);

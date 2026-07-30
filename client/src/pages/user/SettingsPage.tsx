@@ -1,45 +1,23 @@
 import { Link } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { logout } from '@/features/auth/authSlice';
-import { setSupervisor } from '@/features/ui/uiSlice';
-import { Button, SelectField, ViewHead } from '@/components/ui';
-import { ADMIN_ROLES, SUPERVISORS } from '@/config/constants';
-import { adminPaths, userPaths } from '@/config/paths';
+import { Button, ViewHead } from '@/components/ui';
+import { ADMIN_ROLES } from '@/config/constants';
+import { adminPaths, homeFor } from '@/config/paths';
 import { appEnv } from '@/config/env';
-import { useToast } from '@/hooks/useToast';
 
 export function SettingsPage() {
   const dispatch = useAppDispatch();
-  const notify = useToast();
   const user = useAppSelector((s) => s.auth.user);
   const online = useAppSelector((s) => s.ui.online);
-  const supervisor = useAppSelector((s) => s.ui.supervisor);
   const queued = useAppSelector((s) => s.runs.queue.length);
   const isAdmin = Boolean(user && ADMIN_ROLES.includes(user.role));
 
   return (
     <>
-      <ViewHead title="Settings" meta={<Link to={userPaths.machines}>← back</Link>} />
-
-      <section className="panel mb-3">
-        <SelectField
-          label="Supervisor on duty"
-          hint="Tagged on every run, temperature and verdict logged from this device."
-          value={supervisor}
-          onChange={(e) => {
-            dispatch(setSupervisor(e.target.value));
-            notify(e.target.value ? `Supervisor · ${e.target.value}` : 'Supervisor cleared');
-          }}
-          fieldClassName="!mb-0"
-        >
-          <option value="">— select —</option>
-          {SUPERVISORS.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </SelectField>
-      </section>
+      {/* Back to whichever page this account came from - Machines for the
+          floor, Quality for the lab. */}
+      <ViewHead title="Settings" meta={<Link to={homeFor(user?.role)}>← back</Link>} />
 
       <section className="panel mb-3">
         <dl className="space-y-2 text-[13px]">

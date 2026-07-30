@@ -1,6 +1,7 @@
 export { AdminLoginPage } from './AdminLoginPage';
 export { DashboardPage } from './DashboardPage';
 export { AdminHistoryPage } from './HistoryPage';
+export { AdminQualityPage } from './QualityPage';
 export { EfficiencyPage } from './EfficiencyPage';
 export { RatesPage } from './RatesPage';
 export { CostingPage } from './CostingPage';

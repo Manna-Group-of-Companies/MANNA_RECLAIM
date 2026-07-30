@@ -4,15 +4,42 @@ import type { Quality, DispatchGrade, Role, Shift } from '@/types/models';
 export const ROLES: Record<string, Role> = {
   WORKER: 'worker',
   SUPERVISOR: 'supervisor',
+  LAB: 'lab',
   MANAGER: 'manager',
   ADMIN: 'admin',
 };
 
 export const ADMIN_ROLES: Role[] = ['manager', 'admin'];
 
+/**
+ * Who gets which half of the shop-floor app.
+ *
+ * Quality is the lab's page and the lab's only page: the lab bench tests what
+ * the plant made and signs the batch off, and a supervisor has no business
+ * either recording that verdict or seeing an untested batch as their problem.
+ * So the two lists do not overlap - a lab account signs in to Quality alone,
+ * and everyone else gets the floor without it. A manager reads the same record
+ * from the back office instead, at adminPaths.quality, which is admin-only.
+ * Settings sits outside both lists, because every account needs a way back out.
+ */
+export const LAB_ROLES: Role[] = ['lab'];
+
+export const FLOOR_ROLES: Role[] = ['worker', 'supervisor', 'manager', 'admin'];
+
 export const SHIFTS: Shift[] = ['Day', 'Night'];
 
 export const QUALITIES: Quality[] = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC'];
+
+/**
+ * The grades a batch is tracked as yielding - the rows of the batch card's grid.
+ *
+ * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
+ * else: a refiner run can be logged as DRC, the lab tests it, and it keeps its
+ * own quality chip - only the batch card and its rules leave it alone. The API
+ * counts the same set, so the grid, the state chip and the close rule cannot
+ * disagree - mirrors BATCH_QUALITIES in server/src/config/constants.js.
+ */
+export const BATCH_QUALITIES: Quality[] = ['Special', 'SuperFine', 'Fine', 'Medium'];
 
 export const DISPATCH_GRADES: DispatchGrade[] = [
   'Special',
@@ -33,11 +60,11 @@ export const PRICE_LIST: Record<string, number> = {
 
 /** Tailwind classes per quality chip, used by the Badge component. */
 export const QUALITY_CLASS: Record<Quality, string> = {
-  Special: 'bg-quality-special text-bg',
-  SuperFine: 'bg-quality-superfine text-bg',
-  Fine: 'bg-quality-fine text-bg',
-  Medium: 'bg-quality-medium text-bg',
-  DRC: 'bg-quality-drc text-bg',
+  Special: 'bg-quality-special text-quality-on',
+  SuperFine: 'bg-quality-superfine text-quality-on',
+  Fine: 'bg-quality-fine text-quality-on',
+  Medium: 'bg-quality-medium text-quality-on',
+  DRC: 'bg-quality-drc text-quality-on',
 };
 
 export const FIREWOOD_KG_PER_LOAD = 550;
@@ -70,6 +97,18 @@ export const AUTOCLAVE_FORMS: AutoclaveForm[] = [
 /** The formulations that fit this vessel - specials first, then coarse. */
 export const autoclaveFormsFor = (capacity?: number | null): AutoclaveForm[] =>
   capacity == null ? [] : AUTOCLAVE_FORMS.filter((f) => f.capacity === capacity);
+
+/**
+ * Whether charging this formulation opens a batch the refiners work through.
+ *
+ * Only a special charge does. A coarse charge feeds the coarse line for the shift
+ * and a DRC charge is counted by its runs - neither is marked, staged or weighed
+ * in grades, so a batch record for one would sit on the list with nothing able to
+ * move it off. Both are still logged as runs, which is what dispatch, history and
+ * the costing read. The API applies the same rule and refuses either.
+ */
+export const opensBatch = (form?: AutoclaveForm | null): boolean =>
+  form?.type === 'special' && form.grade !== 'DRC';
 
 /**
  * Two hands charge two autoclaves between them, so a paired load costs one

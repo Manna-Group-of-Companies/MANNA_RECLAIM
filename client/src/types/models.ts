@@ -1,4 +1,4 @@
-export type Role = 'worker' | 'supervisor' | 'manager' | 'admin';
+export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin';
 export type Shift = 'Day' | 'Night';
 export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
@@ -32,24 +32,90 @@ export interface Machine {
   sub?: string | null;
 }
 
+/**
+ * One row of the batch card's grade grid: whether the batch was marked as
+ * yielding this grade, and how far that grade has got.
+ *
+ * `marked` is the supervisor's tick - or the tick logging a run on the final
+ * refiner made for them. The three stages are derived by the API from the runs
+ * logged against the batch number: refined on R3 (or R1 standing in for it),
+ * finished on R4, and weighed once there is a figure against it. `kg` is what
+ * has been weighed off this grade, which is the detail view's per-grade line.
+ */
+export interface BatchGrade {
+  quality: Quality;
+  marked: boolean;
+  refined: boolean;
+  finished: boolean;
+  weighed: boolean;
+  kg: number | null;
+}
+
+/** Material moved from one grade to another partway through a batch. */
+export interface BatchConversion {
+  id: string;
+  batch_no?: string | null;
+  from_quality?: Quality | null;
+  to_quality?: Quality | null;
+  qty_kg?: number | null;
+  stage?: string | null;
+  ts?: string | null;
+  shift_date?: string | null;
+  shift?: Shift | null;
+  supervisor?: string | null;
+}
+
+/**
+ * One autoclave charge, from the load that opened it to the close that files it
+ * away. A batch is never created on its own - loading an autoclave is what opens
+ * one - so `machine_id` is always the vessel it was charged in.
+ */
 export interface Batch {
   id: string;
   ref: string;
   machine_id: string;
   formulation?: string | null;
+  /**
+   * Which line the charge was on. Only a special charge becomes a batch the
+   * refiners work grades out of, so loading a coarse or DRC one opens none -
+   * every `coarse` or `drc` batch is a record that came across from the tablets,
+   * and those are kept off the batch list and the refiner pickers.
+   */
+  line?: 'special' | 'coarse' | 'drc';
+  /** What the vessel was charged with, in kg. */
   capacity?: number | null;
-  /** A paired autoclave load can yield more than one grade. */
+  /** The grades the batch is marked as yielding. Empty until they are marked. */
   qualities?: Quality[];
   grade?: Quality | null;
+  /** The load was shared with the twin vessel rather than charged alone. */
   paired?: boolean;
+  workers?: number | null;
+  /** Set by unloading the autoclave. Until then no refiner can pick it up. */
   autoclave_done?: boolean;
   status: 'open' | 'closed';
+  shift?: Shift | null;
   shift_date?: string | null;
   opened_at: string | null;
   opened_by?: string | null;
   closed_at?: string | null;
   closed_by?: string | null;
   remarks?: string | null;
+  loaded_at?: string | null;
+  unloaded_at?: string | null;
+  /** The grade x stage grid, one row per quality the plant makes. */
+  grades?: BatchGrade[];
+  /** Which pre-refiners broke this charge down. */
+  pre_refiners?: string[];
+  runs_count?: number;
+  marked_count?: number;
+  weighed_count?: number;
+  /** Loaded -> In autoclave -> mark qualities -> n/m weighed. */
+  state_label?: string;
+  /** Out of the vessel, yet nothing was ever logged against it. */
+  orphaned?: boolean;
+  /** Total weighed off the batch, and that over the charge. */
+  weighed_kg?: number | null;
+  yield_pct?: number | null;
   /** Folded in from the costing snapshot, null until the batch is costed. */
   stage?: string | null;
   output_kg?: number | null;
@@ -78,13 +144,29 @@ export interface Run {
   formulation?: string | null;
   capacity?: number | null;
   quality?: Quality | null;
+  /**
+   * The batches a special-line pass drew from - the one being refined first,
+   * then the tailings mixed into it. Stored as four columns, read back as one
+   * list; empty on every run that was not a mix.
+   */
+  sources?: string[] | null;
   mesh?: string | null;
   tyre_type?: string | null;
   shift_date: string;
   shift: Shift;
   supervisor?: string | null;
   workers?: number | null;
+  /**
+   * How many start/stops this record combines. A shiftwise machine keeps one
+   * record per shift, so stopping and restarting it inside the shift folds back
+   * into the same row and lifts this instead of opening a second one.
+   */
   passes?: number | null;
+  /**
+   * Set only on the answer to a stop that was folded into the shift's existing
+   * record: the id of the row that went, so the tablet can drop it.
+   */
+  merged_from?: string | null;
   paired?: boolean;
   started_at: string;
   ended_at?: string | null;
@@ -151,6 +233,13 @@ export interface QualityTest {
   /** The lab's report, once it has been uploaded - a photo or a PDF. */
   attachment_url?: string | null;
   attachment_name?: string | null;
+}
+
+/** The whole record of one batch - what the batch detail view is drawn from. */
+export interface BatchDetail extends Batch {
+  runs: Run[];
+  conversions: BatchConversion[];
+  qualityTests: QualityTest[];
 }
 
 export interface DispatchLoad {

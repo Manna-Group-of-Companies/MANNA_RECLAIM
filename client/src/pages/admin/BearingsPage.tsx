@@ -45,8 +45,8 @@ function TrendChart({ points }: { points: Point[] }) {
     <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       {gridlines.map((g) => (
         <g key={g}>
-          <line x1={padL} y1={Y(g)} x2={W - padR} y2={Y(g)} stroke="#1d2731" />
-          <text x="2" y={Y(g) + 3} fill="#6f818f" fontSize="9">
+          <line x1={padL} y1={Y(g)} x2={W - padR} y2={Y(g)} stroke="var(--rule)" />
+          <text x="2" y={Y(g) + 3} fill="var(--ink-faint)" fontSize="9">
             {g}
           </text>
         </g>
@@ -56,14 +56,14 @@ function TrendChart({ points }: { points: Point[] }) {
         y1={limitY}
         x2={W - padR}
         y2={limitY}
-        stroke="#ef6b5b"
+        stroke="var(--err)"
         strokeWidth="1.2"
         strokeDasharray="5 4"
       />
-      <text x={W - padR} y={limitY - 4} fill="#ef6b5b" fontSize="9" textAnchor="end">
+      <text x={W - padR} y={limitY - 4} fill="var(--err)" fontSize="9" textAnchor="end">
         {BEARING_TEMP_LIMIT_C}°
       </text>
-      <path d={path} fill="none" stroke="#7fb1d8" strokeWidth="1.8" />
+      <path d={path} fill="none" stroke="var(--brand)" strokeWidth="1.8" />
       {points.map((p, i) => {
         const hot = p.v >= BEARING_TEMP_LIMIT_C;
         return (
@@ -72,14 +72,14 @@ function TrendChart({ points }: { points: Point[] }) {
             cx={X(p.t).toFixed(1)}
             cy={Y(p.v).toFixed(1)}
             r={hot ? 3.2 : 2.2}
-            fill={hot ? '#ef6b5b' : '#7fb1d8'}
+            fill={hot ? 'var(--err)' : 'var(--brand)'}
           />
         );
       })}
-      <text x={padL} y={H - 6} fill="#6f818f" fontSize="9">
+      <text x={padL} y={H - 6} fill="var(--ink-faint)" fontSize="9">
         {dayLong(new Date(t0).toISOString().slice(0, 10))}
       </text>
-      <text x={W - padR} y={H - 6} fill="#6f818f" fontSize="9" textAnchor="end">
+      <text x={W - padR} y={H - 6} fill="var(--ink-faint)" fontSize="9" textAnchor="end">
         {dayLong(new Date(t1).toISOString().slice(0, 10))}
       </text>
     </svg>

@@ -12,11 +12,12 @@ import {
   Button,
   EmptyState,
   PageLoader,
-  Readout,
+  SupervisorPick,
   TextField,
   ViewHead,
 } from '@/components/ui';
 import { icons } from '@/config/icons';
+import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { ago, minutes } from '@/utils/format';
 import { currentShift, todayISO } from '@/utils/date';
@@ -35,7 +36,8 @@ export function BearingPage() {
   const logs = useAppSelector((s) => s.maintenance.bearings);
   const active = useAppSelector((s) => s.runs.active);
   const machines = useAppSelector((s) => s.machines.items);
-  const supervisor = useAppSelector((s) => s.ui.supervisor);
+  // The account signed in tags the log unless the crew switches the name.
+  const { name: supervisor } = useSupervisor();
   const loading = useAppSelector((s) => s.machines.loading);
 
   const [target, setTarget] = useState<BearingDue | null>(null);
@@ -176,7 +178,7 @@ export function BearingPage() {
               }`
             : undefined
         }
-        led="radial-gradient(circle at 35% 30%,#9fe0ea,var(--elec))"
+        led="var(--led-elec)"
         onClose={() => setTarget(null)}
         footer={
           <>
@@ -207,7 +209,7 @@ export function BearingPage() {
                 />
               );
             })}
-            <Readout label="Supervisor" value={supervisor || '—'} />
+            <SupervisorPick fieldClassName="mt-3" note="— signs these temperatures" />
           </>
         )}
       </BottomSheet>

@@ -3,6 +3,7 @@ import { AdminLayout } from '@/components/layout';
 import { ProtectedRoute } from './ProtectedRoute';
 import {
   AdminHistoryPage,
+  AdminQualityPage,
   BearingsPage,
   CostingPage,
   DashboardPage,
@@ -25,6 +26,7 @@ export const adminRoutes: RouteObject[] = [
           { index: true, element: <Navigate to={adminPaths.dashboard} replace /> },
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'history', element: <AdminHistoryPage /> },
+          { path: 'quality', element: <AdminQualityPage /> },
           { path: 'efficiency', element: <EfficiencyPage /> },
           { path: 'rates', element: <RatesPage /> },
           { path: 'costing', element: <CostingPage /> },

@@ -25,6 +25,12 @@ export const startRunSchema = z.object({
    * Weigh tab and so is never bagged.
    */
   nonProduction: z.boolean().optional(),
+  /**
+   * The batches a special-line pass drew from, the one being refined first and
+   * the tailings mixed into it after. Four is the ceiling because that is how
+   * many columns the tablets kept them in - see src1..src4 in config/tables.
+   */
+  sources: z.array(z.string().max(60)).max(4).optional().nullable(),
   // The refiner crews read both meters off the machine as they start it. A
   // reading of zero is a mis-key rather than a meter that has never turned, so
   // it is rejected the same way the tablets reject it.
@@ -90,6 +96,17 @@ export const updateRunSchema = z
 export const weighRunSchema = z.object({
   outWeight: z.coerce.number().min(0),
   entries: z.array(z.coerce.number().min(0)).max(60).optional(),
+});
+
+/**
+ * The running tally kept while a shiftwise machine is still going: each load is
+ * banked as it comes off rather than held in someone's head until the shift
+ * ends. The whole list is sent every time, so adding one and removing one are
+ * the same call - nothing here weighs the run, which still happens in the Weigh
+ * tab once the machine has stopped.
+ */
+export const tallyRunSchema = z.object({
+  entries: z.array(z.coerce.number().positive()).max(60),
 });
 
 /**

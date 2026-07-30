@@ -103,7 +103,10 @@ export function WeighPage() {
   const open = (run: Run) => {
     setTarget(run);
     setCorrecting(false);
-    setEntries([]);
+    // A shiftwise machine banks each load as it comes off, so a run can arrive
+    // here with its weighings already against it - this tab is where they are
+    // totalled and filed rather than where they are all typed.
+    setEntries(entriesOf(run));
     setWeight('');
     setTotal('');
   };
@@ -294,7 +297,7 @@ export function WeighPage() {
             : ''
         }
         subtitle={target ? subtitleOf(target) : undefined}
-        led="var(--elec)"
+        led="var(--led-elec)"
         onClose={() => setTarget(null)}
         footer={
           <>
@@ -383,7 +386,9 @@ export function WeighPage() {
           <>
             <Readout label="Total" value={`${sum(entries)} kg`} className="mt-3" />
             <div className="hint">
-              Add each barrow as it comes off the scale, or type one weight and save.
+              {target && entriesOf(target).length > 0
+                ? 'Tallied while the machine ran — correct the list if needed, then save.'
+                : 'Add each barrow as it comes off the scale, or type one weight and save.'}
             </div>
           </>
         )}

@@ -235,7 +235,7 @@ export function DispatchPage() {
         open={building}
         title="New dispatch"
         subtitle="One customer, one vehicle, one driver — any mix of grades."
-        led="radial-gradient(circle at 35% 30%,#c8f0a0,var(--amber))"
+        led="var(--led-brand)"
         onClose={reset}
         footer={
           <>

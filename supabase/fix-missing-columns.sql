@@ -21,8 +21,28 @@ alter table public.runs add column if not exists needs_weigh boolean default fal
 
 -- The individual weighings behind a run's weight, so the Weigh tab's correction
 -- sheet can show what went on the scale. Without it a correction still saves the
--- total; only the barrow-by-barrow breakdown is lost.
+-- total; only the barrow-by-barrow breakdown is lost. It is also where the
+-- coarse and grinding lines bank each load as it comes off a running machine.
 alter table public.runs add column if not exists weigh_entries jsonb;
+
+-- The shiftwise lines keep one record per machine per shift, so a machine
+-- stopped and restarted inside the shift folds back into it: `passes` is how
+-- many start/stops that record combines. The tablets wrote this column, so it
+-- is normally already there.
+alter table public.runs add column if not exists passes integer default 1;
+
+-- The batches a special-line pass drew from - the one being refined, then the
+-- tailings of others mixed into it. Four columns rather than a list, which is
+-- how the tablets kept them.
+alter table public.runs add column if not exists src1 text;
+alter table public.runs add column if not exists src2 text;
+alter table public.runs add column if not exists src3 text;
+alter table public.runs add column if not exists src4 text;
+
+-- Every stop on the coarse or grinding line looks for the record its shift
+-- already has, so that lookup gets an index of its own.
+create index if not exists runs_machine_shift_idx
+  on public.runs (machine_id, shift_date, shift);
 
 -- Weighbridge loads: without these a dispatch cannot carry its loads at all.
 alter table public.dispatch_loads add column if not exists dispatch_id text;
@@ -44,6 +64,13 @@ alter table public.bearing_logs add column if not exists notes text;
 
 -- Who last saved the costing inputs on the Rates tab.
 alter table public.cost_rates add column if not exists updated_by text;
+
+-- The lab bench signs in as its own role: Quality is the only tab it gets, and
+-- the only one anybody else does not. Without this the check constraint written
+-- by the original schema.sql rejects a lab account outright.
+alter table public.users drop constraint if exists users_role_check;
+alter table public.users add constraint users_role_check
+  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin'));
 
 -- PostgREST caches the table shapes; this makes it pick the new columns up
 -- straight away instead of on its next reload.

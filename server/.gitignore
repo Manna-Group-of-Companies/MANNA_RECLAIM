@@ -8,6 +8,9 @@ node_modules/
 .env.development.local
 .env.production.local
 .env.test.local
+# a copy of .env is still a copy of the secrets
+.env.bak
+.env.*.bak
 
 # logs
 logs/

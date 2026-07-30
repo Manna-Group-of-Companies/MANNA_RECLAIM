@@ -20,7 +20,20 @@ export interface MachineCardProps {
   onBreakdown: (machine: Machine) => void;
   onRepair: (log: MaintenanceLog) => void;
   onBearing: (machine: Machine) => void;
+  /** Opens the running tally on a shiftwise machine whose output is weighed. */
+  onTally: (run: Run) => void;
 }
+
+/**
+ * Whether this run keeps a running tally: a machine run for a shift, whose
+ * output is weighed afterwards, so each load is banked as it comes off rather
+ * than remembered until the shift ends. That is the coarse refiner and the
+ * grinders - never a batch pass, which is weighed once against its batch.
+ */
+const tallies = (machine: Machine, run?: Run) =>
+  Boolean(machine.out_weight) && (run?.line === 'coarse' || run?.line === 'grind');
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * One machine, in the three states it can be in: running (timer + pause),
@@ -40,6 +53,7 @@ export function MachineCard({
   onBreakdown,
   onRepair,
   onBearing,
+  onTally,
 }: MachineCardProps) {
   const running = Boolean(run);
   const paused = Boolean(run?.paused);
@@ -53,6 +67,10 @@ export function MachineCard({
   const pillTone = isDown ? 'down' : running ? (paused ? 'paused' : 'run') : '';
 
   const sub = machine.sub ?? (machine.kind === 'autoclave' && machine.capacity ? `${machine.capacity} kg` : '');
+
+  const showTally = !isDown && tallies(machine, run);
+  const tally = run?.weigh_entries ?? [];
+  const tallied = tally.length ? round2(tally.reduce((total, n) => total + n, 0)) : 0;
 
   const lastLine = last
     ? `last ${last.batch_no ?? last.shift ?? ''}${last.quality ? ` · ${last.quality}` : ''}${
@@ -78,6 +96,17 @@ export function MachineCard({
           {sub && <small>{sub}</small>}
         </button>
 
+        {showTally && run && (
+          <button
+            type="button"
+            className="tbtn"
+            style={{ color: 'var(--steel)' }}
+            onClick={() => onTally(run)}
+            aria-label={`Add weight — ${machine.name}`}
+          >
+            <Icon name="scale" size={16} strokeWidth={2} />
+          </button>
+        )}
         {bearing && (
           <button
             type="button"
@@ -126,6 +155,11 @@ export function MachineCard({
               {run.quality && <QualityChip quality={run.quality} />}
               {run.mesh && <FormChip style={{ color: 'var(--steel)' }}>{run.mesh}</FormChip>}
               {run.out_weight != null && <FormChip>{kg(run.out_weight)}</FormChip>}
+              {tally.length > 0 && (
+                <FormChip style={{ color: 'var(--steel)' }}>
+                  {kg(tallied)} · {tally.length} load{tally.length > 1 ? 's' : ''}
+                </FormChip>
+              )}
             </div>
             <span className={cn('timer', paused && 'paused')}>{elapsed(run.started_at)}</span>
           </div>

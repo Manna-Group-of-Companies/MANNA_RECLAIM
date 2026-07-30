@@ -27,7 +27,13 @@ export const env = {
   },
   rateLimit: {
     windowMs: int(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
-    max: int(process.env.RATE_LIMIT_MAX, 300),
+    // The whole API shares this budget, and in development the whole plant is
+    // one IP - every tab, every ↻ Refresh and every HMR reload spends from it.
+    // 300 is a shift's worth of tablets behind a router; a dev with two tabs
+    // open burns it in minutes and is then locked out of /auth/login too, since
+    // this limiter runs before the auth one. So development gets a loose
+    // ceiling, exactly as authMax below does.
+    max: int(process.env.RATE_LIMIT_MAX, process.env.NODE_ENV === 'production' ? 300 : 5000),
     // Credential endpoints get their own, tighter budget. Only failed attempts
     // are counted, so a shop floor signing in normally never reaches it; in
     // development the ceiling is loose so restarts and retries don't lock you out.

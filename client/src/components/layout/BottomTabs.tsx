@@ -3,6 +3,8 @@ import { useAppSelector } from '@/app/hooks';
 import { userPaths } from '@/config/paths';
 import { Icon } from '@/components/ui';
 import type { IconName } from '@/config/icons';
+import type { Role } from '@/types/models';
+import { FLOOR_ROLES, LAB_ROLES } from '@/config/constants';
 import { cn } from '@/utils/cn';
 
 interface Tab {
@@ -11,6 +13,8 @@ interface Tab {
   icon: IconName;
   /** Which pending count sits on the badge, if any. */
   badge?: 'weigh' | 'packing' | 'quality' | 'bearing';
+  /** Who this tab is for. A tab is floor work unless it says otherwise. */
+  roles?: Role[];
 }
 
 /** The eight shop-floor tabs, in the prototype's order. */
@@ -20,16 +24,31 @@ const tabs: Tab[] = [
   { to: userPaths.weigh, label: 'Weigh', icon: 'weigh', badge: 'weigh' },
   { to: userPaths.packing, label: 'Packing', icon: 'packing', badge: 'packing' },
   { to: userPaths.dispatch, label: 'Dispatch', icon: 'dispatch' },
-  { to: userPaths.quality, label: 'Quality', icon: 'quality', badge: 'quality' },
+  { to: userPaths.quality, label: 'Quality', icon: 'quality', badge: 'quality', roles: LAB_ROLES },
   { to: userPaths.history, label: 'History', icon: 'history' },
   { to: userPaths.bearing, label: 'Bearing', icon: 'bearing', badge: 'bearing' },
 ];
 
+/** What a badge count means, so it is not read out as a bare number. */
+const badgeNoun: Record<NonNullable<Tab['badge']>, string> = {
+  weigh: 'waiting to be weighed',
+  packing: 'waiting to be packed',
+  quality: 'awaiting test',
+  bearing: 'due for temperatures',
+};
+
 /**
  * Badges are the whole point of this bar: they are how the crew knows there is
- * work waiting on a tab they are not looking at.
+ * work waiting on a tab they are not looking at. The bar is the same markup at
+ * every size - `.tabs` lays it along the bottom of a phone and turns it into a
+ * left rail from 900px up.
+ *
+ * What it holds depends on who is holding the tablet: the lab gets Quality and
+ * only Quality, the floor gets the other seven. The routes enforce the same
+ * split, so a hidden tab is not a hidden page - it is a page that is not theirs.
  */
 export function BottomTabs() {
+  const role = useAppSelector((s) => s.auth.user?.role);
   const pendingWeigh = useAppSelector((s) => s.runs.pendingWeigh.length);
   const pendingPack = useAppSelector((s) => s.runs.pendingPack.length);
   const pendingQuality = useAppSelector((s) => s.quality.pending.length);
@@ -42,13 +61,25 @@ export function BottomTabs() {
     bearing: bearingsDue,
   } as const;
 
+  const visible = role ? tabs.filter((tab) => (tab.roles ?? FLOOR_ROLES).includes(role)) : [];
+
   return (
-    <nav className="tabs">
-      {tabs.map(({ to, label, icon, badge }) => {
+    <nav className="tabs" aria-label="Sections">
+      {visible.map(({ to, label, icon, badge }) => {
         const count = badge ? counts[badge] : 0;
         return (
-          <NavLink key={to} to={to} className={({ isActive }) => cn(isActive && 'active')}>
-            {count > 0 && <i className="tabbadge">{count}</i>}
+          <NavLink
+            key={to}
+            to={to}
+            title={label}
+            className={({ isActive }) => cn(isActive && 'active')}
+          >
+            {count > 0 && (
+              <i className="tabbadge">
+                {count}
+                <span className="sr-only"> {badge ? badgeNoun[badge] : ''}</span>
+              </i>
+            )}
             <Icon name={icon} size={23} />
             <span>{label}</span>
           </NavLink>

@@ -25,7 +25,7 @@ create table if not exists public.users (
   id          text primary key default gen_random_uuid()::text,
   name        text not null,
   role        text not null default 'supervisor'
-                check (role in ('worker', 'supervisor', 'manager', 'admin')),
+                check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin')),
   active      boolean not null default true,
   pin_hash    text not null,
   created_at  timestamptz not null default now(),
@@ -119,6 +119,20 @@ alter table public.runs add column if not exists non_production boolean default 
 -- this column existed read null, which is one weighing by another name.
 alter table public.runs add column if not exists weigh_entries jsonb;
 
+-- The coarse and grinding lines are run for a shift, not for a batch, so they
+-- keep one record per machine per shift date per shift: a machine stopped and
+-- restarted inside the shift is folded back into it rather than opening a
+-- second row, and `passes` is how many start/stops that record combines.
+alter table public.runs add column if not exists passes integer default 1;
+
+-- The batches a special-line pass drew from - the one being refined first, then
+-- the tailings of other batches mixed into it. Four columns rather than a list,
+-- which is how the tablets kept them.
+alter table public.runs add column if not exists src1 text;
+alter table public.runs add column if not exists src2 text;
+alter table public.runs add column if not exists src3 text;
+alter table public.runs add column if not exists src4 text;
+
 -- A quality test can be pinned to the run and machine it was drawn from,
 -- not just to the batch number.
 alter table public.quality_tests add column if not exists run_id     text;
@@ -171,6 +185,8 @@ create unique index if not exists customer_rates_customer_grade_key
 -- 5. Indexes for the queries the API actually runs
 -- -----------------------------------------------------------------------------
 create index if not exists runs_shift_date_shift_idx  on public.runs (shift_date, shift);
+-- Every stop on a shiftwise line looks for the record its shift already has.
+create index if not exists runs_machine_shift_idx     on public.runs (machine_id, shift_date, shift);
 create index if not exists runs_machine_ended_idx     on public.runs (machine_id, ended_at);
 create index if not exists runs_batch_no_idx          on public.runs (batch_no);
 create index if not exists bearing_logs_ts_idx        on public.bearing_logs (ts desc);

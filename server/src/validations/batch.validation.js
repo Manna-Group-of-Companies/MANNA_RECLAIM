@@ -1,24 +1,44 @@
 import { z } from 'zod';
-import { qualityEnum, isoDate, shiftEnum } from './common.validation.js';
+import { batchQualityEnum, qualityEnum, isoDate, shiftEnum } from './common.validation.js';
 
+/**
+ * Opening a batch - which only ever happens by loading an autoclave, so
+ * `machine_id` is required and the service checks that it names one.
+ *
+ * There is no `qualities` or `grade` here on purpose: what a charge yields is
+ * settled at the refiners, by the supervisor marking grades on the batch card or
+ * by a run being logged on the final refiner. A new batch always starts empty.
+ */
 export const createBatchSchema = z.object({
   machine_id: z.string().min(1),
   ref: z.string().min(1),
   formulation: z.string().optional().nullable(),
+  /** What the vessel was charged with, in kg. */
   capacity: z.coerce.number().int().positive().optional().nullable(),
-  grade: qualityEnum.optional().nullable(),
   /** The autoclave load that opened it was shared with the twin vessel. */
   paired: z.boolean().optional(),
   /** The shift the load belongs to - a night shift keeps its start date. */
+  shift: shiftEnum.optional(),
   shift_date: isoDate.optional(),
-  opened_at: z.string().datetime().optional(),
   opened_by: z.string().optional().nullable(),
-  status: z.enum(['open', 'closed']).default('open'),
 });
 
-export const updateBatchSchema = createBatchSchema.partial();
+/**
+ * Correcting an open batch. `status` is not settable - a batch is filed away
+ * through close, and brought back through reopen, both of which carry rules the
+ * plain patch does not.
+ */
+export const updateBatchSchema = createBatchSchema
+  .partial()
+  .extend({ remarks: z.string().max(500).optional().nullable() });
 
 export const closeBatchSchema = z.object({ remarks: z.string().max(500).optional() });
+
+/** The supervisor ticking a grade off the batch card, or taking one back off. */
+export const batchQualitySchema = z.object({
+  quality: batchQualityEnum,
+  marked: z.boolean().default(true),
+});
 
 /**
  * A lab verdict. `batchNo` is what the tablets actually key on - `batchId` is

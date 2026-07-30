@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 
 export interface BottomSheetProps {
@@ -19,7 +19,9 @@ export interface BottomSheetProps {
 
 /**
  * Every write on the shop floor happens in this sheet: it slides up over a
- * scrim, keeps the page behind it, and closes on Escape or a tap outside.
+ * scrim on a phone, opens as a centred dialog on a desk screen, and closes on
+ * Escape, on the × or on a tap outside. `.sheet` is the skin the back office
+ * shares; `.app-sheet` is what fixes it to the screen.
  */
 export function BottomSheet({
   open,
@@ -31,14 +33,29 @@ export function BottomSheet({
   footer,
   after,
 }: BottomSheetProps) {
+  const titleId = useId();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  /** Where focus was before the sheet took it, so it can be handed back. */
+  const opener = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
+
+    // A sheet that opens without taking focus leaves the keyboard back on the
+    // page behind it - the next Tab walks the page, not the form just opened.
+    opener.current = document.activeElement as HTMLElement | null;
+    const focusable = sheetRef.current?.querySelector<HTMLElement>(
+      'input, select, textarea, button:not(.sheet-x)',
+    );
+    (focusable ?? sheetRef.current)?.focus({ preventScroll: true });
+
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
+      opener.current?.focus?.({ preventScroll: true });
     };
   }, [open, onClose]);
 
@@ -46,15 +63,21 @@ export function BottomSheet({
     <>
       <div aria-hidden onClick={onClose} className={cn('scrim', open && 'show')} />
       <div
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-hidden={!open}
-        className={cn('sheet', open && 'show')}
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={cn('sheet app-sheet', open && 'show')}
       >
         <div className="grab" />
         <div className="sheet-h">
           {led && <span className="led" style={{ background: led }} />}
-          <b>{title}</b>
+          <b id={titleId}>{title}</b>
+          <button type="button" className="sheet-x" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         {subtitle && <div className="sheet-sub">{subtitle}</div>}
         {children}

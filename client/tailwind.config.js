@@ -4,24 +4,48 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
-      /* Palette lifted from the index.html / back.html prototypes so the
-         React port keeps the same industrial dark look. */
+      /*
+       * These point at the CSS variables rather than repeating their values.
+       *
+       * That is what lets one class mean two things in the two rooms of this
+       * app: the shop floor is light, the back office is dark, and a component
+       * shared between them - the modal, the table, the spinner - says
+       * `text-ink-dim` once and gets whichever is right for where it is
+       * rendered. A literal hex here would have pinned it to one of them and
+       * broken it in the other.
+       *
+       * `brand` carries an rgb triplet as well, because Tailwind can only
+       * apply an opacity modifier (`ring-brand/20`) to a channel list.
+       */
       colors: {
-        bg: { DEFAULT: '#13160f', soft: '#191d13' },
-        panel: { DEFAULT: '#1d2217', raised: '#232a1c', field: '#161310' },
-        line: { DEFAULT: '#36402c', strong: '#475238' },
-        ink: { DEFAULT: '#e9edde', dim: '#9aa386', faint: '#6f7860' },
-        brand: { DEFAULT: '#62b23a', soft: '#8fcf66', deep: '#3f8a22' },
-        ember: '#e0762e',
-        elec: '#46c2d6',
-        steel: '#9bb0c4',
-        state: { ok: '#7bc86c', warn: '#e9b53a', err: '#e8604c', pause: '#e9b53a' },
+        bg: { DEFAULT: 'var(--bg)', soft: 'var(--bg2)' },
+        panel: { DEFAULT: 'var(--panel)', raised: 'var(--panel2)', field: 'var(--sunken)' },
+        line: { DEFAULT: 'var(--line)', strong: 'var(--line2)' },
+        ink: { DEFAULT: 'var(--ink)', dim: 'var(--ink-dim)', faint: 'var(--ink-faint)' },
+        brand: {
+          DEFAULT: 'rgb(var(--brand-rgb) / <alpha-value>)',
+          soft: 'var(--brand-soft)',
+          deep: 'var(--brand-deep)',
+          on: 'var(--on-fill)',
+        },
+        ember: 'var(--ember)',
+        elec: 'var(--elec)',
+        steel: 'var(--steel)',
+        state: {
+          ok: 'var(--ok)',
+          warn: 'var(--warn)',
+          err: 'var(--err)',
+          pause: 'var(--pause)',
+        },
         quality: {
-          special: '#46c2d6',
-          superfine: '#86d36a',
-          fine: '#e9b53a',
-          medium: '#cf9a5e',
-          drc: '#b58be0',
+          special: 'var(--q-special)',
+          superfine: 'var(--q-superfine)',
+          fine: 'var(--q-fine)',
+          medium: 'var(--q-medium)',
+          coarse: 'var(--q-coarse)',
+          drc: 'var(--q-drc)',
+          sillsheet: 'var(--q-sillsheet)',
+          on: 'var(--on-fill)',
         },
       },
       fontFamily: {
@@ -30,8 +54,8 @@ export default {
       },
       borderRadius: { card: '14px', field: '10px' },
       boxShadow: {
-        card: '0 1px 0 rgba(54,48,36,.5) inset, 0 8px 18px -14px #000',
-        sheet: '0 -10px 30px -12px #000',
+        card: 'var(--shadow-card)',
+        sheet: 'var(--shadow-sheet)',
       },
       keyframes: {
         pulseLed: { '0%,100%': { opacity: '1' }, '50%': { opacity: '.55' } },

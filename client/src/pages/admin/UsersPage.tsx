@@ -6,7 +6,16 @@ import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
 import type { Role, User } from '@/types/models';
 
-const roles: Role[] = ['worker', 'supervisor', 'manager', 'admin'];
+const roles: Role[] = ['worker', 'supervisor', 'lab', 'manager', 'admin'];
+
+/** What each role reaches, shown under the picker so the choice is not a guess. */
+const roleNote: Record<Role, string> = {
+  worker: 'Shop floor, without Quality.',
+  supervisor: 'Shop floor, without Quality.',
+  lab: 'Quality only - no machines, batches or dispatch.',
+  manager: 'Shop floor and this back office.',
+  admin: 'Shop floor and this back office.',
+};
 
 /** Local state only - user administration is small and does not need a slice. */
 export function UsersPage() {
@@ -62,7 +71,8 @@ export function UsersPage() {
       <div className="mx-0.5 mt-3">
         <h1 className="text-lg">Users</h1>
         <div className="sub">
-          Who can sign in, and what they reach. Manager and admin also get this back office.
+          Who can sign in, and what they reach. Manager and admin also get this back office;
+          a lab account gets the Quality tab and nothing else.
         </div>
       </div>
 
@@ -140,6 +150,7 @@ export function UsersPage() {
                   </option>
                 ))}
               </select>
+              <div className="sub mt-1">{roleNote[draft.role]}</div>
             </div>
           </div>
         )}

@@ -129,7 +129,7 @@ function RunDetail({
       open
       title={`${run.machine ?? run.machine_id}${run.batch_no ? ` · Batch ${run.batch_no}` : ''}`}
       subtitle={`${run.kind ?? ''}${run.line ? ` · ${run.line} line` : ''} · ${dayLong(run.shift_date)}${
-        (run.passes ?? 1) > 1 ? ` · ${run.passes} passes merged` : ''
+        (run.passes ?? 1) > 1 ? ` · ${run.passes} start/stops combined` : ''
       }`}
       onClose={onClose}
       footer={

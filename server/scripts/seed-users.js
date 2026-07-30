@@ -31,6 +31,7 @@ const SEED_USERS = [
   { name: 'Mathai', role: ROLES.SUPERVISOR, pin: '1111' },
   { name: 'Rahul', role: ROLES.SUPERVISOR, pin: '2222' },
   { name: 'Devanand', role: ROLES.SUPERVISOR, pin: '3333' },
+  { name: 'Lab', role: ROLES.LAB, pin: '4444' },
   { name: 'Manager', role: ROLES.MANAGER, pin: '2525' },
 ];
 

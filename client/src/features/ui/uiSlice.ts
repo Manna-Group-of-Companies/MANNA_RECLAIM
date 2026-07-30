@@ -1,4 +1,5 @@
 import { createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit';
+import { storageKeys } from '@/config/env';
 import { storage } from '@/utils/storage';
 
 export type ToastKind = 'ok' | 'err' | 'warn';
@@ -15,11 +16,6 @@ interface UiState {
   sheet: { name: string | null; payload: unknown };
   online: boolean;
   /**
-   * Who is on duty. Tagged onto everything logged from this device, so it
-   * survives a reload rather than being asked for again every shift.
-   */
-  supervisor: string;
-  /**
    * Bumped by the back office's Refresh button. Pages list it in their effect
    * deps, so one button re-runs whatever the current page fetches without the
    * layout needing to know what that is.
@@ -32,17 +28,25 @@ interface UiState {
    * not persisted: a reload asks again.
    */
   costingUnlocked: boolean;
+  /**
+   * The supervisor the tablet is signing records with, once someone has switched
+   * it. Null means nobody has, and the signed-in account's own name stands.
+   *
+   * Held here rather than per-sheet so the choice holds across the start sheet,
+   * the stop sheet and the Bearing tab - a shift is signed by one person, not
+   * re-picked at every entry. Persisted, because the tablet gets reloaded mid
+   * shift and re-picking would be the crew's job to remember.
+   */
+  supervisor: string | null;
 }
-
-const SUPERVISOR_KEY = 'manna.supervisor';
 
 const initialState: UiState = {
   toasts: [],
   sheet: { name: null, payload: null },
   online: navigator.onLine,
-  supervisor: storage.get<string>(SUPERVISOR_KEY, ''),
   refreshTick: 0,
   costingUnlocked: false,
+  supervisor: storage.get<string | null>(storageKeys.supervisor, null),
 };
 
 const uiSlice = createSlice({
@@ -69,12 +73,15 @@ const uiSlice = createSlice({
     setOnline: (state, action: PayloadAction<boolean>) => {
       state.online = action.payload;
     },
-    setSupervisor: (state, action: PayloadAction<string>) => {
-      state.supervisor = action.payload;
-      storage.set(SUPERVISOR_KEY, action.payload);
-    },
     requestRefresh: (state) => {
       state.refreshTick += 1;
+    },
+    /** Switch who is signing. Blank hands the record back to the account. */
+    setSupervisor: (state, action: PayloadAction<string>) => {
+      const name = action.payload.trim() || null;
+      state.supervisor = name;
+      if (name) storage.set(storageKeys.supervisor, name);
+      else storage.remove(storageKeys.supervisor);
     },
     unlockCosting: (state) => {
       state.costingUnlocked = true;
@@ -91,8 +98,8 @@ export const {
   openSheet,
   closeSheet,
   setOnline,
-  setSupervisor,
   requestRefresh,
+  setSupervisor,
   unlockCosting,
   lockCosting,
 } = uiSlice.actions;

@@ -31,6 +31,11 @@ export interface StartRunPayload {
   hourStart?: number | null;
   /** The special line's rare pass that yields nothing to weigh. */
   nonProduction?: boolean;
+  /**
+   * The batches a special-line pass draws from: the one being refined first,
+   * then the tailings of others mixed into it. Up to four in all.
+   */
+  sources?: string[] | null;
 }
 
 export interface StopRunPayload {
@@ -121,6 +126,15 @@ export const runService = {
       outWeight,
       ...(entries ? { entries } : {}),
     });
+    return res.data.data;
+  },
+
+  /**
+   * Replaces the running tally on a machine that is still going. The whole list
+   * goes every time, so adding a load and removing one are the same call.
+   */
+  async tally(id: string, entries: number[]): Promise<Run> {
+    const res = await axiosClient.post<ApiEnvelope<Run>>(endpoints.runs.tally(id), { entries });
     return res.data.data;
   },
 

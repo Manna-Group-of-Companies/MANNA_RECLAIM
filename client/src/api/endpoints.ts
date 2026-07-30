@@ -22,6 +22,7 @@ export const endpoints = {
     root: '/batches',
     open: '/batches/open',
     byId: (id: string) => `/batches/${id}`,
+    qualities: (id: string) => `/batches/${id}/qualities`,
     close: (id: string) => `/batches/${id}/close`,
     reopen: (id: string) => `/batches/${id}/reopen`,
   },
@@ -36,6 +37,8 @@ export const endpoints = {
     start: '/runs/start',
     stop: (id: string) => `/runs/${id}/stop`,
     weigh: (id: string) => `/runs/${id}/weigh`,
+    /** The running tally banked while a shiftwise machine is still going. */
+    tally: (id: string) => `/runs/${id}/tally`,
     pack: (id: string) => `/runs/${id}/pack`,
     pause: (id: string) => `/runs/${id}/pause`,
     cancel: (id: string) => `/runs/${id}/cancel`,

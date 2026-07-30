@@ -133,7 +133,7 @@ export function PackingPage() {
               } · ${SACK_KG} kg per sack.`
             : undefined
         }
-        led="var(--elec)"
+        led="var(--led-elec)"
         onClose={() => setTarget(null)}
         footer={
           <>

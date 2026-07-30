@@ -173,7 +173,7 @@ function RunSheet({
             <span className="batchref">{label}</span> · {when}
           </>
         }
-        led="var(--err)"
+        led="var(--led-err)"
         onClose={close}
         footer={
           <>
@@ -357,11 +357,9 @@ function RunSheet({
         <Det k="Formulation" v={run.formulation} />
         <Det k="Capacity" v={run.capacity != null ? `${run.capacity} kg` : null} />
         <Det k="Tyre" v={tyre ? `${tyre.label} ${run.mesh ?? tyre.mesh}` : run.mesh} />
-        {/* The batches merged into a pass and the hand that logged it are not
-            columns the API carries yet - the row is here for when they are. */}
-        <Det k="Mix sources" v={null} />
+        <Det k="Mix sources" v={run.sources?.length ? run.sources.join(' + ') : null} />
         <Det k="Start / end" v={`${show(stamp(run.started_at))} → ${show(stamp(run.ended_at))}`} />
-        <Det k="Start/stops merged" v={run.passes ?? 1} />
+        <Det k="Start/stops combined" v={run.passes ?? 1} />
         {Array.isArray(run.weigh_entries) && run.weigh_entries.length > 0 && (
           <Det k="Weighings" v={run.weigh_entries.join(' + ')} />
         )}
@@ -385,7 +383,7 @@ function RunSheet({
           {when} · <span style={{ color: 'var(--ok)' }}>synced</span>
         </>
       }
-      led="var(--elec)"
+      led="var(--led-elec)"
       onClose={close}
       footer={
         <>
@@ -606,6 +604,11 @@ export function HistoryPage() {
                       <div className="muted text-[10px]">
                         hr {r.hour_start ?? '—'} → {r.hour_end ?? '—'}
                       </div>
+                    )}
+                    {/* A shiftwise machine keeps one record per shift, so these
+                        hours are every start of it added together. */}
+                    {(r.passes ?? 1) > 1 && (
+                      <div className="muted text-[10px]">{r.passes} start/stops combined</div>
                     )}
                   </td>
                   <td className="tnum">

@@ -8,6 +8,7 @@ import {
   pauseRun,
   startRun,
   stopRun,
+  tallyRun,
 } from '@/features/machines/runsSlice';
 import {
   cancelDown,
@@ -18,7 +19,6 @@ import {
   markDown,
 } from '@/features/maintenance/maintenanceSlice';
 import { createBatch, fetchOpenBatches } from '@/features/batches/batchesSlice';
-import { setSupervisor } from '@/features/ui/uiSlice';
 import { MachineCard } from '@/features/machines/MachineCard';
 import {
   BottomSheet,
@@ -33,10 +33,13 @@ import {
   Readout,
   SelectField,
   SheetLabel,
+  SupervisorPick,
   TextAreaField,
   TextField,
   ViewHead,
 } from '@/components/ui';
+import { icons } from '@/config/icons';
+import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/utils/cn';
 import {
@@ -45,12 +48,12 @@ import {
   QUALITIES,
   SHIFTS,
   SHIFT_HOURS,
-  SUPERVISORS,
   TOD_MACHINE_ID,
   TYRES,
   autoclaveFormsFor,
   autoclaveWorkers,
   defaultWorkers,
+  opensBatch,
   type AutoclaveForm,
   type TyreType,
 } from '@/config/constants';
@@ -65,11 +68,11 @@ type Sheet =
   | { kind: 'line'; machine: Machine }
   | { kind: 'start'; machine: Machine; line: Line | null }
   | { kind: 'stop'; run: Run }
+  | { kind: 'tally'; run: Run }
   | { kind: 'cancelLoad'; run: Run }
   | { kind: 'breakdown'; machine: Machine }
   | { kind: 'repair'; log: MaintenanceLog }
   | { kind: 'bearing'; machine: Machine; due: BearingDue }
-  | { kind: 'supervisor' }
   | null;
 
 const blankRepair = { rootCause: '', resolution: '', prevention: '' };
@@ -151,11 +154,28 @@ export function MachinesPage() {
   const openDown = useAppSelector((s) => s.maintenance.open);
   const due = useAppSelector((s) => s.maintenance.due);
   const openBatches = useAppSelector((s) => s.batches.items);
-  const supervisor = useAppSelector((s) => s.ui.supervisor);
+  /**
+   * The batches a refiner may be pointed at: open, and out of the autoclave.
+   * A charge still cooking has nothing to refine yet, so it is kept off the
+   * picker rather than offered and then rejected.
+   */
+  const refinableBatches = useMemo(
+    () => openBatches.filter((b) => b.autoclave_done),
+    [openBatches],
+  );
+  // The account signed in signs the record unless the crew switches the name -
+  // one tablet is shared, so the two are not always the same person.
+  const { name: supervisor } = useSupervisor();
 
   const [sheet, setSheet] = useState<Sheet>(null);
   const [quality, setQuality] = useState<Quality>('Special');
   const [batchNo, setBatchNo] = useState('');
+  /**
+   * Special line only: the other batches whose tailings are going through with
+   * the one being refined. The batch itself is not in here - it leads the list
+   * that gets sent, and cannot be mixed with itself.
+   */
+  const [mix, setMix] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(todayISO());
   const [startShift, setStartShift] = useState<Shift>(currentShift());
   const [elecStart, setElecStart] = useState('');
@@ -172,7 +192,8 @@ export function MachinesPage() {
   const [downTime, setDownTime] = useState('');
   const [repair, setRepair] = useState(blankRepair);
   const [temps, setTemps] = useState<Record<string, string>>({});
-  const [pickedSupervisor, setPickedSupervisor] = useState(supervisor);
+  /** The load being added to a running machine's tally, in kg. */
+  const [tallyAdd, setTallyAdd] = useState('');
 
   useEffect(() => {
     void dispatch(fetchMachines());
@@ -218,6 +239,17 @@ export function MachinesPage() {
   const startIsTod = startMachine?.id === TOD_MACHINE_ID;
   /** The sheets that pick a batch off the open list rather than only typing one. */
   const startPicksBatch = Boolean(startMachine && (isRefiner(startMachine) || startSpecial));
+  /**
+   * The special line needs a real batch to refine, and one only exists once the
+   * autoclave it was cooked in has been discharged. With none out of the vessel
+   * the sheet says so and offers nothing to fill in.
+   */
+  const startNothingReady = startSpecial && refinableBatches.length === 0;
+  /** The other batches whose tailings can go through with the one picked. */
+  const mixable = useMemo(
+    () => (startSpecial && batchNo.trim() ? refinableBatches.filter((b) => b.ref !== batchNo.trim()) : []),
+    [startSpecial, batchNo, refinableBatches],
+  );
 
   // ---- the autoclave being charged ----
   const startIsAutoclave = startMachine?.kind === 'autoclave';
@@ -228,6 +260,11 @@ export function MachinesPage() {
   );
   /** A coarse charge feeds the line for a shift; a special one opens a batch. */
   const loadIsCoarse = form?.type === 'coarse';
+  /**
+   * Whether this charge opens a batch at all. Coarse and DRC do not: neither is
+   * worked through in grades, so both are counted by their runs alone.
+   */
+  const loadOpensBatch = opensBatch(form);
   /** The loading time decides the shift, not the clock the sheet was opened at. */
   const loadShift = shiftForTime(load.loadTime);
 
@@ -248,6 +285,15 @@ export function MachinesPage() {
   const stopWeighedLater = Boolean(stopMachine?.out_weight) && stopShiftwise;
 
   const round2 = (value: number) => Math.round(value * 100) / 100;
+
+  // ---- the running tally on a machine that is still going ----
+  const tallying = sheet?.kind === 'tally' ? sheet.run : undefined;
+  const tallyRuns = tallying ? active.find((r) => r.id === tallying.id) ?? tallying : undefined;
+  const tallyEntries = tallyRuns?.weigh_entries ?? [];
+  const tallyTotal = round2(tallyEntries.reduce((total, n) => total + n, 0));
+  /** What the stop sheet says has already been banked against this shift. */
+  const stopTally = stopping?.weigh_entries ?? [];
+
   const elecEndValue = asNumber(stop.elecEnd);
   const hourEndValue = asNumber(stop.hourEnd);
   const weightValue = asNumber(outWeight);
@@ -295,21 +341,32 @@ export function MachinesPage() {
     stopIssues.push('Output weight: must be greater than zero (leave it blank to weigh later).');
   }
 
-  /** Every write goes through here so a failure always says so out loud. */
-  const run = async (action: Promise<{ meta: { requestStatus: string } }>, okMsg: string, errMsg: string) => {
+  /**
+   * Every write goes through here so a failure always says so out loud. The
+   * confirmation may be a function of what came back, for the writes whose
+   * outcome is not known until the server has answered - stopping a shiftwise
+   * machine can fold into a record that already exists.
+   */
+  const run = async (
+    action: Promise<{ meta: { requestStatus: string }; payload?: unknown }>,
+    okMsg: string | ((payload: unknown) => string),
+    errMsg: string,
+  ) => {
     const result = await action;
     const okay = result.meta.requestStatus === 'fulfilled';
-    notify(okay ? okMsg : errMsg, okay ? 'ok' : 'err');
+    const message = okay && typeof okMsg === 'function' ? okMsg(result.payload) : okMsg;
+    notify(okay ? (message as string) : errMsg, okay ? 'ok' : 'err');
     if (okay) closeSheet();
     return okay;
   };
 
   /**
-   * Charging an autoclave. A special load opens the batch the refiners will
-   * work through, then starts the run against it; a coarse load only starts the
-   * run, because coarse output is counted by the shift and never becomes a
-   * batch. The run is not started if the batch could not be opened - a load
-   * running against a batch that does not exist is worse than no load at all.
+   * Charging an autoclave. A special load opens the batch the refiners will work
+   * through, then starts the run against it. A coarse or DRC load only starts the
+   * run: neither is worked through in grades, so both are counted by their runs
+   * and never become a batch - see opensBatch(). The run is not started if the
+   * batch could not be opened, because a load running against a batch that does
+   * not exist is worse than no load at all.
    */
   const confirmLoad = async () => {
     if (sheet?.kind !== 'start') return;
@@ -328,6 +385,9 @@ export function MachinesPage() {
       notify(loadIsCoarse ? 'Enter a coarse batch number' : 'Enter a batch number', 'warn');
       return;
     }
+    // A quick answer for the number the crew can already see on this tablet.
+    // The server checks it against every batch on record, open or closed, and
+    // is the one that has the last word - see the message it sends back below.
     if (openBatches.some((b) => b.ref.toLowerCase() === ref.toLowerCase())) {
       notify(`Batch ${ref} already exists`, 'warn');
       return;
@@ -337,19 +397,23 @@ export function MachinesPage() {
     // the shift's date; with no date of its own it falls back to the shift's.
     const startedAt = atLocal(load.loadDate || load.shiftDate, load.loadTime) ?? undefined;
 
-    if (!loadIsCoarse) {
+    if (loadOpensBatch) {
       const opened = await dispatch(
         createBatch({
           machine_id: machine.id,
           ref,
           formulation: form.name,
           capacity: machine.capacity ?? form.capacity,
+          // Whether the crew was shared with the twin vessel, and the shift the
+          // charge belongs to - which is the loading time's shift, not the
+          // clock's, and can sit on a different date from the shift date.
           paired: load.paired,
+          shift: loadShift,
           shift_date: load.shiftDate,
         }),
       );
-      if (opened.meta.requestStatus !== 'fulfilled') {
-        notify('Could not open the batch', 'err');
+      if (createBatch.rejected.match(opened)) {
+        notify((opened.payload as string) ?? 'Could not open the batch', 'err');
         return;
       }
     }
@@ -418,6 +482,12 @@ export function MachinesPage() {
     const line = sheet.line;
     const shiftwise = line ? line === 'coarse' : isShiftwise(machine.kind);
     const special = line === 'special';
+    // The special line refines a named batch - there is nothing to run it
+    // against otherwise, and the grade would belong to nothing.
+    if (special && !batchNo.trim()) {
+      notify('Pick the batch it is refining', 'warn');
+      return;
+    }
     // Only when the batch was picked rather than typed - a typed number the
     // plant has no open batch for has nothing to copy off it.
     const picked = openBatches.find((b) => b.ref === batchNo.trim());
@@ -445,18 +515,25 @@ export function MachinesPage() {
           elecStart: elec,
           hourStart: hour,
           nonProduction: special ? nonProd : undefined,
+          // The batch being refined leads the list; the tailings mixed into it
+          // follow. Sent only when there is a mix - a batch on its own is
+          // already named by `batchNo`.
+          sources: special && mix.length ? [batchNo.trim(), ...mix] : undefined,
         }),
       ),
       `${machine.name} started${
         shiftwise
           ? ` · ${startShift}${tyre ? ` · ${TYRES[tyre].label}` : ''}`
           : special
-            ? ` · special line${nonProd ? ' · non-production' : ''}`
+            ? ` · special line${nonProd ? ' · non-production' : ''}${
+                mix.length ? ` · mixed with ${mix.length}` : ''
+              }`
             : ''
       }`,
       'Could not start the run',
     );
     setBatchNo('');
+    setMix([]);
     setElecStart('');
     setHourStart('');
     setNonProd(false);
@@ -502,14 +579,55 @@ export function MachinesPage() {
           hoursRun: stopsWithMeters ? asNumber(stop.hourDiff) : null,
         }),
       ),
-      stopIsAutoclave ? 'Unloaded · logged' : 'Run logged',
+      stopIsAutoclave
+        ? 'Unloaded · logged'
+        : (payload) => {
+            // A shiftwise stop is named by the shift it was run for, and says
+            // so when it was folded into one the shift already had.
+            const logged = payload as Run;
+            const label = stopShiftwise
+              ? `${stopMachine?.short ?? stopping?.machine ?? stopping?.machine_id} · ${stopping?.shift}`
+              : 'Run';
+            const passes = logged?.passes ?? 1;
+            return `${label} logged${passes > 1 ? ` · ${passes} start/stops combined` : ''}`;
+          },
       stopIsAutoclave ? 'Could not log the unload' : 'Could not stop the run',
     );
     if (okay) {
       setOutWeight('');
       setStop(blankStop);
       setUnload(blankUnload);
+      // Logging a run moves the batch on: unloading takes it out of the vessel
+      // and releases it to the refiners, and an R4 pass marks the grade it
+      // yielded. Both happen server-side, so the list is re-read rather than
+      // patched from here.
+      if (stopIsAutoclave || sheet.run.batch_no) void dispatch(fetchOpenBatches());
     }
+  };
+
+  /**
+   * The running tally: the whole list goes to the server each time, so adding a
+   * load and taking one back off are the same write. Nothing is weighed by it -
+   * the figure of record is still settled in the Weigh tab once the machine has
+   * stopped - so a failure only warns rather than closing the sheet.
+   */
+  const saveTally = async (entries: number[]) => {
+    if (!tallyRuns) return;
+    const result = await dispatch(tallyRun({ id: tallyRuns.id, entries }));
+    if (!tallyRun.fulfilled.match(result)) notify('Could not save the weighing', 'err');
+  };
+
+  const addTally = () => {
+    const value = asNumber(tallyAdd);
+    if (value == null || value <= 0) {
+      notify('Enter a weight above zero', 'warn');
+      return;
+    }
+    void saveTally([...tallyEntries, round2(value)]);
+    setTallyAdd('');
+    // Tapping a button does not reliably take focus off the input on the
+    // tablets, so the number pad would sit over the sheet's actions.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
 
   const confirmCancelLoad = async () => {
@@ -609,15 +727,7 @@ export function MachinesPage() {
 
   return (
     <>
-      <ViewHead
-        title="Machines"
-        meta={
-          <button type="button" className="shiftchip" onClick={() => setSheet({ kind: 'supervisor' })}>
-            {supervisor ? <b>{supervisor}</b> : <span style={{ color: 'var(--amber)' }}>set supervisor</span>}
-            <span style={{ opacity: 0.6 }}>▾</span>
-          </button>
-        }
-      />
+      <ViewHead title="Machines" />
 
       {dueNow.length > 0 && (
         <button
@@ -660,6 +770,7 @@ export function MachinesPage() {
                   onStart={(m) => {
                     setQuality('Special');
                     setBatchNo('');
+                    setMix([]);
                     setStartDate(todayISO());
                     setStartShift(currentShift());
                     setNonProd(false);
@@ -722,6 +833,10 @@ export function MachinesPage() {
                       ),
                     );
                   }}
+                  onTally={(r) => {
+                    setTallyAdd('');
+                    setSheet({ kind: 'tally', run: r });
+                  }}
                   onBreakdown={(m) => setSheet({ kind: 'breakdown', machine: m })}
                   onRepair={(log) => {
                     setRepair(blankRepair);
@@ -750,7 +865,7 @@ export function MachinesPage() {
             ? `Is ${sheet.machine.short ?? sheet.machine.name} running the coarse line or the special line this time?`
             : undefined
         }
-        led="radial-gradient(circle at 35% 30%,#c8f0a0,var(--amber))"
+        led="var(--led-brand)"
         onClose={closeSheet}
         footer={
           <Button variant="ghost" onClick={closeSheet}>
@@ -787,7 +902,9 @@ export function MachinesPage() {
         subtitle={
           sheet?.kind !== 'start'
             ? undefined
-            : startIsAutoclave
+            : startNothingReady
+              ? 'No batches are ready yet.'
+              : startIsAutoclave
               ? `${sheet.machine.capacity ?? '—'} kg · firewood entered at unload`
               : startShiftwise
               ? `${sheet.machine.kind === 'grind' ? 'Grinding line' : 'Coarse line'} — pick the shift it is running for. Units & crew at stop${
@@ -799,19 +916,36 @@ export function MachinesPage() {
                   ? `Batch, grade and both meter readings${supervisor ? ` · ${supervisor}` : ''}`
                   : `${todayISO()} · ${currentShift()} shift${supervisor ? ` · ${supervisor}` : ''}`
         }
-        led="radial-gradient(circle at 35% 30%,#c8f0a0,var(--amber))"
+        led="var(--led-brand)"
         onClose={closeSheet}
         footer={
-          <>
+          startNothingReady ? (
             <Button variant="ghost" onClick={closeSheet}>
-              Cancel
+              Close
             </Button>
-            <Button variant="primary" onClick={confirmStart}>
-              {startIsAutoclave ? 'Load ▸' : 'Start ▸'}
-            </Button>
-          </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={closeSheet}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={confirmStart}>
+                {startIsAutoclave ? 'Load ▸' : 'Start ▸'}
+              </Button>
+            </>
+          )
         }
       >
+        {/* The special line has nothing to work on until a charge is out of the
+            vessel, so the sheet says what has to happen first rather than
+            offering a batch picker with nothing in it. */}
+        {sheet?.kind === 'start' && startNothingReady && (
+          <EmptyState
+            icon={icons.batches}
+            title="Nothing to refine"
+            hint="Unload the autoclave first to make a batch selectable."
+          />
+        )}
+
         {sheet?.kind === 'start' && startIsAutoclave && (
           <>
             <SheetLabel>Formulation</SheetLabel>
@@ -903,13 +1037,13 @@ export function MachinesPage() {
           </>
         )}
 
-        {sheet?.kind === 'start' && !startIsAutoclave && (
+        {sheet?.kind === 'start' && !startIsAutoclave && !startNothingReady && (
           <>
-            {startPicksBatch && openBatches.length > 0 && (
+            {startPicksBatch && refinableBatches.length > 0 && (
               <>
                 <SheetLabel>Batch</SheetLabel>
                 <PickGrid>
-                  {openBatches.map((b) => (
+                  {refinableBatches.map((b) => (
                     <Pick
                       key={b.id}
                       title={b.ref}
@@ -918,6 +1052,9 @@ export function MachinesPage() {
                       onClick={() => {
                         const next = batchNo === b.ref ? '' : b.ref;
                         setBatchNo(next);
+                        // A batch cannot be mixed into itself, so picking one
+                        // takes it back out of the tailings.
+                        setMix(mix.filter((ref) => ref !== next));
                         // The grade the batch was opened for is the one it will
                         // come off at, so the picker starts there - the crew can
                         // still say otherwise before it starts.
@@ -975,6 +1112,46 @@ export function MachinesPage() {
                     onClick={() => setNonProd(true)}
                   />
                 </PickGrid>
+              </>
+            )}
+
+            {/* A pass often carries the tailings of other batches through with
+                the one being refined. They are named here so the run says what
+                actually went into it - four batches in all, which is as many as
+                the record has room for. */}
+            {startSpecial && batchNo.trim() && (
+              <>
+                <SheetLabel className="mt-4">
+                  Mixed from{' '}
+                  <span className="muted normal-case tracking-normal">
+                    — add tailings of other batches
+                  </span>
+                </SheetLabel>
+                {mixable.length ? (
+                  <PickGrid>
+                    {mixable.map((b) => (
+                      <Pick
+                        key={b.id}
+                        title={b.ref}
+                        sub={b.formulation ?? undefined}
+                        selected={mix.includes(b.ref)}
+                        onClick={() => {
+                          if (mix.includes(b.ref)) {
+                            setMix(mix.filter((ref) => ref !== b.ref));
+                          } else if (mix.length >= 3) {
+                            // Four columns is all the record has room for, and
+                            // one of them is the batch being refined.
+                            notify('Up to 4 batches per mix', 'warn');
+                          } else {
+                            setMix([...mix, b.ref]);
+                          }
+                        }}
+                      />
+                    ))}
+                  </PickGrid>
+                ) : (
+                  <div className="hint">No other batches to mix.</div>
+                )}
               </>
             )}
 
@@ -1073,6 +1250,12 @@ export function MachinesPage() {
             )}
           </>
         )}
+
+        {/* Both halves of this sheet - the autoclave load and every other
+            start - file the run against a name, so the pick sits under both. */}
+        {sheet?.kind === 'start' && !startNothingReady && (
+          <SupervisorPick fieldClassName="mt-4" note={startIsAutoclave ? '— signs this load' : '— signs this run'} />
+        )}
       </BottomSheet>
 
       {/* ---- stop a run ---- */}
@@ -1105,7 +1288,7 @@ export function MachinesPage() {
                   `Running ${elapsed(stopping.started_at)}`
                 : `Running ${elapsed(stopping.started_at)}${stopping.batch_no ? ` · ${stopping.batch_no}` : ''}`
         }
-        led="radial-gradient(circle at 35% 30%,#c8f0a0,var(--amber))"
+        led="var(--led-brand)"
         onClose={closeSheet}
         footer={
           <>
@@ -1255,7 +1438,17 @@ export function MachinesPage() {
             )}
 
             {stopWeighedLater && (
-              <div className="hint">Output is weighed shiftwise in the Weigh tab after stopping.</div>
+              <div className="hint">
+                {stopTally.length > 0 ? (
+                  <>
+                    {stopTally.length} load{stopTally.length > 1 ? 's' : ''} tallied ·{' '}
+                    <b>{round2(stopTally.reduce((total, n) => total + n, 0))} kg</b> — finalise and
+                    submit it in the Weigh tab after stopping.
+                  </>
+                ) : (
+                  'Output is weighed shiftwise in the Weigh tab after stopping.'
+                )}
+              </div>
             )}
 
             <FormWarning>
@@ -1282,6 +1475,86 @@ export function MachinesPage() {
         )}
       </BottomSheet>
 
+      {/* ---- the running tally on a machine that is still going ---- */}
+      <BottomSheet
+        open={sheet?.kind === 'tally'}
+        title={tallyRuns ? `Add weight — ${tallyRuns.machine ?? tallyRuns.machine_id}` : ''}
+        subtitle={
+          tallyRuns
+            ? [
+                tallyRuns.line === 'grind' ? 'Grinder output' : 'Coarse',
+                tallyRuns.shift,
+                dayMonth(tallyRuns.shift_date),
+                tallyRuns.mesh,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : undefined
+        }
+        led="var(--led-elec)"
+        onClose={closeSheet}
+        footer={
+          <Button variant="primary" onClick={closeSheet}>
+            Done
+          </Button>
+        }
+      >
+        {tallyRuns && (
+          <>
+            <Readout
+              label="Running total"
+              value={`${tallyTotal} kg`}
+              valueColor="var(--elec)"
+              className="mb-3.5"
+            />
+
+            {tallyEntries.length > 0 ? (
+              <div className="weighlist">
+                {tallyEntries.map((value, i) => (
+                  <div key={`${value}-${i}`} className="weighrow">
+                    <span className="tnum">{value} kg</span>
+                    <button
+                      type="button"
+                      className="wdel"
+                      aria-label={`Remove ${value} kg`}
+                      onClick={() => void saveTally(tallyEntries.filter((_, index) => index !== i))}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="hint">
+                Add each load as it comes off — they keep adding up while the machine runs. Finalise
+                &amp; submit in the Weigh tab after you stop it.
+              </div>
+            )}
+
+            <SheetLabel>Add a weighing</SheetLabel>
+            <div className="field-inline items-stretch">
+              <TextField
+                inputMode="decimal"
+                suffix="kg"
+                placeholder="0"
+                value={tallyAdd}
+                onChange={(e) => setTallyAdd(e.target.value.replace(/[^\d.]/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addTally();
+                  }
+                }}
+                fieldClassName="flex-1 !mb-0"
+              />
+              <Button variant="elec" className="self-end" onClick={addTally}>
+                + Add
+              </Button>
+            </div>
+          </>
+        )}
+      </BottomSheet>
+
       {/* ---- throw away a load entered by mistake ---- */}
       <BottomSheet
         open={sheet?.kind === 'cancelLoad'}
@@ -1293,7 +1566,7 @@ export function MachinesPage() {
                 .join(' · ')
             : undefined
         }
-        led="var(--err)"
+        led="var(--led-err)"
         onClose={closeSheet}
         footer={
           <>
@@ -1318,7 +1591,7 @@ export function MachinesPage() {
         open={sheet?.kind === 'breakdown'}
         title={sheet?.kind === 'breakdown' ? `Report breakdown — ${sheet.machine.name}?` : ''}
         subtitle="The machine is flagged DOWN in red and cannot be started until the repair is logged. Down-time counts from the time below."
-        led="var(--err)"
+        led="var(--led-err)"
         onClose={closeSheet}
         footer={
           <>
@@ -1349,7 +1622,7 @@ export function MachinesPage() {
             ? `Down for ${elapsed(sheet.log.down_start)}. Complete the log to bring it back online.`
             : undefined
         }
-        led="var(--err)"
+        led="var(--led-err)"
         onClose={closeSheet}
         footer={
           <>
@@ -1403,7 +1676,7 @@ export function MachinesPage() {
               }`
             : undefined
         }
-        led="radial-gradient(circle at 35% 30%,#9fe0ea,var(--elec))"
+        led="var(--led-elec)"
         onClose={closeSheet}
         footer={
           <>
@@ -1435,47 +1708,9 @@ export function MachinesPage() {
                 onChange={(e) => setTemps({ ...temps, [position]: e.target.value })}
               />
             ))}
-            <Readout label="Supervisor" value={supervisor || '—'} />
+            <SupervisorPick fieldClassName="mt-3" note="— signs these temperatures" />
           </>
         )}
-      </BottomSheet>
-
-      {/* ---- who is on duty ---- */}
-      <BottomSheet
-        open={sheet?.kind === 'supervisor'}
-        title="Supervisor in charge"
-        subtitle="Tagged on everything logged from this device."
-        onClose={closeSheet}
-        footer={
-          <>
-            <Button variant="ghost" onClick={closeSheet}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                dispatch(setSupervisor(pickedSupervisor));
-                notify(pickedSupervisor ? `Supervisor · ${pickedSupervisor}` : 'Supervisor cleared');
-                closeSheet();
-              }}
-            >
-              Save
-            </Button>
-          </>
-        }
-      >
-        <SelectField
-          label="Supervisor"
-          value={pickedSupervisor}
-          onChange={(e) => setPickedSupervisor(e.target.value)}
-        >
-          <option value="">— select —</option>
-          {SUPERVISORS.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </SelectField>
       </BottomSheet>
     </>
   );

@@ -1,7 +1,7 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { batchService } from '@/api/services/batch.service';
 import { toRequestError } from '@/api/axiosClient';
-import type { Batch } from '@/types/models';
+import type { Batch, BatchDetail, Quality } from '@/types/models';
 import type { PageMeta } from '@/types/api';
 
 interface BatchesState {
@@ -9,9 +9,19 @@ interface BatchesState {
   meta: PageMeta | null;
   loading: boolean;
   error: string | null;
+  /** The batch whose detail view is open, and whether it is still arriving. */
+  detail: BatchDetail | null;
+  detailLoading: boolean;
 }
 
-const initialState: BatchesState = { items: [], meta: null, loading: false, error: null };
+const initialState: BatchesState = {
+  items: [],
+  meta: null,
+  loading: false,
+  error: null,
+  detail: null,
+  detailLoading: false,
+};
 
 export const fetchOpenBatches = createAsyncThunk('batches/fetchOpen', async (_, { rejectWithValue }) => {
   try {
@@ -21,11 +31,43 @@ export const fetchOpenBatches = createAsyncThunk('batches/fetchOpen', async (_, 
   }
 });
 
+export const fetchBatchDetail = createAsyncThunk(
+  'batches/fetchDetail',
+  async (id: string, { rejectWithValue }) => {
+    try {
+      return await batchService.getOne(id);
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
 export const createBatch = createAsyncThunk(
   'batches/create',
   async (payload: Partial<Batch>, { rejectWithValue }) => {
     try {
       return await batchService.create(payload);
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
+/**
+ * Ticking a grade the batch will yield, or taking one back off.
+ *
+ * The server has the last word on both - it refuses a batch still in the
+ * autoclave, and refuses to untick a grade a refiner has already run - so its
+ * message is what comes back for the card to show.
+ */
+export const setBatchQuality = createAsyncThunk(
+  'batches/setQuality',
+  async (
+    { id, quality, marked }: { id: string; quality: Quality; marked: boolean },
+    { rejectWithValue },
+  ) => {
+    try {
+      return await batchService.setQuality(id, quality, marked);
     } catch (err) {
       return rejectWithValue(toRequestError(err).message);
     }
@@ -43,11 +85,35 @@ export const closeBatch = createAsyncThunk(
   },
 );
 
+/** Orphans only. Takes the batch's runs and quality tests with it. */
+export const deleteBatch = createAsyncThunk(
+  'batches/delete',
+  async (id: string, { rejectWithValue }) => {
+    try {
+      return await batchService.remove(id);
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
 const batchesSlice = createSlice({
   name: 'batches',
   initialState,
-  reducers: {},
+  reducers: {
+    clearBatchDetail: (state) => {
+      state.detail = null;
+      state.detailLoading = false;
+    },
+  },
   extraReducers: (builder) => {
+    /** A batch that came back changed replaces the one on the list in place. */
+    const replace = (state: BatchesState, batch: Batch) => {
+      const index = state.items.findIndex((b) => b.id === batch.id);
+      if (index >= 0) state.items[index] = batch;
+      if (state.detail?.id === batch.id) state.detail = { ...state.detail, ...batch };
+    };
+
     builder
       .addCase(fetchOpenBatches.pending, (state) => {
         state.loading = true;
@@ -62,13 +128,35 @@ const batchesSlice = createSlice({
         state.loading = false;
         state.error = action.payload as string;
       })
+      .addCase(fetchBatchDetail.pending, (state) => {
+        state.detailLoading = true;
+      })
+      .addCase(fetchBatchDetail.fulfilled, (state, action) => {
+        state.detailLoading = false;
+        state.detail = action.payload;
+      })
+      .addCase(fetchBatchDetail.rejected, (state, action) => {
+        state.detailLoading = false;
+        state.error = action.payload as string;
+      })
       .addCase(createBatch.fulfilled, (state, action) => {
         state.items.unshift(action.payload);
       })
+      .addCase(setBatchQuality.fulfilled, (state, action) => {
+        replace(state, action.payload);
+      })
+      // Closing files the batch away: it drops off this list and every refiner
+      // picker that reads it, and stays on the record for dispatch and history.
       .addCase(closeBatch.fulfilled, (state, action) => {
         state.items = state.items.filter((b) => b.id !== action.payload.id);
+        if (state.detail?.id === action.payload.id) state.detail = null;
+      })
+      .addCase(deleteBatch.fulfilled, (state, action) => {
+        state.items = state.items.filter((b) => b.id !== action.payload.id);
+        if (state.detail?.id === action.payload.id) state.detail = null;
       });
   },
 });
 
+export const { clearBatchDetail } = batchesSlice.actions;
 export default batchesSlice.reducer;

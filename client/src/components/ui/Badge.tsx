@@ -21,6 +21,26 @@ export function Badge({
 }
 
 /**
+ * The grade's colour class, spelled out one per line rather than built as
+ * `q-${quality}`.
+ *
+ * These rules live in index.css inside `@layer components`, which Tailwind
+ * tree-shakes against the class names it can find in the source. A name only
+ * ever assembled at runtime is a name it cannot find, so every grade chip
+ * shipped unstyled - grey text where the whole design expects the crew to read
+ * the grade off its colour before its name. Written out, the scanner sees them.
+ */
+const GRADE_CLASS: Record<DispatchGrade, string> = {
+  Special: 'q-Special',
+  SuperFine: 'q-SuperFine',
+  Fine: 'q-Fine',
+  Medium: 'q-Medium',
+  DRC: 'q-DRC',
+  Coarse: 'q-Coarse',
+  Sillsheet: 'q-Sillsheet',
+};
+
+/**
  * Colour-coded grade chip. The five refiner qualities plus Coarse and
  * Sillsheet, which only ever appear on a dispatch line.
  */
@@ -31,7 +51,9 @@ export function QualityChip({
   quality: DispatchGrade | string;
   className?: string;
 }) {
-  return <span className={cn('qchip', `q-${quality}`, className)}>{quality}</span>;
+  return (
+    <span className={cn('qchip', GRADE_CLASS[quality as DispatchGrade], className)}>{quality}</span>
+  );
 }
 
 /** Monospaced batch number, the anchor of every card in the prototype. */

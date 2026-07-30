@@ -5,10 +5,11 @@ import { logout } from '@/features/auth/authSlice';
 import { adminPaths, userPaths } from '@/config/paths';
 import { cn } from '@/utils/cn';
 
-/** The six back.html tabs, plus the two this port adds. */
+/** The six back.html tabs, plus the three this port adds. */
 const tabs = [
   { to: adminPaths.dashboard, label: 'Overview' },
   { to: adminPaths.history, label: 'History' },
+  { to: adminPaths.quality, label: 'Quality' },
   { to: adminPaths.efficiency, label: 'Efficiency' },
   { to: adminPaths.rates, label: 'Rates' },
   { to: adminPaths.costing, label: 'Costing' },

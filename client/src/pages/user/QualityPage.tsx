@@ -67,9 +67,9 @@ const readings = (test: QualityTest) => {
 
 const chipStyle = (tone: ReturnType<typeof batchQcChip>['tone']) =>
   tone === 'ok'
-    ? { background: 'var(--ok)', color: '#06210a' }
+    ? { background: 'var(--ok)', color: 'var(--on-fill)' }
     : tone === 'part'
-      ? { background: 'var(--pause)', color: '#2a1f06' }
+      ? { background: 'var(--pause)', color: 'var(--on-fill)' }
       : undefined;
 
 /** "2 grades awaiting test", "All grades passed", "1 grade on hold". */
@@ -83,7 +83,8 @@ export function QualityPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
   const { batches, pending, tests, summary, loading } = useAppSelector((s) => s.quality);
-  const supervisor = useAppSelector((s) => s.ui.supervisor);
+  // Whoever is signed in on this device is the default tester.
+  const supervisor = useAppSelector((s) => s.auth.user?.name ?? '');
 
   /** The batch whose grades are listed, and the grade being written up. */
   const [target, setTarget] = useState<Batch | null>(null);
@@ -116,7 +117,7 @@ export function QualityPage() {
       // A re-test starts from what was measured last time rather than blank.
       params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
       verdict: prev?.verdict ?? 'pass',
-      testedBy: prev?.tested_by ?? prev?.tester ?? supervisor ?? SUPERVISORS[0],
+      testedBy: prev?.tested_by ?? prev?.tester ?? (supervisor || SUPERVISORS[0] || ''),
       notes: '',
       attachmentUrl: prev?.attachment_url ?? '',
       attachmentName: prev?.attachment_name ?? '',
@@ -344,7 +345,7 @@ export function QualityPage() {
                 .join(' · ')
             : undefined
         }
-        led="radial-gradient(circle at 35% 30%,#bfe3ff,#3aa0ff)"
+        led="var(--led-brand)"
         onClose={() => setTarget(null)}
         footer={
           <Button variant="ghost" onClick={() => setTarget(null)}>
@@ -392,7 +393,7 @@ export function QualityPage() {
                 .join(' · ')
             : undefined
         }
-        led="radial-gradient(circle at 35% 30%,#bfe3ff,#3aa0ff)"
+        led="var(--led-brand)"
         onClose={() => setDraft(null)}
         footer={
           <>

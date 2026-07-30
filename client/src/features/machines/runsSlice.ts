@@ -162,6 +162,21 @@ export const pauseRun = createAsyncThunk(
   },
 );
 
+/**
+ * Banks the running tally on a machine that is still going. The whole list is
+ * sent, so this is both "add a load" and "take one off".
+ */
+export const tallyRun = createAsyncThunk(
+  'runs/tally',
+  async ({ id, entries }: { id: string; entries: number[] }, { rejectWithValue }) => {
+    try {
+      return await runService.tally(id, entries);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 export const weighRun = createAsyncThunk(
   'runs/weigh',
   async (
@@ -259,13 +274,25 @@ const runsSlice = createSlice({
       .addCase(pauseRun.fulfilled, (state, action) => {
         state.active = state.active.map((r) => (r.id === action.payload.id ? action.payload : r));
       })
+      .addCase(tallyRun.fulfilled, (state, action) => {
+        state.active = state.active.map((r) => (r.id === action.payload.id ? action.payload : r));
+      })
       .addCase(stopRun.fulfilled, (state, action) => {
         const run = action.payload;
-        state.active = state.active.filter((r) => r.id !== run.id);
-        state.shift = [run, ...state.shift];
+        // A shiftwise stop can be folded into the record the shift already has,
+        // in which case the row it was logged on is gone and what comes back is
+        // the merged one under a different id - so both have to leave `active`,
+        // and the shift list gets the merged row in place of its earlier self
+        // rather than a second copy of the same shift.
+        const gone = [run.id, run.merged_from].filter(Boolean) as string[];
+        state.active = state.active.filter((r) => !gone.includes(r.id));
+        state.shift = [run, ...state.shift.filter((r) => !gone.includes(r.id))];
         // A weighed machine drops straight onto the Weigh tab when it stops
-        // without a weight.
-        if (run.out_weight == null && run.needs_weight) state.pendingWeigh.unshift(run);
+        // without a weight - carrying whatever was tallied while it ran.
+        state.pendingWeigh = state.pendingWeigh.filter((r) => !gone.includes(r.id));
+        if (run.out_weight == null && (run.needs_weight || run.needs_weigh)) {
+          state.pendingWeigh.unshift(run);
+        }
       })
       .addCase(weighRun.fulfilled, (state, action) => {
         const run = action.payload;

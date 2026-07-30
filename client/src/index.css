@@ -4,44 +4,197 @@
 
 /*
  * The shop-floor look is defined here rather than in per-component Tailwind
- * strings. index.html (the prototype the crew already uses on the tablets) is
- * one file of hand-written CSS, and the classes below are that stylesheet
- * ported verbatim - same names, same numbers. Keeping them means a change to
- * the prototype can be diffed straight against this file, and the React markup
- * stays as short as the prototype's HTML strings.
+ * strings, so the whole app can be re-skinned from one place and the React
+ * markup stays as short as the prototype's HTML strings.
+ *
+ * Two rules keep it that way:
+ *   1. No component sets a raw colour. Everything reads a token from the block
+ *      below, so a palette change is a change to that block and nothing else.
+ *   2. Layout classes carry their own breakpoints. A page says `.stack` and
+ *      gets one column on a phone and three on a desk screen without knowing
+ *      which it is on.
  */
 
 @layer base {
   :root {
-    --bg: #13160f;
-    --bg2: #191d13;
-    --panel: #1d2217;
-    --panel2: #232a1c;
-    --line: #36402c;
-    --line2: #475238;
-    --ink: #e9edde;
-    --ink-dim: #9aa386;
-    --ink-faint: #6f7860;
-    --amber: #62b23a;
-    --amber-soft: #8fcf66;
-    --brand-deep: #3f8a22;
-    --ember: #e0762e;
-    --elec: #46c2d6;
-    --steel: #9bb0c4;
-    --pause: #e9b53a;
-    --ok: #7bc86c;
-    --warn: #e9b53a;
-    --err: #e8604c;
-    --q-special: #46c2d6;
-    --q-superfine: #86d36a;
-    --q-fine: #e9b53a;
-    --q-medium: #cf9a5e;
-    --q-drc: #b58be0;
+    color-scheme: dark;
+
+    /* ---------- ground ----------
+       An elevation ladder rather than a set of greys: the page is the darkest
+       thing on screen, a card sits above it, a raised surface above that, and
+       a well is cut back below. On a dark theme that ladder is what separates
+       surfaces - a border on its own reads as a box drawn on a flat wall. */
+    --bg: #0a0e14;
+    /* The page colour as a channel list, for the one place that has to fade it
+       out to nothing: the sticky heading the back office's rows scroll under. */
+    --bg-rgb: 10 14 20;
+    --bg2: #0e131a;
+    --panel: #151d27;
+    --panel2: #1b2531;
+    /* Recessed surfaces - input wells, list rows, anything set *into* a panel.
+       On a dark ground "recessed" means a shade darker, not lighter. */
+    --sunken: #10161e;
+
+    --line: #26323f;
+    --line2: #3b4b5c;
+    /* The hairline between rows of a list or table: quieter than a border. */
+    --rule: #1c2531;
+
+    /* A wash for hover states, tinted toward the light rather than the page. */
+    --hover: rgba(255, 255, 255, 0.055);
+
+    /* ---------- type ----------
+       Not pure white: #fff on a near-black panel haloes under plant lighting
+       and is tiring on a screen somebody reads for a whole shift. Every one of
+       these clears 4.5:1 on both --panel and --bg; --ink-faint is the one that
+       had to be measured rather than eyeballed, because it carries the hints
+       and it sits on the page wash, not on a card. */
+    --ink: #e7eef6;
+    --ink-dim: #a9bacb;
+    --ink-faint: #7e91a4;
+
+    /* ---------- accents ----------
+       `--brand` is the one colour that means "this is live / this is the
+       action": a running machine, the primary button, the active tab. It is
+       deliberately not reused for anything else. */
+    --brand: #4d9fe8;
+    --brand-rgb: 77 159 232;
+    --brand-soft: #7cbcf2;
+    --brand-deep: #2f78bb;
+
+    /* Text and glyphs sitting *on* any saturated fill - brand, state or grade.
+       One token, because on a dark theme every fill in this palette is a light
+       one, so the answer is always the near-black below, and a chip that got
+       it wrong would be the one thing nobody can read. */
+    --on-fill: #08131d;
+    --on-brand: var(--on-fill);
+    --on-quality: var(--on-fill);
+
+    --elec: #5cc8de;
+    --steel: #8a9eb0;
+    --ember: #f79c56;
+
+    --ok: #3fcf9a;
+    --warn: #f0c453;
+    --pause: #f0c453;
+    --err: #fc675c;
+
+    /* Channel lists for the two states that glow rather than just colour: a
+       running card's halo, a due button's pulse. Only rgb() can take the
+       opacity these need, and only a triplet can be fed to rgb(). */
+    --warn-rgb: 240 196 83;
+    --err-rgb: 252 103 92;
+
+    /* `--amber` is the name the markup and the prototype grew up with; it is
+       the brand accent under an older name and is kept so nothing has to be
+       renamed to re-skin the app. */
+    --amber: var(--brand);
+    --amber-soft: var(--brand-soft);
+
+    /* ---------- quality ramp ----------
+       Seven grades the crew picks by colour before they read the name. Each is
+       light enough to carry the near-black --on-fill, since on a dark theme
+       these are glowing chips rather than solid ones.
+
+       The real constraint here is not contrast but separation. Nine solid
+       chips can end up on one row: the seven grades from the dispatch picker,
+       the QC-hold chip in --err, and the shift chip in --steel. So the nine
+       are laid out round the OKLCH wheel at a roughly even lightness, and no
+       two are closer than dE 12 - about twice a just-noticeable step, which is
+       what it takes to tell two chips apart at arm's length under plant light
+       rather than side by side on a desk.
+
+       Two of them were fixed rather than chosen. Coarse used to borrow
+       --ember and came out the same orange as Medium standing next to it, so
+       it has its own magenta now; Sillsheet used to borrow --steel and so was
+       the same blue-grey as the shift chip beside it, so it is now a much
+       lighter near-neutral. --ember keeps meaning heat - a cooking batch, an
+       autoclave rail, a tab badge - none of which is ever a solid chip in this
+       row, which is why it is allowed to stay near Medium.
+
+       Anything added here has to be checked against the other eight, not just
+       against the panel. */
+    --q-special: #3fd2d4;
+    --q-superfine: #7ae78d;
+    --q-fine: #f8d64c;
+    --q-medium: #f69835;
+    --q-coarse: #fb7cbd;
+    --q-drc: #b994f8;
+    --q-sillsheet: #d7dfe8;
+
+    /* ---------- state tints ----------
+       Every "tinted box" in the app - a due warning, a passed check, a failed
+       reading - is one of these pairs: a deep fill and a slightly stronger
+       line, with the saturated token above supplying the text. */
+    --t-brand-bg: #0f2133;
+    --t-brand-line: #2a4f75;
+    --t-elec-bg: #0d2229;
+    --t-elec-line: #22525f;
+    --t-ok-bg: #0c2320;
+    --t-ok-line: #1e4a3c;
+    --t-warn-bg: #241d0d;
+    --t-warn-line: #57431a;
+    --t-err-bg: #2a1512;
+    --t-err-line: #5e2b25;
+    --t-ember-bg: #271a0f;
+    --t-ember-line: #5b3b1e;
+    --t-steel-bg: #161e28;
+    --t-steel-line: #37485b;
+
+    /* Body text inside a red tinted box - the saturated --err is right for a
+       label or an icon, but too hot to read a paragraph of. */
+    --err-ink: #ffb0a4;
+
+    /* The halo a focused field or a chosen pick wears. */
+    --focus-ring: 0 0 0 3px rgba(77, 159, 232, 0.35);
+
+    /* ---------- elevation ----------
+       A dark UI separates surfaces mostly with the ladder above, so shadow is
+       kept for things that genuinely float - the sheet, the toast - plus a
+       one-pixel top highlight that gives a card an edge to catch the light. */
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+    --shadow-raised: 0 12px 30px -12px rgba(0, 0, 0, 0.8);
+    --shadow-sheet: 0 -16px 44px -16px rgba(0, 0, 0, 0.85);
+
+    /* ---------- surfaces that are not flat ----------
+       The header and the tab bar are the two bars framing the app, so they get
+       their own gradient rather than the panel colour: it is what stops them
+       reading as another card. `--page-glow` lifts the top of the page so the
+       app does not start as a flat black rectangle. */
+    --bar: linear-gradient(180deg, #1a232f, #121a24);
+    --bar-shadow: 0 4px 16px -10px rgba(0, 0, 0, 0.9);
+    --page-glow: radial-gradient(120% 60% at 50% -10%, #17212d 0%, #0a0e14 55%);
+    --scrim: rgba(3, 6, 10, 0.68);
+
+    /* The two-tone dot on a machine card and at the head of every sheet, and
+       the ring that keeps an unlit one from vanishing into the card. */
+    --led-off: radial-gradient(circle at 35% 30%, #4a5b6d, #19212b);
+    --led-brand: radial-gradient(circle at 35% 30%, #a8d2f7, var(--brand));
+    --led-elec: radial-gradient(circle at 35% 30%, #9fe2f0, var(--elec));
+    --led-err: radial-gradient(circle at 35% 30%, #ffa89c, var(--err));
+    --led-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+
+    /* The chevron on a custom-styled select. A data URI cannot read a variable
+       mid-string, so the whole `url()` is the token and the stroke inside it is
+       --ink-dim spelled out; the two are changed together or not at all. */
+    --chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a9bacb' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
+
     --mono: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, Consolas, monospace;
     --r: 14px;
     --r-sm: 10px;
     --safe-t: env(safe-area-inset-top, 0px);
     --safe-b: env(safe-area-inset-bottom, 0px);
+
+    /* ---------- layout ----------
+       The bottom tab bar's height on a phone, and the width it becomes as a
+       side rail on a desk screen. Both are read by the shell, the toast dock
+       and the sheets, so the three never disagree about where the edges are.
+       `--tabbar-h` is re-declared at the breakpoints where the bar changes
+       shape, so the padding the shell reserves always matches what is drawn. */
+    --tabbar-h: 74px;
+    --rail: 232px;
+    --shell-max: 1180px;
+    --content-max: 760px;
   }
 
   html,
@@ -52,7 +205,8 @@
 
   body {
     @apply bg-bg text-ink font-sans text-base antialiased;
-    background-image: radial-gradient(120% 60% at 50% -10%, #1c2415 0%, #13160f 55%);
+    background-image: var(--page-glow);
+    background-attachment: fixed;
     line-height: 1.35;
     overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
@@ -66,6 +220,47 @@
     font-family: inherit;
     color: inherit;
     cursor: pointer;
+  }
+
+  /*
+   * Keyboard focus. The prototype only ever styled `:active`, which is fine
+   * for a gloved thumb and invisible to anyone driving the app from a keyboard
+   * on the desk screen this now has to fill. `:focus-visible` keeps the ring
+   * off touch taps and mouse clicks.
+   */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Fields draw their own focus ring, so the outline would double up. */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background: var(--t-brand-line);
+    color: var(--ink);
+  }
+
+  /* A thin, quiet scrollbar in place of the platform default. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line2) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line2);
+    border-radius: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
@@ -93,6 +288,7 @@
   .scroll-x {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
   }
   .safe-top {
     padding-top: var(--safe-t);
@@ -103,17 +299,18 @@
 
   /* ---------- shell ---------- */
   .app-shell {
-    max-width: 760px;
+    max-width: var(--content-max);
     margin: 0 auto;
     min-height: 100%;
     display: flex;
     flex-direction: column;
     padding-top: var(--safe-t);
-    padding-bottom: calc(74px + var(--safe-b));
+    padding-bottom: calc(var(--tabbar-h) + var(--safe-b));
   }
   .app-view {
     padding: 14px 14px 8px;
     flex: 1 1 auto;
+    width: 100%;
   }
 
   /* ---------- branded header ---------- */
@@ -121,22 +318,30 @@
     position: sticky;
     top: 0;
     z-index: 30;
-    background: linear-gradient(180deg, #202a18, #161c11);
-    border-bottom: 1px solid #090c06;
-    box-shadow: 0 1px 0 #3a4a2c inset, 0 6px 14px -8px #000;
+    background: var(--bar);
+    border-bottom: 1px solid var(--line);
+    box-shadow: var(--bar-shadow);
     padding: calc(10px + var(--safe-t)) 14px 11px;
     display: flex;
     align-items: center;
     gap: 11px;
   }
+  /* On the dark theme this was a white plate lifting the wordmark off the
+     panel. Against a white header there is nothing to lift it off, so the
+     plate goes and the mark sits directly on the bar. */
   .brandplate {
-    background: #fff;
     border-radius: 11px;
-    padding: 7px 12px;
-    flex: 0 0 auto;
+    padding: 4px 2px;
+    flex: 0 1 auto;
+    min-width: 0;
     display: flex;
     align-items: center;
-    box-shadow: 0 4px 12px -6px #000, 0 0 0 1px #ffffff18;
+  }
+  .brandmark {
+    height: 30px;
+    width: auto;
+    max-width: 100%;
+    display: block;
   }
   .plate .spacer {
     flex: 1 1 auto;
@@ -149,13 +354,37 @@
     font-weight: 700;
     white-space: nowrap;
   }
+
+  /* The plate is a single unwrapped row, and on a small phone the wordmark,
+     the role, the running count and the settings button do not all fit - they
+     used to push the last two off the right edge and give the whole page a
+     sideways scroll. The role goes first: it is on the Settings tab anyway,
+     while the running count is the number the header exists to show. */
+  @media (max-width: 479px) {
+    .plate {
+      gap: 9px;
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+    .linetag {
+      display: none;
+    }
+  }
+  @media (max-width: 380px) {
+    .brandplate {
+      padding: 6px 9px;
+    }
+    .brandmark {
+      height: 26px;
+    }
+  }
   .runcount {
     font-family: var(--mono);
     font-size: 11px;
     letter-spacing: 0.05em;
-    color: #0e1a08;
-    background: var(--amber);
-    border: 1px solid var(--amber);
+    color: var(--on-brand);
+    background: var(--brand);
+    border: 1px solid var(--brand);
     padding: 5px 10px;
     border-radius: 999px;
     white-space: nowrap;
@@ -164,22 +393,23 @@
   .runcount.zero {
     color: var(--ink-faint);
     border-color: var(--line);
-    background: #1a1f12;
+    background: var(--sunken);
     font-weight: 600;
   }
   .iconbtn {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     flex: 0 0 auto;
     border-radius: 10px;
-    background: #1a1f12;
+    background: var(--sunken);
     border: 1px solid var(--line);
     display: grid;
     place-items: center;
     color: var(--ink-dim);
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
   }
   .iconbtn:active {
-    background: #13160f;
+    background: var(--bg);
   }
 
   /* ---------- view head ---------- */
@@ -187,6 +417,8 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
     margin: 2px 2px 12px;
   }
   .view-head h1 {
@@ -235,7 +467,7 @@
     font-family: var(--mono);
     font-size: 10px;
     letter-spacing: 0.04em;
-    color: var(--amber);
+    color: var(--brand);
     white-space: nowrap;
   }
 
@@ -244,20 +476,20 @@
     width: 100%;
     text-align: left;
     cursor: pointer;
-    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
     padding: 14px 14px 14px 16px;
     overflow: hidden;
-    box-shadow: 0 1px 0 #36302480 inset, 0 8px 18px -14px #000;
-    transition: transform 0.06s ease, border-color 0.15s ease;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.06s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .mcard:active {
     transform: scale(0.992);
   }
   .mcard.on {
-    border-color: #5a4a23;
-    box-shadow: 0 0 0 1px #5a4a2380 inset, 0 0 22px -10px rgba(244, 165, 42, 0.5);
+    border-color: var(--t-brand-line);
+    box-shadow: 0 0 0 1px var(--t-brand-line) inset, 0 6px 20px -8px rgb(var(--brand-rgb) / 0.35);
   }
   .mcard::before {
     content: '';
@@ -270,13 +502,13 @@
     opacity: 0.55;
   }
   .mcard.on::before {
-    background: var(--amber);
+    background: var(--brand);
     opacity: 1;
-    box-shadow: 0 0 14px 1px var(--amber);
+    box-shadow: 0 0 14px 1px var(--brand);
   }
   .mcard.down {
-    border-color: #5a2c1d;
-    box-shadow: 0 0 0 1px #5a2c1d99 inset, 0 0 22px -12px rgba(224, 96, 60, 0.55);
+    border-color: var(--t-err-line);
+    box-shadow: 0 0 0 1px var(--t-err-line) inset, 0 6px 20px -8px rgb(var(--err-rgb) / 0.32);
   }
   .mcard.down::before {
     background: var(--err);
@@ -303,12 +535,12 @@
     height: 13px;
     border-radius: 50%;
     flex: 0 0 auto;
-    background: radial-gradient(circle at 35% 30%, #6d6450, #2c281f);
-    box-shadow: inset 0 0 3px #000, 0 0 0 1px #00000060;
+    background: var(--led-off);
+    box-shadow: var(--led-ring);
   }
   .mcard.on .led {
-    background: radial-gradient(circle at 35% 30%, #c8f0a0, var(--amber));
-    box-shadow: 0 0 10px 1px var(--amber), inset 0 0 3px #1f5a00;
+    background: var(--led-brand);
+    box-shadow: 0 0 0 3px rgb(var(--brand-rgb) / 0.22), 0 0 12px -2px rgb(var(--brand-rgb) / 0.7);
     animation: ledpulse 1.7s ease-in-out infinite;
   }
   @keyframes ledpulse {
@@ -356,7 +588,7 @@
     font-size: 24px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: var(--amber);
+    color: var(--brand);
   }
   .timer.paused {
     color: var(--pause);
@@ -374,31 +606,48 @@
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--accent, var(--amber));
+    color: var(--accent, var(--brand));
     display: flex;
     align-items: center;
     gap: 6px;
   }
 
-  /* small square actions on a machine card */
+  /* Small square actions on a machine card. 36px is the drawn size; the
+     ::after pad widens the *hit* area to the 44px a gloved thumb needs. The
+     8px gap is exactly what keeps two neighbouring pads from overlapping -
+     one of these reports a breakdown and the next logs temperatures, so a
+     tap that lands between them must not resolve to the wrong one. */
   .wbtn,
   .tbtn {
+    position: relative;
     flex: none;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
     border: 1px solid var(--line);
     display: grid;
     place-items: center;
-    margin-left: 6px;
+    margin-left: 8px;
     padding: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.06s ease;
+  }
+  .wbtn::after,
+  .tbtn::after,
+  .wdel::after,
+  .sheet-x::after {
+    content: '';
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
   }
   .wbtn {
-    background: #1a1f12;
+    background: var(--sunken);
     color: var(--ink-dim);
   }
   .tbtn {
-    background: #11201f;
+    background: var(--t-elec-bg);
     color: var(--elec);
   }
   .wbtn:active,
@@ -406,18 +655,18 @@
     transform: scale(0.94);
   }
   .tbtn.due {
-    border-color: #7a5a1f;
-    background: #2a2310;
-    color: var(--amber);
+    border-color: var(--t-warn-line);
+    background: var(--t-warn-bg);
+    color: var(--warn);
     animation: tpulse 1.6s ease-in-out infinite;
   }
   @keyframes tpulse {
     0%,
     100% {
-      box-shadow: 0 0 0 0 rgba(244, 165, 42, 0);
+      box-shadow: 0 0 0 0 rgb(var(--warn-rgb) / 0);
     }
     50% {
-      box-shadow: 0 0 10px 1px rgba(244, 165, 42, 0.55);
+      box-shadow: 0 0 0 4px rgb(var(--warn-rgb) / 0.22);
     }
   }
   .pausebtn {
@@ -425,24 +674,25 @@
     margin-top: 11px;
     padding: 11px;
     border-radius: var(--r-sm);
-    background: #241f10;
-    border: 1px solid #5a4a1f;
+    background: var(--t-warn-bg);
+    border: 1px solid var(--t-warn-line);
     color: var(--pause);
     font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.06em;
+    transition: background 0.15s ease, transform 0.06s ease;
   }
   .pausebtn:active {
     transform: scale(0.98);
   }
   .pausebtn.paused {
-    background: #16210f;
-    border-color: #2f4a28;
+    background: var(--t-ok-bg);
+    border-color: var(--t-ok-line);
     color: var(--ok);
   }
   .pausebtn.repair {
-    background: #2a130f;
-    border-color: #5a2c1d;
+    background: var(--t-err-bg);
+    border-color: var(--t-err-line);
     color: var(--err);
   }
 
@@ -450,14 +700,16 @@
     display: block;
     width: 100%;
     text-align: left;
-    background: #2a2310;
-    border: 1px solid #7a5a1f;
-    color: var(--amber);
+    background: var(--t-warn-bg);
+    border: 1px solid var(--t-warn-line);
+    color: var(--warn);
     border-radius: 11px;
-    padding: 10px 13px;
+    padding: 12px 14px;
+    min-height: 46px;
     margin-bottom: 12px;
     font-size: 12.5px;
     font-weight: 600;
+    transition: transform 0.06s ease, background 0.15s ease;
   }
   .duebar:active {
     transform: scale(0.995);
@@ -466,23 +718,24 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    background: #141a20;
-    border: 1px solid #3f4a55;
+    background: var(--t-steel-bg);
+    border: 1px solid var(--t-steel-line);
     color: var(--ink-dim);
     padding: 5px 11px;
     border-radius: 999px;
     font-size: 12px;
+    transition: border-color 0.15s ease, color 0.15s ease;
   }
   .shiftchip b {
     color: var(--ink);
   }
   .shiftchip.pinned {
-    background: #241d10;
-    border-color: #5a4420;
-    color: var(--amber);
+    background: var(--t-brand-bg);
+    border-color: var(--t-brand-line);
+    color: var(--brand);
   }
   .shiftchip.pinned b {
-    color: var(--amber);
+    color: var(--brand);
   }
 
   /* ---------- chips ---------- */
@@ -500,7 +753,7 @@
     padding: 3px 9px;
     border-radius: 6px;
     text-transform: uppercase;
-    color: #13110b;
+    color: var(--on-quality);
     white-space: nowrap;
   }
   .q-Special {
@@ -519,17 +772,17 @@
     background: var(--q-drc);
   }
   .q-Coarse {
-    background: var(--ember);
+    background: var(--q-coarse);
   }
   .q-Sillsheet {
-    background: var(--steel);
+    background: var(--q-sillsheet);
   }
   .qchip.shift {
     background: var(--steel);
   }
   .qchip.hold {
     background: var(--err);
-    color: #fff;
+    color: var(--on-fill);
   }
   .formchip {
     font-size: 11px;
@@ -551,46 +804,46 @@
     flex: 0 0 auto;
     border: 1px solid var(--line2);
     color: var(--ink-dim);
-    background: #00000030;
+    background: var(--panel);
   }
   .pill.run {
-    color: #0e1a08;
-    background: var(--amber);
-    border-color: var(--amber);
+    color: var(--on-brand);
+    background: var(--brand);
+    border-color: var(--brand);
   }
   .pill.paused {
     color: var(--pause);
-    border-color: #5a4a1f;
-    background: #241f10;
+    border-color: var(--t-warn-line);
+    background: var(--t-warn-bg);
   }
   .pill.shift {
     color: var(--steel);
-    border-color: #3f4a55;
-    background: #141a20;
+    border-color: var(--t-steel-line);
+    background: var(--t-steel-bg);
   }
   .pill.down {
-    color: #fff;
+    color: var(--on-fill);
     background: var(--err);
     border-color: var(--err);
   }
   .pill.ok {
     color: var(--ok);
-    border-color: #2f4a28;
-    background: #16210f;
+    border-color: var(--t-ok-line);
+    background: var(--t-ok-bg);
   }
   .pill.warn {
     color: var(--warn);
-    border-color: #5a4a1f;
-    background: #241f10;
+    border-color: var(--t-warn-line);
+    background: var(--t-warn-bg);
   }
 
   /* ---------- generic panels ---------- */
   .panel {
-    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
     padding: 14px;
-    box-shadow: 0 1px 0 #36302480 inset;
+    box-shadow: var(--shadow-card);
   }
   .stack {
     display: flex;
@@ -618,10 +871,12 @@
 
   /* ---------- batches ---------- */
   .bcard {
-    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
     padding: 13px 14px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .bhead {
     display: flex;
@@ -647,13 +902,20 @@
   }
   .bstate.cook {
     color: var(--ember);
-    border: 1px solid #5a2c1d;
-    background: #2a160f;
+    border: 1px solid var(--t-ember-line);
+    background: var(--t-ember-bg);
   }
   .bstate.ready {
     color: var(--ok);
-    border: 1px solid #2f4a28;
-    background: #16210f;
+    border: 1px solid var(--t-ok-line);
+    background: var(--t-ok-bg);
+  }
+  /* Out of the vessel and waiting on someone to say what it yielded - the one
+     state of a batch that is waiting on a person rather than on the plant. */
+  .bstate.mark {
+    color: var(--elec);
+    border: 1px solid var(--t-elec-line);
+    background: var(--t-elec-bg);
   }
   .bhint {
     font-size: 10.5px;
@@ -661,9 +923,76 @@
     margin-top: 9px;
     line-height: 1.35;
   }
-  .bclose {
-    width: 100%;
+  /* Which pre-refiners broke this charge down. Not part of the grade grid: they
+     run before the grades are split out of the charge at all. */
+  .bmeta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 11px;
+  }
+  .bmeta .k {
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .bcard.orphan {
+    border-color: var(--t-err-line);
+  }
+  .borphan {
+    font-size: 10.5px;
+    color: var(--ink-dim);
+    line-height: 1.4;
+    margin-top: 9px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--t-err-line);
+    background: var(--t-err-bg);
+  }
+  .borphan b {
+    color: var(--err);
+  }
+  .bactions {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px;
     margin-top: 10px;
+  }
+  /* A grade the runs have already settled: still readable, but not a target. */
+  .qtake.locked {
+    cursor: default;
+  }
+  .qtake:disabled {
+    opacity: 0.5;
+  }
+  /* Every run against a batch, in the detail sheet. */
+  .bruns {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .brun {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    font-size: 11.5px;
+  }
+  .brun .l,
+  .brun .r {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brun .r {
+    font-family: var(--mono);
   }
   .qgrid {
     display: grid;
@@ -684,13 +1013,19 @@
     font-weight: 700;
     letter-spacing: 0.04em;
   }
+  /* Ticking a grade off a batch. This is a real target, not a label, and it
+     was drawn at the height of its 18px box - which a gloved thumb misses. It
+     is given the height directly rather than with an overlay pad, because its
+     neighbours in `.qgrid` are only a 7px gap away and a pad that wide would
+     reach into the row above. */
   .qtake {
     display: flex;
     align-items: center;
     gap: 6px;
     cursor: pointer;
     user-select: none;
-    padding: 3px 2px;
+    padding: 6px 4px;
+    min-height: 44px;
     border-radius: 7px;
     background: none;
     border: none;
@@ -709,8 +1044,8 @@
     flex: none;
   }
   .qtake.on .qbox {
-    background: #16210f;
-    border-color: #2f4a28;
+    background: var(--t-ok-bg);
+    border-color: var(--t-ok-line);
   }
   .qtake.off {
     opacity: 0.4;
@@ -732,19 +1067,19 @@
     display: grid;
     place-items: center;
     font-size: 11px;
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line);
     color: var(--ink-faint);
     font-family: var(--mono);
   }
   .stagedot.done {
-    background: #16210f;
-    border-color: #2f4a28;
+    background: var(--t-ok-bg);
+    border-color: var(--t-ok-line);
     color: var(--ok);
   }
   .stagedot.weighed {
-    background: #101d20;
-    border-color: #27474d;
+    background: var(--t-elec-bg);
+    border-color: var(--t-elec-line);
     color: var(--elec);
   }
 
@@ -754,10 +1089,12 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    background: linear-gradient(180deg, var(--panel2), var(--panel));
-    border: 1px solid #3d3a24;
+    background: var(--panel);
+    border: 1px solid var(--line);
     border-radius: var(--r);
     padding: 13px 14px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .wcard .info {
     min-width: 0;
@@ -796,11 +1133,15 @@
     font-size: 11.5px;
     color: var(--ink-faint);
   }
+  /* "Show all" is a link by looks and a button by job, so it gets the padding
+     that makes it tappable; the negative margin keeps it optically aligned
+     with the heading it sits beside. */
   .wsec button {
     flex: none;
     background: none;
     border: 0;
-    padding: 0;
+    margin: -10px -6px;
+    padding: 10px 6px;
     font-family: var(--mono);
     font-size: 11.5px;
     color: var(--elec);
@@ -817,7 +1158,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
     padding: 10px 13px;
@@ -827,11 +1168,12 @@
     font-size: 15px;
   }
   .wdel {
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
-    background: #2a130f;
-    border: 1px solid #5a2620;
+    position: relative;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--t-err-bg);
+    border: 1px solid var(--t-err-line);
     color: var(--err);
     font-size: 13px;
     display: grid;
@@ -865,7 +1207,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    background: #161a10;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
     padding: 10px 13px;
@@ -878,7 +1220,7 @@
   }
   .custrow .cp {
     font-family: var(--mono);
-    color: var(--amber);
+    color: var(--brand);
     font-size: 13px;
   }
   .custrow .cn {
@@ -895,7 +1237,7 @@
   }
   .gbtn {
     flex: 1;
-    background: #161310;
+    background: var(--sunken);
     border: 1.5px solid var(--line2);
     border-radius: 9px;
     color: var(--ink-dim);
@@ -903,6 +1245,8 @@
     font-weight: 700;
     padding: 9px 4px;
     text-align: center;
+    min-height: 44px;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.06s ease;
   }
   .gbtn:active {
     transform: scale(0.97);
@@ -912,17 +1256,17 @@
   }
   .gbtn.pass.sel {
     border-color: var(--ok);
-    background: #1b2a16;
+    background: var(--t-ok-bg);
     color: var(--ok);
   }
   .gbtn.hold.sel {
     border-color: var(--err);
-    background: #2c1816;
+    background: var(--t-err-bg);
     color: var(--err);
   }
   .gbtn.none.sel {
     border-color: var(--line2);
-    background: #20281a;
+    background: var(--panel2);
     color: var(--ink-dim);
   }
   .gradetag {
@@ -933,7 +1277,7 @@
     font-weight: 700;
     padding: 3px 8px;
     border-radius: 6px;
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line2);
   }
   .gradetag .gd {
@@ -964,11 +1308,13 @@
     background: var(--panel2);
     border: 1px solid var(--line);
     border-radius: 11px;
-    padding: 11px 13px;
+    padding: 13px;
+    min-height: 48px;
     margin-bottom: 8px;
     color: var(--ink);
     text-align: left;
     font-size: 13px;
+    transition: border-color 0.15s ease, transform 0.06s ease;
   }
   .qcrow:active {
     transform: scale(0.99);
@@ -985,7 +1331,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: 9px;
     padding: 8px 11px;
@@ -1004,24 +1350,24 @@
     white-space: nowrap;
   }
   .bstat.ok {
-    background: #1f2c17;
+    background: var(--t-ok-bg);
     color: var(--ok);
-    border: 1px solid #2f4a26;
+    border: 1px solid var(--t-ok-line);
   }
   .bstat.due {
-    background: #2a2310;
-    color: var(--amber);
-    border: 1px solid #7a5a1f;
+    background: var(--t-warn-bg);
+    color: var(--warn);
+    border: 1px solid var(--t-warn-line);
   }
   .bstat.idle {
-    background: #1a1f12;
+    background: var(--sunken);
     color: var(--ink-faint);
     border: 1px solid var(--line);
   }
   .bstat.miss {
-    background: #2c1816;
+    background: var(--t-err-bg);
     color: var(--err);
-    border: 1px solid #5a2c1d;
+    border: 1px solid var(--t-err-line);
   }
 
   /* ---------- maintenance log ---------- */
@@ -1063,28 +1409,31 @@
     align-items: center;
     justify-content: center;
     gap: 7px;
+    min-height: 44px;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.06s ease,
+      box-shadow 0.15s ease;
   }
   .btn:active {
     transform: scale(0.97);
   }
   .btn.primary {
-    background: var(--amber);
-    color: #1a1408;
-    border-color: var(--amber);
+    background: var(--brand);
+    color: var(--on-brand);
+    border-color: var(--brand);
   }
   .btn.elec {
-    background: #123a40;
+    background: var(--t-elec-bg);
     color: var(--elec);
-    border-color: #27474d;
+    border-color: var(--t-elec-line);
   }
   .btn.ghost {
-    background: #1d1a13;
+    background: var(--sunken);
     color: var(--ink-dim);
   }
   .btn.danger {
-    background: #2a130f;
+    background: var(--t-err-bg);
     color: var(--err);
-    border-color: #5a2620;
+    border-color: var(--t-err-line);
   }
   .btn.block {
     width: 100%;
@@ -1115,13 +1464,15 @@
   .field select,
   .field textarea {
     width: 100%;
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line2);
     border-radius: var(--r-sm);
     color: var(--ink);
     padding: 13px;
-    font-size: 15px;
+    /* 16px keeps iOS Safari from zooming the whole page on focus. */
+    font-size: 16px;
     font-family: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .field textarea {
     resize: vertical;
@@ -1130,23 +1481,28 @@
   .field select {
     -webkit-appearance: none;
     appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a89c8a' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");
+    background-image: var(--chevron);
     background-repeat: no-repeat;
     background-position: right 13px center;
     padding-right: 34px;
+  }
+  .field input::placeholder,
+  .field textarea::placeholder {
+    color: var(--ink-faint);
+    opacity: 0.75;
   }
   .field input:focus,
   .field select:focus,
   .field textarea:focus {
     outline: none;
-    border-color: var(--amber);
-    box-shadow: 0 0 0 3px #62b23a22;
+    border-color: var(--brand);
+    box-shadow: var(--focus-ring);
   }
   /* Standalone input / label, for the admin side and any one-off control that
      is not wrapped in a `.field`. */
   .field-input {
-    @apply w-full rounded-field border border-line-strong bg-panel-field px-3 py-3 text-[15px]
-           text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20;
+    @apply w-full rounded-field border border-line-strong bg-panel-field px-3 py-3 text-base
+           text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20;
   }
   .label-caps {
     @apply mb-2 block text-[11px] font-bold uppercase tracking-[0.12em] text-ink-dim;
@@ -1178,8 +1534,8 @@
     margin: 7px 0 2px;
     font-size: 12.5px;
     color: var(--steel);
-    background: #10201a;
-    border: 1px solid #244338;
+    background: var(--t-elec-bg);
+    border: 1px solid var(--t-elec-line);
     border-radius: 9px;
     padding: 7px 11px;
   }
@@ -1190,9 +1546,9 @@
     color: var(--ink);
   }
   .diffout.bad {
-    background: #2c1816;
-    border-color: #5a2c1d;
-    color: #f0b3ab;
+    background: var(--t-err-bg);
+    border-color: var(--t-err-line);
+    color: var(--err-ink);
   }
   .diffout.bad b {
     color: var(--err);
@@ -1200,9 +1556,9 @@
   .formwarn {
     display: none;
     margin: 2px 0 4px;
-    background: #2c1816;
-    border: 1px solid #5a2c1d;
-    color: #f0b3ab;
+    background: var(--t-err-bg);
+    border: 1px solid var(--t-err-line);
+    color: var(--err-ink);
     border-radius: 9px;
     padding: 9px 12px;
     font-size: 12.5px;
@@ -1226,6 +1582,7 @@
     border: none;
     color: inherit;
     text-align: left;
+    min-height: 44px;
   }
   .toggle-row small {
     display: block;
@@ -1239,10 +1596,10 @@
     width: 46px;
     height: 27px;
     border-radius: 14px;
-    background: #2a3320;
-    border: 1px solid var(--line);
+    background: var(--panel2);
+    border: 1px solid var(--line2);
     position: relative;
-    transition: background 0.15s;
+    transition: background 0.15s, border-color 0.15s;
   }
   .toggle i {
     position: absolute;
@@ -1251,16 +1608,16 @@
     width: 21px;
     height: 21px;
     border-radius: 50%;
-    background: #8a96a0;
+    background: var(--ink-faint);
     transition: left 0.15s, background 0.15s;
   }
   .toggle.on {
-    background: var(--amber);
-    border-color: var(--amber);
+    background: var(--brand);
+    border-color: var(--brand);
   }
   .toggle.on i {
     left: 21px;
-    background: #0e1a08;
+    background: var(--on-brand);
   }
 
   /* ---------- history ---------- */
@@ -1277,8 +1634,8 @@
     min-width: 0;
   }
   .histsum {
-    background: #10201a;
-    border: 1px solid #244338;
+    background: var(--t-elec-bg);
+    border: 1px solid var(--t-elec-line);
     border-radius: 11px;
     padding: 11px 13px;
     margin: 0 2px 12px;
@@ -1304,7 +1661,7 @@
   }
   table.hist td {
     padding: 9px 8px;
-    border-bottom: 1px solid #2a2519;
+    border-bottom: 1px solid var(--rule);
     vertical-align: middle;
   }
   table.hist tr:last-child td {
@@ -1331,7 +1688,7 @@
     justify-content: space-between;
     gap: 14px;
     padding: 9px 2px;
-    border-bottom: 1px solid #2a2519;
+    border-bottom: 1px solid var(--rule);
   }
   .detrow:last-child {
     border-bottom: none;
@@ -1363,10 +1720,11 @@
     gap: 11px;
   }
   .stat {
-    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--r);
     padding: 13px 14px;
+    box-shadow: var(--shadow-card);
   }
   .stat .v {
     font-family: var(--mono);
@@ -1393,7 +1751,7 @@
     align-items: center;
     gap: 12px;
     padding: 11px 4px;
-    border-bottom: 1px solid #2a2519;
+    border-bottom: 1px solid var(--rule);
   }
   .wq:last-child {
     border-bottom: none;
@@ -1402,7 +1760,7 @@
     flex: 1 1 auto;
     height: 9px;
     border-radius: 5px;
-    background: #161310;
+    background: var(--sunken);
     overflow: hidden;
   }
   .wbar i {
@@ -1417,39 +1775,68 @@
     text-align: right;
   }
 
-  /* ---------- bottom tabs ---------- */
+  /* ---------- tabs ----------
+     A bottom bar on a phone; the same markup becomes a left rail from 900px up
+     (see the responsive block at the foot of this file). */
   .tabs {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
     z-index: 40;
-    background: linear-gradient(180deg, #211d15, #171410);
-    border-top: 1px solid #0c0a07;
-    box-shadow: 0 -1px 0 #443c2c inset;
+    background: var(--bar);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 16px -10px rgba(0, 0, 0, 0.9);
     padding-bottom: var(--safe-b);
     display: flex;
-    max-width: 760px;
+    /* The lab tablet carries one tab, not eight, so a short bar is centred
+       rather than left hanging off the left edge of the phone. */
+    justify-content: center;
+    max-width: var(--content-max);
     margin: 0 auto;
+    /* All eight share the width equally and none of it scrolls: a navigation
+       bar you have to swipe sideways hides the tab you need behind a gesture,
+       which on a tablet held in one hand is worse than a small label. */
+    overflow: hidden;
   }
   .tabs a {
     flex: 1 1 0;
-    padding: 9px 2px 7px;
+    min-width: 0;
+    /* An eighth of the widest phone that gets this bar - it becomes a rail at
+       900px - is about 112px, so the cap never bites on the floor's eight. It
+       is here for the lab's one tab, which would otherwise stretch the whole
+       width and read as a banner rather than as a tab. */
+    max-width: 120px;
+    padding: 9px 1px 7px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
     color: var(--ink-faint);
     position: relative;
+    transition: color 0.15s ease, background 0.15s ease;
   }
   .tabs a span {
     font-size: 9.5px;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     font-weight: 700;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* An eighth of a small phone is about 44px; the label has to give a little
+     to stay whole rather than be cut to "MACHIN…". */
+  @media (max-width: 430px) {
+    .tabs a span {
+      font-size: 8.5px;
+      letter-spacing: 0;
+    }
   }
   .tabs a.active {
-    color: var(--amber);
+    color: var(--brand);
   }
   .tabs a.active::after {
     content: '';
@@ -1458,18 +1845,21 @@
     width: 26px;
     height: 2px;
     border-radius: 2px;
-    background: var(--amber);
-    box-shadow: 0 0 8px var(--amber);
+    background: var(--brand);
+    box-shadow: 0 0 8px var(--brand);
   }
   .tabbadge {
     position: absolute;
     top: 4px;
-    right: calc(50% - 22px);
+    /* Tucked against the icon's top-right corner, but never past the edge of
+       its own tab - on a 320px phone an eighth of the bar is narrower than the
+       22px offset, and the last tab's badge would be clipped by the bar. */
+    right: max(2px, calc(50% - 22px));
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
     background: var(--ember);
-    color: #fff;
+    color: var(--on-fill);
     font-size: 10px;
     font-weight: 800;
     border-radius: 999px;
@@ -1479,12 +1869,15 @@
     font-style: normal;
   }
 
-  /* ---------- bottom sheet ---------- */
+  /* ---------- bottom sheet ----------
+     `.sheet` is only the skin - the back office reuses it inside `.bo-modal`
+     with its own box. `.app-sheet` is what makes it a sheet: fixed to the
+     bottom of a phone, a centred dialog on a desk screen. */
   .scrim {
     position: fixed;
     inset: 0;
     z-index: 50;
-    background: #000a;
+    background: var(--scrim);
     backdrop-filter: blur(2px);
     opacity: 0;
     pointer-events: none;
@@ -1495,26 +1888,35 @@
     pointer-events: auto;
   }
   .sheet {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-bottom: none;
+    border-radius: 20px 20px 0 0;
+    box-shadow: var(--shadow-sheet);
+    padding: 8px 18px calc(20px + var(--safe-b));
+    max-height: 88vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .app-sheet {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
     z-index: 51;
-    max-width: 760px;
+    max-width: var(--content-max);
     margin: 0 auto;
-    background: linear-gradient(180deg, #262219, #1c1913);
-    border: 1px solid var(--line);
-    border-bottom: none;
-    border-radius: 20px 20px 0 0;
-    padding: 8px 18px calc(20px + var(--safe-b));
     transform: translateY(100%);
-    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
-    max-height: 88vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+    /* Hidden rather than merely off-screen: a closed sheet's fields must not
+       be reachable by Tab. The visibility flip is delayed by the length of the
+       slide so the sheet is still painted while it animates away. */
+    visibility: hidden;
+    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.24s;
   }
-  .sheet.show {
+  .app-sheet.show {
     transform: translateY(0);
+    visibility: visible;
+    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0s;
   }
   .grab {
     width: 38px;
@@ -1537,11 +1939,32 @@
     font-size: 19px;
     font-weight: 800;
     letter-spacing: 0.01em;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  /* An explicit way out. Tapping the scrim already closes the sheet, but that
+     is not discoverable and is not reachable from a keyboard. */
+  .sheet-x {
+    position: relative;
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    margin: -4px -6px -4px 0;
+    border-radius: 9px;
+    border: 1px solid var(--line);
+    background: var(--sunken);
+    color: var(--ink-dim);
+    display: grid;
+    place-items: center;
+    font-size: 17px;
+    line-height: 1;
+    transition: color 0.15s ease, border-color 0.15s ease;
   }
   .sheet-sub {
     font-size: 12.5px;
     color: var(--ink-faint);
     margin: 0 0 16px 23px;
+    line-height: 1.45;
   }
   .sheet-label {
     font-size: 11px;
@@ -1567,7 +1990,7 @@
     gap: 9px;
   }
   .pick {
-    background: #161310;
+    background: var(--sunken);
     border: 1.5px solid var(--line2);
     border-radius: var(--r-sm);
     padding: 15px 12px;
@@ -1576,14 +1999,16 @@
     flex-direction: column;
     gap: 3px;
     color: var(--ink);
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.06s ease,
+      box-shadow 0.15s ease;
   }
   .pick:active {
     transform: scale(0.98);
   }
   .pick.sel {
-    border-color: var(--amber);
-    background: #241d10;
-    box-shadow: 0 0 0 3px #62b23a22;
+    border-color: var(--brand);
+    background: var(--t-brand-bg);
+    box-shadow: var(--focus-ring);
   }
   .pick b {
     font-size: 16px;
@@ -1601,7 +2026,7 @@
     font-size: 20px;
   }
   .ro {
-    background: #161310;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
     padding: 13px;
@@ -1620,34 +2045,82 @@
   .ro .v {
     font-family: var(--mono);
     font-size: 18px;
-    color: var(--amber);
+    color: var(--brand);
+  }
+
+  /* ---------- toast ----------
+     Docked clear of whichever navigation is on screen: above the tab bar on a
+     phone, clear of the rail on a desk screen. */
+  .toast-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--tabbar-h) + 12px + var(--safe-b));
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--panel2);
+    border: 1px solid var(--line2);
+    color: var(--ink);
+    padding: 11px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: var(--shadow-raised);
+    max-width: 88%;
+    pointer-events: auto;
+  }
+  .toast.ok {
+    border-color: var(--t-ok-line);
+  }
+  .toast.ok::before {
+    content: '✓ ';
+    color: var(--ok);
+  }
+  .toast.err {
+    border-color: var(--t-err-line);
+  }
+  .toast.err::before {
+    content: '✕ ';
+    color: var(--err);
+  }
+  .toast.warn {
+    border-color: var(--t-warn-line);
+  }
+  .toast.warn::before {
+    content: '! ';
+    color: var(--warn);
   }
 
   /*
    * ---------- back office ----------
    *
-   * back.html is a different room: a cooler, bluer palette for a desk and a
-   * bigger screen, where the shop floor is warm green for a tablet in a noisy
-   * plant. Both prototypes name their variables the same, so the back-office
-   * ones are redefined under `.back-office` rather than at :root - that way
-   * one app can carry both looks without either bleeding into the other.
+   * The other room: a desk, a bigger screen, a mouse.
+   *
+   * Both rooms are dark now, so what separates them is no longer hue - it is
+   * density. The shop floor is built for a gloved thumb: big targets, one
+   * card at a time, shadow under everything. The back office puts a hundred
+   * rows on a screen for someone sitting down, so its surfaces are flat, its
+   * padding is tighter and its type is smaller. The palette is shared.
+   *
+   * The tokens below are therefore only the ones that genuinely differ, plus
+   * `--muted`, which is the name the back office's own rules grew up with.
+   * Everything else is inherited from `:root` on purpose: two copies of one
+   * palette is how the two rooms drift apart.
    */
   .back-office {
-    --bg: #0c1116;
-    --panel: #141b22;
-    --panel2: #101820;
-    --line: #26323d;
-    --ink: #e8eef4;
-    --ink-dim: #9fb0bf;
-    --ink-faint: #6f818f;
-    --muted: #6f818f;
-    --steel: #7fb1d8;
-    --elec: #7c9cf0;
-    --ember: #f0a35a;
-    --ok: #46c79a;
-    --amber: #f3c969;
-    --err: #ef6b5b;
-    --accent: #7fb1d8;
+    --muted: var(--ink-faint);
+    --accent: var(--brand);
+
+    /* Flat: a desk screen shows too many of these at once for a drop shadow
+       under each to read as anything but noise. */
+    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
 
     background: var(--bg);
     color: var(--ink);
@@ -1662,7 +2135,7 @@
     position: sticky;
     top: 0;
     z-index: 20;
-    background: linear-gradient(180deg, #0c1116 72%, rgba(12, 17, 22, 0));
+    background: linear-gradient(180deg, var(--bg) 72%, rgb(var(--bg-rgb) / 0));
     padding: 14px 0 8px;
   }
   .back-office h1 {
@@ -1701,7 +2174,7 @@
   }
   .back-office .tab.on {
     background: var(--accent);
-    color: #08222e;
+    color: var(--on-fill);
     border-color: var(--accent);
   }
   .back-office .panel {
@@ -1715,7 +2188,7 @@
   .back-office select,
   .back-office input,
   .back-office textarea {
-    background: #0e151b;
+    background: var(--sunken);
     border: 1px solid var(--line);
     color: var(--ink);
     border-radius: 9px;
@@ -1729,7 +2202,7 @@
   .back-office textarea:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px #7fb1d822;
+    box-shadow: var(--focus-ring);
   }
   .back-office label {
     display: block;
@@ -1766,7 +2239,7 @@
   }
   .back-office .chip.on {
     background: var(--ember);
-    color: #2a1607;
+    color: var(--on-fill);
     border-color: var(--ember);
   }
   .back-office .grouphead {
@@ -1801,7 +2274,7 @@
     color: var(--muted);
   }
   .back-office .badge {
-    background: #0e151b;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: 999px;
     padding: 3px 10px;
@@ -1811,15 +2284,15 @@
   }
   .back-office .badge.hot {
     color: var(--ember);
-    border-color: #5a4420;
+    border-color: var(--t-ember-line);
   }
   .back-office .badge.warn {
     color: var(--err);
-    border-color: #5a2c1d;
+    border-color: var(--t-err-line);
   }
   .back-office .badge.ok {
     color: var(--ok);
-    border-color: #244338;
+    border-color: var(--t-ok-line);
   }
   .back-office .badge.none {
     color: var(--muted);
@@ -1890,7 +2363,7 @@
     margin-top: 9px;
   }
   .back-office .chiplet {
-    background: #0e151b;
+    background: var(--sunken);
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 5px 9px;
@@ -1900,12 +2373,16 @@
   .back-office .chiplet b {
     color: var(--ink);
   }
+  /* A quality chip on the desk side is a quieter pill than the solid colour
+     block the shop floor picks grades by - the admin tables put dozens on a
+     screen, and at that count the ramp turns into confetti. */
   .back-office .qchip {
     font-size: 11px;
     padding: 2px 8px;
     border-radius: 999px;
-    background: #22304a;
-    color: #cfe0ff;
+    background: var(--t-brand-bg);
+    color: var(--brand);
+    border: 1px solid var(--t-brand-line);
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
@@ -1925,9 +2402,9 @@
     font-size: 13.5px;
   }
   .back-office .errbox {
-    background: #2c1816;
-    border: 1px solid #5a2c1d;
-    color: #f0b3ab;
+    background: var(--t-err-bg);
+    border: 1px solid var(--t-err-line);
+    color: var(--err-ink);
     border-radius: 11px;
     padding: 11px 13px;
     font-size: 13px;
@@ -1995,8 +2472,8 @@
     margin-bottom: 10px;
   }
   .back-office .effcard.flag {
-    border-color: #5a2c1d;
-    background: #1c1512;
+    border-color: var(--t-err-line);
+    background: var(--t-err-bg);
   }
   .back-office .metric {
     display: flex;
@@ -2004,7 +2481,7 @@
     align-items: baseline;
     gap: 8px;
     padding: 6px 0;
-    border-bottom: 1px solid #1b242d;
+    border-bottom: 1px solid var(--rule);
     width: 100%;
     text-align: left;
     background: none;
@@ -2025,29 +2502,30 @@
     font-size: 10px;
     padding: 2px 7px;
     border-radius: 999px;
-    background: #3a1d17;
+    background: var(--t-err-bg);
     color: var(--err);
-    border: 1px solid #5a2c1d;
+    border: 1px solid var(--t-err-line);
     margin-left: 6px;
   }
   .back-office .okpill {
     font-size: 10px;
     padding: 2px 7px;
     border-radius: 999px;
-    background: #12241c;
+    background: var(--t-ok-bg);
     color: var(--ok);
-    border: 1px solid #244338;
+    border: 1px solid var(--t-ok-line);
     margin-left: 6px;
   }
   .back-office .btn {
     background: var(--accent);
-    color: #08222e;
+    color: var(--on-fill);
     border: none;
     border-radius: 9px;
     padding: 9px 14px;
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 0;
+    min-height: 0;
   }
   .back-office .btn.ghost,
   .back-office .btn.outline {
@@ -2056,8 +2534,8 @@
     color: var(--ink-dim);
   }
   .back-office .btn.danger {
-    background: #3a1d17;
-    border: 1px solid #5a2c1d;
+    background: var(--t-err-bg);
+    border: 1px solid var(--t-err-line);
     color: var(--err);
   }
   .back-office .btn.block {
@@ -2104,15 +2582,15 @@
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: rgba(4, 8, 11, 0.72);
+    background: var(--scrim);
     display: flex;
     align-items: flex-end;
     justify-content: center;
   }
   .bo-modal .sheet {
-    background: #141b22;
-    border: 1px solid #26323d;
-    color: #e8eef4;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--ink);
     border-radius: 16px 16px 0 0;
     width: 100%;
     max-width: 820px;
@@ -2130,38 +2608,288 @@
     }
   }
 
-  /* ---------- toast ---------- */
+  /* ==================================================================
+   * responsive
+   *
+   * One column and a bottom bar on a phone; two columns from a tablet;
+   * a left rail, a wide canvas and centred dialogs on a desk screen.
+   * ================================================================== */
+
+  /* ---- overflow safety ----
+     A sideways scrollbar on the whole page is the one layout bug that makes a
+     tablet app feel broken, and on this app it comes from data rather than
+     from layout: a record id, a machine name, a supervisor typed longer than
+     anyone expected. These are the places where a single unbroken string is
+     rendered into a fixed-width slot, so they are told to break rather than to
+     push. The alternative - `overflow-x: hidden` on the body - would hide the
+     symptom and take the sticky header down with it. */
+  .detrow .v,
+  .roRow .v,
+  .sheet-h b,
   .toast {
-    background: #2c2719;
-    border: 1px solid var(--line2);
-    color: var(--ink);
-    padding: 11px 16px;
-    border-radius: 999px;
-    font-size: 13px;
-    font-weight: 600;
-    box-shadow: 0 10px 26px -10px #000;
-    max-width: 88%;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
-  .toast.ok {
-    border-color: #2f4a28;
+  /* Both of these are already `display: block`, which is what lets the
+     ellipsis land; on an inline span it would do nothing. */
+  .mname b,
+  .wcard .info small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .toast.ok::before {
-    content: '✓ ';
-    color: var(--ok);
+  /* A tab bar is a fixed row of eight, so its labels have to give rather than
+     the bar. */
+  .tabs a {
+    min-height: 52px;
   }
-  .toast.err {
-    border-color: #5a2620;
+
+  /* ---- tablet: the card lists go two-up, the pickers get a third column ---- */
+  @media (min-width: 640px) {
+    .app-view {
+      padding: 18px 20px 12px;
+    }
+    .statgrid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .histbar {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .pickgrid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .sheet {
+      padding-left: 22px;
+      padding-right: 22px;
+    }
   }
-  .toast.err::before {
-    content: '✕ ';
-    color: var(--err);
+
+  /* Every card list a tab renders is a direct child of `.app-view`, so the
+     columns can be added here without a page knowing about them. Scoped with
+     `>` deliberately: a `.stack` nested inside a sheet must stay one column,
+     because the sheet is narrow whatever the viewport is doing. */
+  @media (min-width: 760px) {
+    .app-view > .stack,
+    .app-view > .mlist,
+    .app-view > section > .mlist {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: start;
+      gap: 12px;
+    }
   }
-  .toast.warn {
-    border-color: #5a4a1f;
+
+  /* ---- desk: tabs become a rail, sheets become dialogs ---- */
+  @media (min-width: 900px) {
+    .app-shell {
+      max-width: none;
+      padding-left: var(--rail);
+      padding-bottom: var(--safe-b);
+    }
+    .app-view {
+      max-width: var(--shell-max);
+      margin: 0 auto;
+      padding: 22px 28px 40px;
+    }
+    .plate {
+      padding-left: 24px;
+      padding-right: 24px;
+    }
+
+    .tabs {
+      top: 0;
+      right: auto;
+      bottom: 0;
+      width: var(--rail);
+      max-width: none;
+      margin: 0;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 3px;
+      padding: calc(var(--safe-t) + 16px) 12px calc(16px + var(--safe-b));
+      border-top: none;
+      border-right: 1px solid var(--line);
+      box-shadow: none;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .tabs a {
+      flex: 0 0 auto;
+      min-width: 0;
+      /* The rail is already narrow; the bottom bar's cap would only stop a row
+         short of its own label. */
+      max-width: none;
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 12px;
+      padding: 11px 13px;
+      border-radius: 10px;
+    }
+    .tabs a span {
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: none;
+      font-weight: 600;
+    }
+    .tabs a.active {
+      background: var(--t-brand-bg);
+    }
+    .tabs a.active::after {
+      top: 50%;
+      left: 0;
+      width: 3px;
+      height: 20px;
+      transform: translateY(-50%);
+      border-radius: 0 3px 3px 0;
+    }
+    /* The badge is first in the markup so a screen reader announces the count
+       before the tab it belongs to. In the rail it has to *look* last, at the
+       far end of the row - `order` moves the box without moving the reading. */
+    .tabbadge {
+      position: static;
+      order: 1;
+      margin-left: auto;
+    }
+
+    .toast-dock {
+      left: var(--rail);
+      bottom: 20px;
+    }
+
+    /* A sheet with nothing below it to slide up from becomes what it always
+       was on a desk: a dialog in the middle of the screen. */
+    .app-sheet {
+      top: 50%;
+      bottom: auto;
+      left: 50%;
+      right: auto;
+      width: min(640px, calc(100vw - 64px));
+      max-width: none;
+      margin: 0;
+      max-height: min(86vh, 820px);
+      transform: translate(-50%, calc(-50% + 14px)) scale(0.98);
+      opacity: 0;
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.16s ease,
+        visibility 0s linear 0.2s;
+    }
+    .app-sheet.show {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.16s ease,
+        visibility 0s linear 0s;
+    }
+    .app-sheet.sheet {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 10px 22px 22px;
+    }
+    .app-sheet .grab {
+      display: none;
+    }
   }
-  .toast.warn::before {
-    content: '! ';
-    color: var(--warn);
+
+  /* ---- wide desk: three columns, and the KPI row on one line ---- */
+  @media (min-width: 1280px) {
+    .app-view > .stack,
+    .app-view > .mlist,
+    .app-view > section > .mlist {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .statgrid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+
+  /* ---- short viewports ----
+     A phone turned on its side, or a tablet docked in landscape: about 360px
+     of height, of which the header and the tab bar were taking a third
+     between them, leaving a form with two fields visible at a time.
+
+     So both bars shrink and the tab labels go - the icons and, more to the
+     point, the badges are what the bar is there for, and every tab still
+     carries its name as a tooltip and to a screen reader. The sheet is let up
+     to nearly the full height because there is so little of it to spend.
+
+     Capped below 900px on purpose: past that the bar is a vertical rail, and
+     a rail has the room for its labels however short the screen is. */
+  @media (max-width: 899.98px) and (max-height: 520px) and (orientation: landscape) {
+    :root {
+      --tabbar-h: 54px;
+    }
+    .plate {
+      padding-top: calc(6px + var(--safe-t));
+      padding-bottom: 7px;
+    }
+    .brandmark {
+      height: 24px;
+    }
+    .app-view {
+      padding-top: 10px;
+    }
+    .view-head {
+      margin-bottom: 8px;
+    }
+    .tabs a {
+      min-height: 0;
+      gap: 0;
+      padding: 7px 1px;
+    }
+    .tabs a span {
+      display: none;
+    }
+    /* With the labels gone the badge has the icon's corner to itself again. */
+    .tabbadge {
+      top: 2px;
+    }
+    .sheet {
+      max-height: 94vh;
+    }
+    .sheet-actions {
+      margin-top: 14px;
+    }
+  }
+
+  /* ---- pointer devices ----
+     The prototype had `:active` and nothing else, because a thumb has no
+     hover. A desk screen does, and without these the whole app feels dead
+     under a mouse. */
+  @media (hover: hover) and (pointer: fine) {
+    .mcard:hover,
+    .bcard:hover,
+    .wcard:hover,
+    .qcrow:hover {
+      border-color: var(--line2);
+    }
+    .tabs a:hover {
+      color: var(--ink-dim);
+      background: var(--hover);
+    }
+    .tabs a.active:hover {
+      color: var(--brand);
+    }
+    .btn:hover:not(:disabled) {
+      border-color: var(--brand-deep);
+    }
+    .btn.primary:hover:not(:disabled) {
+      background: var(--brand-soft);
+      border-color: var(--brand-soft);
+    }
+    .pick:hover:not(.sel),
+    .gbtn:hover:not(.sel) {
+      border-color: var(--brand-deep);
+    }
+    .iconbtn:hover,
+    .wbtn:hover,
+    .sheet-x:hover {
+      color: var(--ink);
+      border-color: var(--line2);
+    }
+    .duebar:hover {
+      border-color: var(--warn);
+    }
+    .wsec button:hover {
+      color: var(--brand-soft);
+    }
   }
 }
 
@@ -2170,6 +2898,10 @@
   *::before,
   *::after {
     animation: none !important;
-    transition: none !important;
+    /* Duration *and* delay: the sheet hides itself with a delayed
+       `visibility` step, which a duration-only override would leave behind. */
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
 }
