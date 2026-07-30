@@ -4,6 +4,11 @@ import { authenticate } from '../middlewares/auth.middleware.js';
 import { adminOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam, listQuery } from '../validations/common.validation.js';
+import {
+  createMachineSchema,
+  updateMachineSchema,
+  toggleMachineSchema,
+} from '../validations/machine.validation.js';
 
 const router = Router();
 
@@ -14,8 +19,18 @@ router.get('/grouped', machines.grouped);
 router.get('/:id', validate({ params: idParam }), machines.getOne);
 
 // admin side only
-router.post('/', adminOnly, machines.create);
-router.patch('/:id', adminOnly, validate({ params: idParam }), machines.update);
-router.patch('/:id/enabled', adminOnly, validate({ params: idParam }), machines.toggle);
+router.post('/', adminOnly, validate({ body: createMachineSchema }), machines.create);
+router.patch(
+  '/:id',
+  adminOnly,
+  validate({ params: idParam, body: updateMachineSchema }),
+  machines.update,
+);
+router.patch(
+  '/:id/enabled',
+  adminOnly,
+  validate({ params: idParam, body: toggleMachineSchema }),
+  machines.toggle,
+);
 
 export default router;

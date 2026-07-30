@@ -44,6 +44,70 @@ alter table public.runs add column if not exists src4 text;
 create index if not exists runs_machine_shift_idx
   on public.runs (machine_id, shift_date, shift);
 
+-- What a moulding press records: the product it was set up for, the curing
+-- settings copied off that product as it started, and what came out - pieces,
+-- weighed output (weight_kg, already there) and the flash trimmed off. A press
+-- has no meters, so none of the meter columns apply to it.
+alter table public.runs add column if not exists product       text;
+alter table public.runs add column if not exists cavities      integer;
+alter table public.runs add column if not exists cyclic_min    numeric;
+alter table public.runs add column if not exists cure_temp_c   numeric;
+alter table public.runs add column if not exists pieces        integer;
+alter table public.runs add column if not exists flash_kg      numeric;
+alter table public.runs add column if not exists compound_rate numeric;
+
+-- The presses themselves, and what they mould. `kind` had no 'press' in it, so
+-- the check constraint has to be replaced before a press row will insert - a
+-- check cannot be widened in place. Products are seeded with their figures null:
+-- nobody has measured them into this system, and a made-up compound rate would
+-- cost every press run wrong. The press sheets say "not set" until they are
+-- filled in from the back office's Products screen.
+alter table if exists public.machines drop constraint if exists machines_kind_check;
+alter table if exists public.machines add constraint machines_kind_check
+  check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'));
+
+create table if not exists public.products (
+  id             text primary key,
+  name           text not null,
+  cure_temp_c    numeric,
+  cyclic_min     numeric,
+  cavities       integer,
+  compound_rate  numeric,
+  note           text,
+  active         boolean not null default true,
+  sort_order     integer not null default 0,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+-- Sleve was seeded as "Slive" the first time this file was run. The rename comes
+-- before the insert below, so a project that already has it keeps the one row -
+-- with whatever settings were entered against it - rather than gaining a second.
+-- A press run keeps the product's name on the row, so those are renamed with it.
+update public.products set id = 'SLEVE', name = 'Sleve' where id = 'SLIVE';
+update public.runs     set product = 'Sleve' where product = 'Slive';
+
+insert into public.products (id, name, active, sort_order)
+values ('LOOP', 'Loop', true, 1), ('SLEVE', 'Sleve', true, 2)
+on conflict (id) do nothing;
+
+insert into public.machines
+  (id, name, short, kind, group_name, sub, accent, out_weight, needs_quality, weigh, tyre, enabled, sort_order)
+values
+  ('PRS_P3', 'Press 3', 'P3', 'press', 'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', false, false, false, false, true, 15),
+  ('PRS_P5', 'Press 5', 'P5', 'press', 'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', false, false, false, false, true, 16)
+on conflict (id) do nothing;
+
+alter table public.products enable row level security;
+
+drop policy if exists products_read on public.products;
+create policy products_read on public.products
+  for select to anon, authenticated using (true);
+
+drop policy if exists products_write on public.products;
+create policy products_write on public.products
+  for all to service_role using (true) with check (true);
+
 -- Weighbridge loads: without these a dispatch cannot carry its loads at all.
 alter table public.dispatch_loads add column if not exists dispatch_id text;
 alter table public.dispatch_loads add column if not exists gross_kg    numeric;

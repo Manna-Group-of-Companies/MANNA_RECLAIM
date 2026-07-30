@@ -8,7 +8,7 @@ import { env } from './config/env.js';
 import { dbInfo } from './config/supabase.js';
 import routes from './routes/index.js';
 import { requestLogger } from './middlewares/requestLogger.middleware.js';
-import { apiLimiter } from './middlewares/rateLimiter.middleware.js';
+import { apiLimiter, writeLimiter } from './middlewares/rateLimiter.middleware.js';
 import { notFound } from './middlewares/notFound.middleware.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { ApiError } from './utils/ApiError.js';
@@ -24,7 +24,38 @@ export function createApp() {
 
   if (env.trustProxy) app.set('trust proxy', 1);
 
-  app.use(helmet());
+  // This process serves JSON and nothing else - no HTML, no scripts, no frames -
+  // so the policy says exactly that. `default-src 'none'` means a response that
+  // somehow came back as a document could not load a resource or run a script,
+  // which is what turns a reflected-content bug into a dead end.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          'default-src': ["'none'"],
+          'frame-ancestors': ["'none'"],
+          'base-uri': ["'none'"],
+          'form-action': ["'none'"],
+        },
+      },
+      // frame-ancestors above is the modern control; this is the same answer for
+      // browsers that predate it, and helmet's own default is only SAMEORIGIN.
+      frameguard: { action: 'deny' },
+      // Referrer would otherwise carry the API path - including ids in it - to
+      // whatever a browser navigated to next.
+      referrerPolicy: { policy: 'no-referrer' },
+      // The client is a separate origin, so CORS decides who may read a
+      // response; CORP's stricter default would refuse the browser outright.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      // Told to the browser only over HTTPS, and only worth asserting once the
+      // API is actually behind TLS.
+      hsts: env.isProd
+        ? { maxAge: 180 * 24 * 60 * 60, includeSubDomains: true, preload: false }
+        : false,
+    }),
+  );
+  app.disable('x-powered-by');
   app.use(
     cors({
       // a plain Error here reaches the handler without a statusCode and surfaces as a 500
@@ -44,15 +75,20 @@ export function createApp() {
   app.use((req, res, next) =>
     (/\/quality-tests\/[^/]+\/report$/.test(req.path) ? reportBody : standardBody)(req, res, next),
   );
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.urlencoded({ extended: false, limit: '100kb' }));
   app.use(cookieParser());
   app.use(requestLogger);
 
+  // Unauthenticated on purpose - a load balancer has to be able to ask. So in
+  // production it answers only what a health check needs, and keeps the runtime
+  // and the database host to itself.
   app.get('/health', (_req, res) =>
-    res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo() }),
+    env.isProd
+      ? res.json({ success: true, status: 'up' })
+      : res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo() }),
   );
 
-  app.use(env.apiPrefix, apiLimiter, routes);
+  app.use(env.apiPrefix, apiLimiter, writeLimiter, routes);
 
   app.use(notFound);
   app.use(errorHandler);

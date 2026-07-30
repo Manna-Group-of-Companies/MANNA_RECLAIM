@@ -32,3 +32,10 @@ export const rateSchema = z.object({
   rate: z.coerce.number().positive(),
   note: z.string().max(120).optional().nullable(),
 });
+
+/** A customer on the rate card. `name` is the table's own key. */
+export const customerSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  region: z.string().trim().max(80).optional().nullable(),
+  active: z.boolean().optional(),
+});

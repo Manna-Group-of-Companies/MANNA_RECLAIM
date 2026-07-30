@@ -41,7 +41,15 @@ export const BATCH_QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium'];
 
 export const DISPATCH_GRADES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Coarse', 'Sillsheet'];
 
-export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'coarse'];
+export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'];
+
+/**
+ * The moulding presses. They mould finished goods out of reclaim compound rather
+ * than making reclaim, so almost none of the plant's usual rules reach them: no
+ * meters, no run hours, no energy, no bearings, nothing to weigh afterwards and
+ * no packing path. What they record is a count of pieces against a product.
+ */
+export const PRESS_IDS = ['PRS_P3', 'PRS_P5'];
 
 /** Standard list rate per kg. A customer rate card entry overrides these. */
 export const PRICE_LIST = { Special: 48, SuperFine: 47, Fine: 43, Medium: 41, Coarse: 36 };
@@ -54,7 +62,7 @@ export const SACK_KG = 50;
 /**
  * How often a running machine has its bearing / bush temperatures logged, and
  * which positions get a reading. PR1, R1, R2 and Grinder 1 run on bushes;
- * everything else on bearings. Autoclaves have neither.
+ * everything else on bearings. Autoclaves and the presses have neither.
  */
 export const BEARING_INTERVAL_H = { grind: 2, refiner: 3, prerefiner: 3, coarse: 3 };
 export const BUSH_MACHINE_IDS = ['PR1', 'R1', 'R2', 'GRD_K'];
@@ -65,6 +73,8 @@ export const TABLES = {
   users: 'users',
   shifts: 'shifts',
   machines: 'machines',
+  // What the presses mould, and the curing settings that belong to it.
+  products: 'products',
   runs: 'runs',
   dispatches: 'dispatches',
   dispatchLoads: 'dispatch_loads',

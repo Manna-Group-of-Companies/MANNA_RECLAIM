@@ -136,7 +136,16 @@ export const KIND_ACCENT: Record<string, string> = {
   coarse: 'var(--ember)',
   prerefiner: 'var(--elec)',
   refiner: 'var(--elec)',
+  press: 'var(--brand)',
 };
+
+/**
+ * The moulding presses. They mould finished goods out of reclaim compound rather
+ * than making reclaim, so none of the plant's usual machinery reaches them: no
+ * meters, no energy, no run hours, no bearing temperatures, nothing for the Weigh
+ * tab and no packing path. What a press run records is pieces against a product.
+ */
+export const PRESS_IDS = ['PRS_P3', 'PRS_P5'];
 
 /** The two feedstocks the grinding line runs on, and the crumb each yields. */
 export const TYRES = {
@@ -173,6 +182,13 @@ export const defaultWorkers = (machineId: string, shift: Shift, shiftwise: boole
     case 'GRD_K':
     case 'GRD_S':
       return shift === 'Night' ? 2 : 1;
+    // A press is worked by two hands - one on the mould, one trimming - day and
+    // night alike. The spec asks for "the press's default crew" without naming a
+    // figure; this is that figure, and the stop sheet still lets the crew say
+    // otherwise.
+    case 'PRS_P3':
+    case 'PRS_P5':
+      return 2;
     default:
       return shiftwise ? 2 : null;
   }

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as maint from '../controllers/maintenance.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { idParam, listQuery } from '../validations/common.validation.js';
+import { idParam, listQuery, bulkListQuery } from '../validations/common.validation.js';
 import {
   createMaintenanceSchema,
   resolveSchema,
@@ -18,7 +18,9 @@ router.post('/', validate({ body: createMaintenanceSchema }), maint.create);
 router.post('/:id/resolve', validate({ params: idParam, body: resolveSchema }), maint.resolve);
 router.delete('/:id', validate({ params: idParam }), maint.remove);
 
-router.get('/bearings', validate({ query: listQuery }), maint.listBearings);
+// The Bearings tab charts a whole shift's readings at once - every machine,
+// every position, every two or three hours. See bulkListQuery.
+router.get('/bearings', validate({ query: bulkListQuery }), maint.listBearings);
 router.get('/bearings/due', maint.bearingsDue);
 router.post('/bearings', validate({ body: bearingLogSchema }), maint.logBearing);
 

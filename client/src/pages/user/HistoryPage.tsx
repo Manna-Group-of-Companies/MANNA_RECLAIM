@@ -201,7 +201,7 @@ function RunSheet({
     if (!run || !draft) return null;
 
     const math = runMath(run, draft);
-    const { isAuto, isTod, elecPair, hourPair, elecDelta, hourDelta } = math;
+    const { isAuto, isPress, isTod, elecPair, hourPair, elecDelta, hourDelta } = math;
     // Shiftwise: the lines whose output is measured by the shift rather than by
     // the batch, so there is no batch or grade against the run to correct.
     const isShiftwise = run.line === 'grind' || run.line === 'coarse';
@@ -247,23 +247,29 @@ function RunSheet({
               value={draft.batchNo}
               onChange={(e) => set('batchNo', e.target.value)}
             />
-            <SelectField
-              label="Quality"
-              value={draft.quality}
-              onChange={(e) => set('quality', e.target.value)}
-            >
-              <option value="">—</option>
-              {QUALITIES.map((q) => (
-                <option key={q} value={q}>
-                  {q}
-                </option>
-              ))}
-            </SelectField>
-            <TextField
-              label="Formulation"
-              value={draft.formulation}
-              onChange={(e) => set('formulation', e.target.value)}
-            />
+            {/* A press moulds finished goods, not a grade of reclaim: it has
+                neither a quality nor a formulation to correct. */}
+            {!isPress && (
+              <>
+                <SelectField
+                  label="Quality"
+                  value={draft.quality}
+                  onChange={(e) => set('quality', e.target.value)}
+                >
+                  <option value="">—</option>
+                  {QUALITIES.map((q) => (
+                    <option key={q} value={q}>
+                      {q}
+                    </option>
+                  ))}
+                </SelectField>
+                <TextField
+                  label="Formulation"
+                  value={draft.formulation}
+                  onChange={(e) => set('formulation', e.target.value)}
+                />
+              </>
+            )}
           </>
         )}
 
@@ -298,6 +304,35 @@ function RunSheet({
             </FieldRow>
             {number('capacity', 'Charge', '(kg)')}
             {number('firewoodKg', 'Firewood', '(kg)')}
+          </>
+        ) : isPress ? (
+          /* A press: what came out of the mould, and what it was moulded at. No
+             meters and no energy - it records neither. Material re-costs itself
+             off the weight, the flash and the count, at the rate the run was
+             moulded under. */
+          <>
+            <SheetLabel>Moulded</SheetLabel>
+            <FieldRow className="mb-3.5">
+              {number('pieces', 'How many', '(nos)')}
+              {number('workers', 'Workers')}
+            </FieldRow>
+            <FieldRow className="mb-3.5">
+              {number('outWeight', 'Weight', '(kg)', 'kg')}
+              {number('flashKg', 'Flash', '(kg)', 'kg')}
+            </FieldRow>
+            <FieldRow className="mb-3.5">
+              {number('cyclicMin', 'Cyclic time', '(min)')}
+              {number('cavities', 'Cavities')}
+            </FieldRow>
+            {/* No run time here: a press books none. What it ran is its start and
+                stop, read out under Full record. */}
+            <div className="diffout show">
+              {math.material == null
+                ? 'No compound rate against this run, so it carries no material cost.'
+                : `Material: ${draft.outWeight || 0} + ${draft.flashKg || 0} kg × ₹${run.compound_rate} = ₹${math.material}${
+                    math.perPiece != null ? ` · ₹${math.perPiece} a piece` : ''
+                  }`}
+            </div>
           </>
         ) : (
           <>
@@ -341,8 +376,10 @@ function RunSheet({
           </>
         )}
 
-        {number('outWeight', 'Output weight', '(kg) — blank = none')}
-        {number('packedSacks', 'Packed sacks')}
+        {/* A press has already been asked for its weight above, and nothing off a
+            press is bagged - there is no packing path from it. */}
+        {!isPress && number('outWeight', 'Output weight', '(kg) — blank = none')}
+        {!isPress && number('packedSacks', 'Packed sacks')}
         <TextAreaField
           label="Remarks"
           rows={2}
@@ -353,7 +390,30 @@ function RunSheet({
         <SheetLabel>Full record</SheetLabel>
         <Det k="Machine" v={`${run.machine ?? machine?.name ?? '—'} · ${run.machine_id}`} />
         <Det k="Line" v={run.line} />
-        <Det k="Type" v={isAuto ? 'Autoclave' : isShiftwise ? 'Shiftwise' : 'Batch'} />
+        <Det
+          k="Type"
+          v={isAuto ? 'Autoclave' : isPress ? 'Press' : isShiftwise ? 'Shiftwise' : 'Batch'}
+        />
+        {isPress && (
+          <>
+            <Det k="Product" v={run.product} />
+            <Det
+              k="Moulded at"
+              v={`${run.cure_temp_c != null ? `${run.cure_temp_c} °C` : 'temp not set'} · ${
+                run.cyclic_min != null ? `${run.cyclic_min} min` : 'cycle not set'
+              } · ${run.cavities ?? '—'} cavities`}
+            />
+            <Det k="Compound rate" v={run.compound_rate != null ? `₹${run.compound_rate}/kg` : null} />
+            <Det
+              k="Material cost"
+              v={
+                run.material_cost != null
+                  ? `₹${run.material_cost}${run.cost_per_piece != null ? ` · ₹${run.cost_per_piece} a piece` : ''}`
+                  : null
+              }
+            />
+          </>
+        )}
         <Det k="Formulation" v={run.formulation} />
         <Det k="Capacity" v={run.capacity != null ? `${run.capacity} kg` : null} />
         <Det k="Tyre" v={tyre ? `${tyre.label} ${run.mesh ?? tyre.mesh}` : run.mesh} />
@@ -596,6 +656,14 @@ export function HistoryPage() {
                     {r.batch_no && <span className="batchref ml-1 text-[11px]">{r.batch_no}</span>}
                     {r.quality && <QualityChip quality={r.quality} className="ml-1" />}
                     {r.formulation && <div className="muted text-[10px]">{r.formulation}</div>}
+                    {/* A press names its product, and what its pieces cost. */}
+                    {r.product && (
+                      <div className="muted text-[10px]">
+                        {r.product}
+                        {r.pieces != null ? ` · ${r.pieces} pcs` : ''}
+                        {r.cost_per_piece != null ? ` · ₹${r.cost_per_piece}/pc` : ''}
+                      </div>
+                    )}
                   </td>
                   <td>{r.supervisor ?? <span className="muted">—</span>}</td>
                   <td className="tnum">

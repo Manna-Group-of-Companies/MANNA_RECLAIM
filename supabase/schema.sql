@@ -48,7 +48,7 @@ create table if not exists public.machines (
   name           text not null,
   short          text,
   kind           text not null
-                   check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse')),
+                   check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press')),
   group_name     text,
   sub            text,
   accent         text,
@@ -68,8 +68,9 @@ create table if not exists public.machines (
 create index if not exists machines_sort_order_idx on public.machines (sort_order);
 create index if not exists machines_kind_idx on public.machines (kind);
 
--- The 14 machines from the prototype. `on conflict do nothing` so a later run
--- never overwrites a change the back office made through the admin screen.
+-- The 14 machines from the prototype, and the two moulding presses. `on conflict
+-- do nothing` so a later run never overwrites a change the back office made
+-- through the admin screen.
 insert into public.machines
   (id, name, short, kind, group_name, sub, accent, capacity, out_weight, needs_quality, weigh, tyre, def_tyre, enabled, sort_order)
 values
@@ -86,12 +87,66 @@ values
   ('R3',    'Refiner 3',      'R3',      'refiner',    'Refiners',      null,                            '#46c2d6', null,  false, true,  false, false, null,    true,  11),
   ('R4',    'Refiner 4',      'R4',      'refiner',    'Refiners',      null,                            '#46c2d6', null,  false, true,  true,  false, null,    true,  12),
   ('PR1',   'Pre-Refiner 1',  'PR1',     'coarse',     'Coarse line',   'coarse - shiftwise',            '#e0762e', null,  false, false, false, false, null,    true,  13),
-  ('R2',    'Refiner 2',      'R2',      'coarse',     'Coarse line',   'coarse - or Medium grade',      '#e0762e', null,  true,  false, false, false, null,    true,  14)
+  ('R2',    'Refiner 2',      'R2',      'coarse',     'Coarse line',   'coarse - or Medium grade',      '#e0762e', null,  true,  false, false, false, null,    true,  14),
+  -- The moulding presses. Their platen size, daylights and tonnage are still to
+  -- be measured, so the sub-line says so rather than stating a figure nobody has
+  -- checked. Nothing is weighed off a press by the Weigh tab: the crew weighs
+  -- the output at the machine and enters it at stop, so `out_weight` is false.
+  ('PRS_P3', 'Press 3',       'P3',      'press',      'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', null, false, false, false, false, null, true, 15),
+  ('PRS_P5', 'Press 5',       'P5',      'press',      'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', null, false, false, false, false, null, true, 16)
 on conflict (id) do nothing;
 
 -- For a project whose machines table predates the feedstock picker.
 alter table if exists public.machines add column if not exists tyre     boolean not null default false;
 alter table if exists public.machines add column if not exists def_tyre text;
+
+-- And for one whose `kind` check was written before the presses existed: the
+-- constraint is replaced rather than added to, because a check constraint cannot
+-- be widened in place.
+alter table if exists public.machines drop constraint if exists machines_kind_check;
+alter table if exists public.machines add constraint machines_kind_check
+  check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'));
+
+
+-- -----------------------------------------------------------------------------
+-- 2b. What the presses mould
+--
+-- A press's curing settings belong to the product, not to the machine: the same
+-- press moulds Loop today and Sleve tomorrow, and the floor should never retype
+-- a temperature or a cycle time it cannot change anyway. So temperature, cyclic
+-- time, cavities and the compound rate live here, and a press run copies them
+-- as it starts - which is also what keeps an old run costed at the rate that
+-- applied when it was moulded.
+--
+-- The figures are seeded null on purpose. Nobody has measured them into this
+-- system yet, and a placeholder rate would quietly cost every press run wrong;
+-- the press sheets say "not set" until the back office fills them in.
+-- -----------------------------------------------------------------------------
+create table if not exists public.products (
+  id             text primary key,
+  name           text not null,
+  -- Held on the platen, in °C. Shown at the run as a fact, never typed.
+  cure_temp_c    numeric,
+  -- The cure, in minutes. Pre-filled at the run and editable for that run only.
+  cyclic_min     numeric,
+  -- How many pieces the mould makes per cycle.
+  cavities       integer,
+  -- What the reclaim compound this product is moulded from costs, per kg.
+  compound_rate  numeric,
+  note           text,
+  active         boolean not null default true,
+  sort_order     integer not null default 0,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+create index if not exists products_sort_order_idx on public.products (sort_order);
+
+insert into public.products (id, name, cure_temp_c, cyclic_min, cavities, compound_rate, active, sort_order)
+values
+  ('LOOP',  'Loop',  null, null, null, null, true, 1),
+  ('SLEVE', 'Sleve', null, null, null, null, true, 2)
+on conflict (id) do nothing;
 
 
 -- -----------------------------------------------------------------------------
@@ -132,6 +187,20 @@ alter table public.runs add column if not exists src1 text;
 alter table public.runs add column if not exists src2 text;
 alter table public.runs add column if not exists src3 text;
 alter table public.runs add column if not exists src4 text;
+
+-- What a moulding press run recorded. A press has no meters and no run hours to
+-- speak of: what it produced is a count of pieces, the weight that came off it
+-- and the flash trimmed away, against the product it was set up for. The curing
+-- settings are copied off the product as the run starts, so a later change to
+-- the product does not rewrite what an old run was moulded at - and `compound_
+-- rate` is what its material cost is worked out against for good.
+alter table public.runs add column if not exists product       text;
+alter table public.runs add column if not exists cavities      integer;
+alter table public.runs add column if not exists cyclic_min    numeric;
+alter table public.runs add column if not exists cure_temp_c   numeric;
+alter table public.runs add column if not exists pieces        integer;
+alter table public.runs add column if not exists flash_kg      numeric;
+alter table public.runs add column if not exists compound_rate numeric;
 
 -- A quality test can be pinned to the run and machine it was drawn from,
 -- not just to the batch number.
@@ -207,6 +276,7 @@ create index if not exists maintenance_down_start_idx on public.maintenance (dow
 -- -----------------------------------------------------------------------------
 alter table public.users    enable row level security;
 alter table public.machines enable row level security;
+alter table public.products enable row level security;
 
 drop policy if exists machines_read on public.machines;
 create policy machines_read on public.machines
@@ -214,6 +284,15 @@ create policy machines_read on public.machines
 
 drop policy if exists machines_write on public.machines;
 create policy machines_write on public.machines
+  for all to service_role using (true) with check (true);
+
+-- The presses read the product list to start a run; only the back office writes it.
+drop policy if exists products_read on public.products;
+create policy products_read on public.products
+  for select to anon, authenticated using (true);
+
+drop policy if exists products_write on public.products;
+create policy products_write on public.products
   for all to service_role using (true) with check (true);
 
 -- No anon policy on users: only the service key reaches it.

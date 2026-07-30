@@ -1,26 +1,24 @@
 /**
- * Writes the plant's machine list into Supabase - the 14 machines the prototype
- * had, plus the two moulding presses.
+ * Writes what the moulding presses mould into Supabase.
  *
- *   node scripts/seed-machines.js [flags]
+ *   node scripts/seed-products.js [flags]
  *
  *   --dry-run   report what would change, write nothing
- *   --force     overwrite machines that already exist
+ *   --force     overwrite products that already exist
  *
- * supabase/schema.sql already inserts these, so this is only needed to repair
- * or re-apply the list - and it is what to run after editing config/devSeed.js,
- * which holds the same rows for the in-memory fallback.
+ * The rows are seeded with their figures unset - no curing temperature, no cycle
+ * time, no cavities, no compound rate. Nobody has measured them into this system,
+ * and a placeholder rate would quietly cost every press run wrong; the back
+ * office fills them in on the Products screen. --force therefore blanks anything
+ * already entered there, which is why it is not the default.
  *
- * A press will not insert until `kind` allows 'press': run supabase/schema.sql
- * (or fix-missing-columns.sql) first, which replaces that check constraint.
- *
- * Ids are the fixed short codes the whole UI is built around ("CRK", "AC_A",
- * "R4"), so re-running upserts rather than duplicating.
+ * supabase/schema.sql already inserts these, so this is only needed to repair or
+ * re-apply the list after editing config/devSeed.js.
  */
 import { env } from '../src/config/env.js';
 import { logger } from '../src/config/logger.js';
 import { request } from '../src/config/supabase.js';
-import { DEV_MACHINES } from '../src/config/devSeed.js';
+import { DEV_PRODUCTS } from '../src/config/devSeed.js';
 import { TABLES } from '../src/config/constants.js';
 
 const args = process.argv.slice(2);
@@ -28,7 +26,7 @@ const DRY_RUN = args.includes('--dry-run');
 const FORCE = args.includes('--force');
 
 async function seed({ id, ...fields }) {
-  const { total } = await request(TABLES.machines, {
+  const { total } = await request(TABLES.products, {
     select: 'id',
     filters: { id },
     limit: 1,
@@ -39,7 +37,7 @@ async function seed({ id, ...fields }) {
   if (existing && !FORCE) return { id, action: 'skipped (already exists)' };
   if (DRY_RUN) return { id, action: existing ? 'would overwrite' : 'would create' };
 
-  await request(TABLES.machines, {
+  await request(TABLES.products, {
     method: 'POST',
     body: { id, ...fields, updated_at: new Date().toISOString() },
     onConflict: 'id',
@@ -53,20 +51,20 @@ async function main() {
     throw new Error('Set SUPABASE_URL and a key in server/.env - nothing to seed.');
   }
 
-  for (const machine of DEV_MACHINES) {
-    const { id, action } = await seed(machine);
+  for (const product of DEV_PRODUCTS) {
+    const { id, action } = await seed(product);
     logger.info(id.padEnd(8) + action);
   }
 
-  const { total } = await request(TABLES.machines, { select: 'id', limit: 0, count: true });
+  const { total } = await request(TABLES.products, { select: 'id', limit: 0, count: true });
   if (DRY_RUN) logger.warn('--dry-run: no rows were written.');
-  else logger.info(total + ' machines in the table.');
+  else logger.info(total + ' products in the table.');
 }
 
 main().catch((err) => {
   logger.error(err.message);
   if (/schema\.sql|does not exist|Could not find/i.test(err.message)) {
-    logger.error('Run supabase/schema.sql in the Supabase SQL editor first.');
+    logger.error('Run supabase/fix-missing-columns.sql in the Supabase SQL editor first.');
   }
   process.exitCode = 1;
 });

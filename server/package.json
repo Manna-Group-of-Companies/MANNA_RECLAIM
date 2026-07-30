@@ -10,7 +10,8 @@
     "db:report": "node scripts/supabase-report.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",
-    "seed": "npm run seed:users && npm run seed:machines"
+    "seed:products": "node scripts/seed-products.js",
+    "seed": "npm run seed:users && npm run seed:machines && npm run seed:products"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

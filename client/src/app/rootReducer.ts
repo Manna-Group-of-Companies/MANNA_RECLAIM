@@ -1,6 +1,7 @@
 import { combineReducers } from '@reduxjs/toolkit';
 import authReducer from '@/features/auth/authSlice';
 import machinesReducer from '@/features/machines/machinesSlice';
+import productsReducer from '@/features/products/productsSlice';
 import runsReducer from '@/features/machines/runsSlice';
 import batchesReducer from '@/features/batches/batchesSlice';
 import dispatchReducer from '@/features/dispatch/dispatchSlice';
@@ -13,6 +14,7 @@ import uiReducer from '@/features/ui/uiSlice';
 export const rootReducer = combineReducers({
   auth: authReducer,
   machines: machinesReducer,
+  products: productsReducer,
   runs: runsReducer,
   batches: batchesReducer,
   dispatch: dispatchReducer,

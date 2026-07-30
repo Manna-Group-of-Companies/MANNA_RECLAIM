@@ -6,11 +6,25 @@ import { userService } from '../services/user.service.js';
 import { env } from '../config/env.js';
 
 const REFRESH_COOKIE = 'refreshToken';
+/**
+ * httpOnly keeps the refresh token out of reach of any script on the page, so
+ * an XSS bug cannot walk off with a 30-day session. The SameSite and Secure
+ * halves are deployment-shaped and come from the environment - see env.cookie.
+ */
 const cookieOpts = {
   httpOnly: true,
-  sameSite: 'lax',
-  secure: env.isProd,
+  sameSite: env.cookie.sameSite,
+  secure: env.cookie.secure,
+  domain: env.cookie.domain,
   maxAge: 30 * 24 * 60 * 60 * 1000,
+  path: '/',
+};
+/** clearCookie only matches when the flags match the ones it was set with. */
+const clearOpts = {
+  httpOnly: true,
+  sameSite: env.cookie.sameSite,
+  secure: env.cookie.secure,
+  domain: env.cookie.domain,
   path: '/',
 };
 
@@ -28,8 +42,9 @@ export const refresh = asyncHandler(async (req, res) => {
   return ok(res, { user, accessToken: tokens.accessToken }, 'Session refreshed');
 });
 
-export const logout = asyncHandler(async (_req, res) => {
-  res.clearCookie(REFRESH_COOKIE, { path: '/' });
+export const logout = asyncHandler(async (req, res) => {
+  authService.signOut(req.cookies?.[REFRESH_COOKIE] || req.body?.refreshToken);
+  res.clearCookie(REFRESH_COOKIE, clearOpts);
   return ok(res, null, 'Signed out');
 });
 

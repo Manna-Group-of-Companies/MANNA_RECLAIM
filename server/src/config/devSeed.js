@@ -34,7 +34,7 @@ export const DEV_USERS = SEED_PINS.map((u, i) => ({
   pin_hash: bcrypt.hashSync(u.pin, 10),
 }));
 
-/** The 14 machines defined in the index.html prototype. */
+/** The 14 machines defined in the index.html prototype, plus the two presses. */
 export const DEV_MACHINES = [
   { id: 'CRK', name: 'Cracker', short: 'CRK', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - tyre prep (mixed)', accent: '#9bb0c4', enabled: true, sort_order: 1 },
   { id: 'GRD_K', name: 'Grinder 1', short: 'Grind 1', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 30# default', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', enabled: true, sort_order: 2 },
@@ -50,6 +50,21 @@ export const DEV_MACHINES = [
   { id: 'R4', name: 'Refiner 4', short: 'R4', kind: 'refiner', group_name: 'Refiners', accent: '#46c2d6', needs_quality: true, weigh: true, enabled: true, sort_order: 12 },
   { id: 'PR1', name: 'Pre-Refiner 1', short: 'PR1', kind: 'coarse', group_name: 'Coarse line', sub: 'coarse - shiftwise', accent: '#e0762e', enabled: true, sort_order: 13 },
   { id: 'R2', name: 'Refiner 2', short: 'R2', kind: 'coarse', group_name: 'Coarse line', sub: 'coarse - or Medium grade', accent: '#e0762e', out_weight: true, enabled: true, sort_order: 14 },
+  { id: 'PRS_P3', name: 'Press 3', short: 'P3', kind: 'press', group_name: 'Moulding presses', sub: 'platen, daylights, tonnage - to be measured', accent: '#4d9fe8', enabled: true, sort_order: 15 },
+  { id: 'PRS_P5', name: 'Press 5', short: 'P5', kind: 'press', group_name: 'Moulding presses', sub: 'platen, daylights, tonnage - to be measured', accent: '#4d9fe8', enabled: true, sort_order: 16 },
+];
+
+/**
+ * What the presses mould, until the products table exists.
+ *
+ * Seeded with their figures unset, exactly as supabase/schema.sql seeds them: a
+ * curing temperature or a compound rate nobody has measured would be a number
+ * the costing then treats as fact. The press sheets show "not set" against each
+ * one until the back office fills it in.
+ */
+export const DEV_PRODUCTS = [
+  { id: 'LOOP', name: 'Loop', cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 1 },
+  { id: 'SLEVE', name: 'Sleve', cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 2 },
 ];
 
 let warned = false;
@@ -86,4 +101,4 @@ export async function devSeedActive() {
   return true;
 }
 
-export default { DEV_USERS, DEV_MACHINES, devSeedActive };
+export default { DEV_USERS, DEV_MACHINES, DEV_PRODUCTS, devSeedActive };

@@ -66,7 +66,7 @@ function RunDetail({
   const set = (field: keyof Draft, value: string) => setDraft({ ...draft, [field]: value });
 
   const math = runMath(run, draft);
-  const { isAuto, isTod, elecStart, elecEnd, hourStart, hourEnd } = math;
+  const { isAuto, isPress, isTod, elecStart, elecEnd, hourStart, hourEnd } = math;
   const { elecPair, hourPair, elecDelta, hourDelta, energy, runHours, output, issues } = math;
 
   const changed = changedFields(draft, base);
@@ -157,20 +157,44 @@ function RunDetail({
       <div className="mt-3">
         <div className="grouphead mt-0">What ran</div>
         {field('Batch', <input value={draft.batchNo} onChange={(e) => set('batchNo', e.target.value)} />)}
-        {field(
-          'Grade',
-          <select value={draft.quality} onChange={(e) => set('quality', e.target.value)}>
-            <option value="">— none —</option>
-            {QUALITIES.map((q) => (
-              <option key={q} value={q}>
-                {q}
-              </option>
-            ))}
-          </select>,
-        )}
-        {field(
-          'Formulation',
-          <input value={draft.formulation} onChange={(e) => set('formulation', e.target.value)} />,
+        {/* A press moulds finished goods, so it carries neither a grade nor a
+            formulation - what it was set up for is the product. */}
+        {!isPress &&
+          field(
+            'Grade',
+            <select value={draft.quality} onChange={(e) => set('quality', e.target.value)}>
+              <option value="">— none —</option>
+              {QUALITIES.map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>,
+          )}
+        {!isPress &&
+          field(
+            'Formulation',
+            <input value={draft.formulation} onChange={(e) => set('formulation', e.target.value)} />,
+          )}
+        {isPress && (
+          <>
+            <div className="roRow">
+              <span className="k">Product</span>
+              <span className="v">{run.product ?? '—'}</span>
+            </div>
+            <div className="roRow">
+              <span className="k">Moulded at</span>
+              <span className="v">
+                {run.cure_temp_c != null ? `${run.cure_temp_c} °C` : 'temp not set'}
+                <span className="muted">
+                  {' · '}
+                  {run.compound_rate != null ? `₹${run.compound_rate}/kg compound` : 'no compound rate'}
+                </span>
+              </span>
+            </div>
+            {field(<>Cyclic time <span className="muted font-normal">(min)</span></>, numberInput('cyclicMin'))}
+            {field('Cavities', numberInput('cavities'))}
+          </>
         )}
         {isAuto && field(<>Charge <span className="muted font-normal">(kg)</span></>, numberInput('capacity'))}
 
@@ -192,7 +216,8 @@ function RunDetail({
         {field('Supervisor', <input value={draft.supervisor} onChange={(e) => set('supervisor', e.target.value)} />)}
         {field('Crew', numberInput('workers'))}
 
-        {!isAuto && (
+        {/* No meters on a press, and no energy or hours to correct against them. */}
+        {!isAuto && !isPress && (
           <>
             <div className="grouphead">Electricity{isTod && <span className="muted font-normal"> (TOD meter, one phase)</span>}</div>
             {field(<>Reading at start <span className="muted font-normal">(units)</span></>, numberInput('elecStart'))}
@@ -259,8 +284,33 @@ function RunDetail({
         )}
 
         <div className="grouphead">Output</div>
-        {field(<>Output weight <span className="muted font-normal">(kg)</span></>, numberInput('outWeight'))}
-        {field('Packed sacks', numberInput('packedSacks'))}
+        {field(
+          isPress ? (
+            <>Weight <span className="muted font-normal">(kg)</span></>
+          ) : (
+            <>Output weight <span className="muted font-normal">(kg)</span></>
+          ),
+          numberInput('outWeight'),
+        )}
+        {/* A press is counted in pieces, and the flash trimmed off is charged
+            with them - nothing off a press is bagged, so no sacks. */}
+        {isPress ? (
+          <>
+            {field(<>How many <span className="muted font-normal">(nos)</span></>, numberInput('pieces'))}
+            {field(<>Flash <span className="muted font-normal">(kg)</span></>, numberInput('flashKg'))}
+            <div className="roRow">
+              <span className="k">Material</span>
+              <span className="v">
+                {math.material != null ? `₹${num(math.material, 2)}` : '—'}
+                {math.perPiece != null && (
+                  <span className="muted"> · ₹{num(math.perPiece, 2)} a piece</span>
+                )}
+              </span>
+            </div>
+          </>
+        ) : (
+          field('Packed sacks', numberInput('packedSacks'))
+        )}
         {isAuto && field(<>Firewood <span className="muted font-normal">(kg)</span></>, numberInput('firewoodKg'))}
         {field(
           'Remarks',

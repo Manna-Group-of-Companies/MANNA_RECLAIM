@@ -2,7 +2,7 @@ export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin';
 export type Shift = 'Day' | 'Night';
 export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
-export type MachineKind = 'grind' | 'autoclave' | 'prerefiner' | 'refiner' | 'coarse';
+export type MachineKind = 'grind' | 'autoclave' | 'prerefiner' | 'refiner' | 'coarse' | 'press';
 export type RunStatus = 'running' | 'done';
 export type Verdict = 'pass' | 'hold';
 
@@ -30,6 +30,33 @@ export interface Machine {
   enabled: boolean;
   sort_order?: number;
   sub?: string | null;
+}
+
+/**
+ * What a moulding press moulds.
+ *
+ * The curing settings belong to the product rather than to the press, because
+ * the same press moulds a different one tomorrow and neither the temperature nor
+ * the cycle is the press's to change. A press run copies all four as it starts,
+ * so a rate changed next month never rewrites what an old run cost.
+ *
+ * Every figure may be null: the plant has not measured them into this system
+ * yet, and the sheets say "not set" rather than inventing one.
+ */
+export interface Product {
+  id: string;
+  name: string;
+  /** Held on the platen, in °C - shown at the run, never typed. */
+  cure_temp_c?: number | null;
+  /** The cure in minutes, pre-filled at the run and editable for that run. */
+  cyclic_min?: number | null;
+  /** Pieces the mould makes per cycle. */
+  cavities?: number | null;
+  /** What the compound this is moulded from costs, per kg. */
+  compound_rate?: number | null;
+  note?: string | null;
+  active: boolean;
+  sort_order?: number;
 }
 
 /**
@@ -198,6 +225,27 @@ export interface Run {
   /** What this run leaves for the next batch of the same grade. */
   leftout_out?: number | null;
   paused?: boolean;
+  /**
+   * A moulding press run. The product it was set up for and what it was moulded
+   * at - both copied off the product as the run started, so they read as the run
+   * was made rather than as the product stands today - then what came out of the
+   * mould: the pieces counted, the weight put on the scale (`weight_kg`, as for
+   * any other machine) and the flash trimmed off.
+   */
+  product?: string | null;
+  cavities?: number | null;
+  cyclic_min?: number | null;
+  cure_temp_c?: number | null;
+  pieces?: number | null;
+  flash_kg?: number | null;
+  compound_rate?: number | null;
+  /**
+   * What that came to, derived by the API on every read: compound on the weight
+   * plus the flash, spread over the pieces made. Null while the product has no
+   * rate against it, or before the run has been stopped.
+   */
+  material_cost?: number | null;
+  cost_per_piece?: number | null;
   /** A special-line pass that yields nothing to weigh - never bagged. */
   non_production?: boolean | null;
   status: RunStatus;

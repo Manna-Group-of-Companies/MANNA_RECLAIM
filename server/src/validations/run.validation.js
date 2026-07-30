@@ -36,6 +36,16 @@ export const startRunSchema = z.object({
   // it is rejected the same way the tablets reject it.
   elecStart: z.coerce.number().positive().optional().nullable(),
   hourStart: z.coerce.number().positive().optional().nullable(),
+  /**
+   * A moulding press: which product it is set up for, and the two settings the
+   * floor may change for one run - the cure and the mould on the press. The
+   * temperature and the compound rate are not here on purpose; those are the
+   * product's, and the server copies them off it - see run.service's
+   * pressFields().
+   */
+  product: z.string().max(40).optional().nullable(),
+  cyclicMin: z.coerce.number().positive().max(600).optional().nullable(),
+  cavities: z.coerce.number().int().positive().max(500).optional().nullable(),
 });
 
 /**
@@ -54,6 +64,13 @@ export const stopRunSchema = z.object({
   kwh: z.coerce.number().min(0).optional().nullable(),
   hoursRun: z.coerce.number().min(0).optional().nullable(),
   firewoodKg: z.coerce.number().min(0).optional().nullable(),
+  /**
+   * What came out of a press: the pieces moulded, and the flash trimmed off
+   * them. Neither may be negative, and a press that made no pieces at all made
+   * nothing to cost - so the count has to be a real one.
+   */
+  pieces: z.coerce.number().int().positive().max(1_000_000).optional().nullable(),
+  flashKg: z.coerce.number().min(0).optional().nullable(),
 });
 
 /**
@@ -84,6 +101,13 @@ export const updateRunSchema = z
     capacity: z.coerce.number().min(0).optional().nullable(),
     packedSacks: z.coerce.number().int().min(0).optional().nullable(),
     remarks: z.string().max(500).optional().nullable(),
+    // A press run's own figures. The compound rate is left out: it is what the
+    // product cost when this was moulded, not something to correct afterwards.
+    product: z.string().max(40).optional().nullable(),
+    cavities: z.coerce.number().int().min(0).optional().nullable(),
+    cyclicMin: z.coerce.number().min(0).optional().nullable(),
+    pieces: z.coerce.number().int().min(0).optional().nullable(),
+    flashKg: z.coerce.number().min(0).optional().nullable(),
   })
   .refine((patch) => Object.keys(patch).length > 0, { message: 'Nothing to change' });
 

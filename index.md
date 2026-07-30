@@ -617,8 +617,13 @@
     if(!s.conversions) s.conversions=[];
     if(!s.pendingDeletes) s.pendingDeletes=[];
     if(!s.dispatchLoads) s.dispatchLoads=[];
-    if(!s.vehicles||!s.vehicles.length) s.vehicles=SAMPLE_VEHICLES.slice();
-    if(!s.drivers||!s.drivers.length) s.drivers=SAMPLE_DRIVERS.slice();
+    if(!s.vehicles) s.vehicles=[];
+    if(!s.drivers) s.drivers=[];
+    if(!s.seededFleet){            // sample fleet is seeded once; after that the plant owns the lists
+      s.seededFleet=true;
+      if(!s.vehicles.length) s.vehicles=SAMPLE_VEHICLES.slice();
+      if(!s.drivers.length) s.drivers=SAMPLE_DRIVERS.slice();
+    }
     if(!s.pendingLoadDeletes) s.pendingLoadDeletes=[];
     if(!s.qualityTests) s.qualityTests=[];
     if(!s.seededDispatchDemo){
@@ -1866,7 +1871,22 @@
     });
     return { kg:Math.round(kg*100)/100, amt:Math.round(amt*100)/100, missing:missing };
   }
+  /* What still blocks the save — shown live under the buttons instead of only as a toast. */
+  function ddMissing(){
+    if(!DD.items.length) return "Add at least one item.";
+    if(!DD.customer) return "Pick a customer.";
+    if(!DD.vehicleNo) return DD.ownVehicle?"Pick the vehicle.":"Enter the vehicle number.";
+    if(DD.ownVehicle && !DD.driver) return "Pick the driver for our vehicle.";
+    return "";
+  }
+  /* Flip the Save button + reason line in place. Typing must never trigger a full redraw. */
+  function ddSyncSave(){
+    var why=ddMissing(), b=sheet.querySelector("#dl-save"), w=sheet.querySelector("#dl-why");
+    if(b){ b.disabled=!!why; b.style.opacity=why?".5":""; }
+    if(w){ w.textContent=why; w.style.display=why?"":"none"; }
+  }
   function renderDispatchBuilder(){
+    var fsnap=sheetFocusSnap();
     var gradeOpts=DISPATCH_GRADES.map(function(g){ return '<option value="'+g+'">'+g+'</option>'; }).join("");
     var hbMap=heldBatchMap();
     var itemsHtml = DD.items.length ? DD.items.map(function(it,i){
@@ -1882,14 +1902,17 @@
     if(DD.ownVehicle){
       var vopts='<option value="">\u2014 pick vehicle \u2014</option>'+(state.vehicles||[]).map(function(v){ return '<option value="'+esc(v)+'"'+(DD.vehicleNo===v?' selected':'')+'>'+esc(v)+'</option>'; }).join("");
       var dopts='<option value="">\u2014 pick driver \u2014</option>'+(state.drivers||[]).map(function(d){ return '<option value="'+esc(d)+'"'+(DD.driver===d?' selected':'')+'>'+esc(d)+'</option>'; }).join("");
+      var noVeh=!(state.vehicles||[]).length, noDrv=!(state.drivers||[]).length;
       vehSection='<div class="field-inline"><div class="field"><label>Our vehicle</label><select id="dl-veh">'+vopts+'</select></div>'+
-        '<div class="field"><label>Driver</label><select id="dl-drv">'+dopts+'</select></div></div>';
+        '<div class="field"><label>Driver</label><select id="dl-drv">'+dopts+'</select></div></div>'+
+        ((noVeh||noDrv) ? '<div class="hint" style="margin:-4px 0 0">No '+(noVeh&&noDrv?'vehicles or drivers':(noVeh?'vehicles':'drivers'))+' set up yet. '+
+          '<button class="btn ghost" data-act="go-fleet" style="padding:4px 10px;margin-top:6px">Set up drivers &amp; vehicles</button></div>' : '');
     } else {
       vehSection='<div class="field-inline"><div class="field"><label>Vehicle number</label><input id="dl-vehno" type="text" autocomplete="off" placeholder="e.g. KL-43-TT-9090" value="'+esc(DD.vehicleNo||"")+'"></div>'+
         '<div class="field"><label>Driver <span class="muted" style="text-transform:none;letter-spacing:0">opt.</span></label><input id="dl-drvtext" type="text" autocomplete="off" placeholder="driver name" value="'+esc(DD.driver||"")+'"></div></div>';
     }
     var t=ddTotals();
-    var canSave = DD.items.length>0 && DD.customer && (DD.ownVehicle ? !!DD.vehicleNo : true);
+    var why=ddMissing(), canSave=!why;
     openSheet('<div class="sheet-h"><span class="led" style="background:radial-gradient(circle at 35% 30%,#c8f0a0,var(--amber));box-shadow:0 0 10px 1px var(--amber)"></span><b>New dispatch</b></div>'+
       '<div class="sheet-sub">One customer, one vehicle, one driver \u2014 any mix of grades.</div>'+
       '<div class="sheet-label">Items</div>'+itemsHtml+
@@ -1906,6 +1929,7 @@
         '<button class="pick'+(!DD.ownVehicle?' sel':'')+'" data-veh-mode="hired" style="flex:1">Hired / customer</button></div>'+
       vehSection+
       (DD.customer?'<div class="ro" style="margin-top:14px"><span class="k">Total</span><span class="v" style="color:var(--ok)">'+t.kg+' kg \u00b7 '+fmtMoney(t.amt)+(t.missing?' <small style="color:var(--err)">(some grades have no rate)</small>':'')+'</span></div>':'<div class="hint" style="margin-top:12px">Pick a customer to price the load.</div>')+
+      '<div class="hint" id="dl-why" style="margin-top:10px'+(why?'':';display:none')+'">'+esc(why)+'</div>'+
       '<div class="sheet-actions"><button class="btn ghost" data-act="close">Cancel</button>'+
       '<button class="btn primary" id="dl-save"'+(canSave?'':' disabled style="opacity:.5"')+'>Save dispatch</button></div>');
     sheet.querySelector("#di-add").addEventListener("click",function(){
@@ -1918,11 +1942,13 @@
     sheet.querySelectorAll("[data-del-item]").forEach(function(el){ el.addEventListener("click",function(){ DD.items.splice(parseInt(el.getAttribute("data-del-item"),10),1); renderDispatchBuilder(); }); });
     sheet.querySelectorAll("[data-pick-cust]").forEach(function(el){ el.addEventListener("click",function(){ DD.customer=el.getAttribute("data-pick-cust"); renderDispatchBuilder(); }); });
     sheet.querySelectorAll("[data-veh-mode]").forEach(function(el){ el.addEventListener("click",function(){ var own=(el.getAttribute("data-veh-mode")==="own"); if(own!==DD.ownVehicle){ DD.ownVehicle=own; DD.vehicleNo=own?((state.vehicles&&state.vehicles[0])||""):""; DD.driver=""; } renderDispatchBuilder(); }); });
-    var vsel=sheet.querySelector("#dl-veh"); if(vsel) vsel.addEventListener("change",function(){ DD.vehicleNo=vsel.value; });
-    var dsel=sheet.querySelector("#dl-drv"); if(dsel) dsel.addEventListener("change",function(){ DD.driver=dsel.value; });
-    var vno=sheet.querySelector("#dl-vehno"); if(vno) vno.addEventListener("input",function(){ DD.vehicleNo=vno.value; });
-    var dtx=sheet.querySelector("#dl-drvtext"); if(dtx) dtx.addEventListener("input",function(){ DD.driver=dtx.value; });
-    var sv=sheet.querySelector("#dl-save"); if(sv) sv.addEventListener("click",commitDispatchLoad);
+    var vsel=sheet.querySelector("#dl-veh"); if(vsel) vsel.addEventListener("change",function(){ DD.vehicleNo=vsel.value; ddSyncSave(); });
+    var dsel=sheet.querySelector("#dl-drv"); if(dsel) dsel.addEventListener("change",function(){ DD.driver=dsel.value; ddSyncSave(); });
+    var vno=sheet.querySelector("#dl-vehno"); if(vno) vno.addEventListener("input",function(){ DD.vehicleNo=vno.value; ddSyncSave(); });
+    var dtx=sheet.querySelector("#dl-drvtext"); if(dtx) dtx.addEventListener("input",function(){ DD.driver=dtx.value; ddSyncSave(); });
+    // Pass false explicitly — the click event is truthy and would count as "force", skipping the QC-hold warning.
+    var sv=sheet.querySelector("#dl-save"); if(sv) sv.addEventListener("click",function(){ commitDispatchLoad(false); });
+    sheetFocusRestore(fsnap);
   }
   function commitDispatchLoad(force){
     if(!DD.items.length){ toast("Add at least one item","warn"); return; }
@@ -2528,6 +2554,35 @@
       '<div class="field" style="flex:1;margin-bottom:0"><label>₹/kg</label><input id="cust-price" type="number" inputmode="decimal" placeholder="0"></div></div>'+
       '<button class="btn elec block" style="margin-top:11px" data-act="add-customer">+ Add customer</button></div>'+
 
+      '<div class="panel" style="margin-top:14px"><div class="sheet-label" style="margin:0 0 10px">Drivers &amp; vehicles</div>'+
+      '<div class="hint" style="margin-bottom:12px">These fill the two dropdowns on an "Our vehicle" dispatch. Renaming or removing one here never changes a dispatch already saved.</div>'+
+      '<div class="sheet-label" style="margin:0 0 6px;opacity:.75">Drivers</div>'+
+      ((state.drivers||[]).length
+        ? state.drivers.map(function(d){
+            return '<div class="custrow"><div><span class="cc">'+esc(d)+'</span></div>'+
+              '<div style="display:flex;gap:4px;align-items:center">'+
+              '<button class="wdel" data-drvedit="'+esc(d)+'" aria-label="rename" style="color:var(--elec)">✎</button>'+
+              '<button class="wdel" data-drvdel="'+esc(d)+'" aria-label="remove">✕</button></div></div>';
+          }).join("")
+        : '<div class="hint" style="margin-bottom:10px">No drivers yet. Add the people who drive your own lorries.</div>')+
+      '<div id="fleet-add" class="field-inline" style="align-items:stretch;margin-top:6px"><div class="field" style="flex:1;margin-bottom:0"><label>Driver name</label>'+
+      '<input id="drv-new" type="text" autocomplete="off" placeholder="e.g. Biju"></div>'+
+      '<button class="btn elec" data-act="add-driver" style="flex:0 0 auto;align-self:flex-end">+ Add</button></div>'+
+
+      '<div class="sheet-label" style="margin:18px 0 6px;opacity:.75">Our vehicles</div>'+
+      ((state.vehicles||[]).length
+        ? state.vehicles.map(function(v){
+            return '<div class="custrow"><div><span class="cc">'+esc(v)+'</span></div>'+
+              '<div style="display:flex;gap:4px;align-items:center">'+
+              '<button class="wdel" data-vehedit="'+esc(v)+'" aria-label="rename" style="color:var(--elec)">✎</button>'+
+              '<button class="wdel" data-vehdel="'+esc(v)+'" aria-label="remove">✕</button></div></div>';
+          }).join("")
+        : '<div class="hint" style="margin-bottom:10px">No vehicles yet. Add your own lorry numbers.</div>')+
+      '<div class="field-inline" style="align-items:stretch;margin-top:6px"><div class="field" style="flex:1;margin-bottom:0"><label>Vehicle number</label>'+
+      '<input id="veh-new" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. KL-17-AB-1234"></div>'+
+      '<button class="btn elec" data-act="add-vehicle" style="flex:0 0 auto;align-self:flex-end">+ Add</button></div>'+
+      '<div class="hint" style="margin-top:10px;opacity:.8">Saved on this tablet and shared with the others on the next sync.</div></div>'+
+
       '<div class="panel" style="margin-top:14px"><div class="sheet-label" style="margin:0 0 10px">Danger zone</div>'+
       '<button class="btn danger block" data-act="reset-device">Reset device &amp; clear cloud</button>'+
       '<div class="hint" style="margin:8px 0 12px">Wipes this device and pushes an empty plant to the cloud so a fresh start actually holds. Clears runs, batches, dispatches, quality and bearing logs everywhere. Keeps this device\u2019s connection settings.</div>'+
@@ -2541,7 +2596,48 @@
   function closeSheet(){ scrim.classList.remove("show"); sheet.classList.remove("show"); }
   scrim.addEventListener("click",closeSheet);
 
+  /* Re-rendering a sheet replaces its DOM, which drops the keyboard focus. On the floor that
+     shows up as "only one letter goes in". Snapshot the focused box and caret before a redraw,
+     put them back after it. */
+  function sheetFocusSnap(){
+    var el=document.activeElement;
+    if(!el||!el.id||!sheet.contains(el)) return null;
+    var tag=(el.tagName||"").toLowerCase();
+    if(tag!=="input"&&tag!=="textarea") return null;
+    var snap={ id:el.id, start:null, end:null };
+    try{ snap.start=el.selectionStart; snap.end=el.selectionEnd; }catch(e){}   // number inputs throw
+    return snap;
+  }
+  function sheetFocusRestore(snap){
+    if(!snap) return;
+    var el=sheet.querySelector("#"+snap.id); if(!el) return;
+    try{ el.focus({preventScroll:true}); }catch(e){ try{ el.focus(); }catch(e2){} }
+    if(snap.start!=null){ try{ el.setSelectionRange(snap.start,snap.end); }catch(e){} }
+  }
+
   function sheetHead(m,sub){ return '<div class="sheet-h"><span class="led" style="'+(m?'':'display:none')+'"></span><b>'+esc(sub?m:(m||''))+'</b></div>'; }
+
+  /* Rename a driver or an own vehicle. Dispatches already saved keep the name they were
+     saved with — the load is history, not a live link to this list. */
+  function openFleetRename(kind, oldVal){
+    var isDrv=(kind==="drivers");
+    openSheet('<div class="sheet-h"><b>Rename '+(isDrv?'driver':'vehicle')+'</b></div>'+
+      '<div class="sheet-sub">Dispatches already saved keep "'+esc(oldVal)+'". This only changes what you pick from next time.</div>'+
+      '<div class="field"><label>'+(isDrv?'Driver name':'Vehicle number')+'</label>'+
+      '<input id="fl-rename" type="text" autocomplete="off" spellcheck="false" value="'+esc(oldVal)+'"></div>'+
+      '<div class="sheet-actions"><button class="btn ghost" data-act="close">Cancel</button>'+
+      '<button class="btn primary" id="fl-save">Save</button></div>');
+    var inp=sheet.querySelector("#fl-rename");
+    setTimeout(function(){ try{ inp.focus(); }catch(e){} },120);
+    sheet.querySelector("#fl-save").addEventListener("click",function(){
+      var nv=(inp.value||"").trim(); if(!isDrv) nv=nv.toUpperCase();
+      if(!nv){ toast(isDrv?"Enter the driver name":"Enter the vehicle number","warn"); return; }
+      var list=state[kind]||[];
+      if(nv!==oldVal && list.some(function(x){ return String(x).toLowerCase()===nv.toLowerCase(); })){ toast(nv+" is already in the list","warn"); return; }
+      state[kind]=list.map(function(x){ return x===oldVal?nv:x; });
+      save(); closeSheet(); render(); toast("Renamed to "+nv,"ok");
+    });
+  }
 
   function openMachineSheet(mid){
     var m=M(mid), st=state.machines[mid];
@@ -3053,6 +3149,12 @@
     if((t=e.target.closest("[data-edit-run]"))){ openEditRun(t.getAttribute("data-edit-run")); return; }
     if((t=e.target.closest("[data-custdel]"))){ var cd=t.getAttribute("data-custdel");
       state.settings.customers=(state.settings.customers||[]).filter(function(c){ return c.code!==cd; }); save(); render(); return; }
+    if((t=e.target.closest("[data-drvedit]"))){ openFleetRename("drivers", t.getAttribute("data-drvedit")); return; }
+    if((t=e.target.closest("[data-drvdel]"))){ var dd=t.getAttribute("data-drvdel");
+      state.drivers=(state.drivers||[]).filter(function(x){ return x!==dd; }); save(); render(); toast("Driver "+dd+" removed","ok"); return; }
+    if((t=e.target.closest("[data-vehedit]"))){ openFleetRename("vehicles", t.getAttribute("data-vehedit")); return; }
+    if((t=e.target.closest("[data-vehdel]"))){ var vd=t.getAttribute("data-vehdel");
+      state.vehicles=(state.vehicles||[]).filter(function(x){ return x!==vd; }); save(); render(); toast("Vehicle "+vd+" removed","ok"); return; }
     var a=e.target.closest("[data-act]"); if(!a) return;
     var act=a.getAttribute("data-act");
     if(act==="settings"){ openSettings(); }
@@ -3067,6 +3169,21 @@
       if(!state.settings.customers) state.settings.customers=[];
       if(state.settings.customers.some(function(c){ return c.code===cc; })){ toast("Code "+cc+" already exists","warn"); return; }
       state.settings.customers.push({ code:cc, name:cn, price:cp }); save(); render(); toast("Customer "+cc+" added","ok");
+    }
+    else if(act==="go-fleet"){ closeSheet(); active="settings"; render(); setTimeout(function(){ var el=document.getElementById("fleet-add"); if(el) el.scrollIntoView({block:"center"}); },60); }
+    else if(act==="add-driver"){
+      var dnEl=document.getElementById("drv-new"), dn=(dnEl?dnEl.value:"").trim();
+      if(!dn){ toast("Enter the driver name","warn"); return; }
+      if(!state.drivers) state.drivers=[];
+      if(state.drivers.some(function(x){ return String(x).toLowerCase()===dn.toLowerCase(); })){ toast(dn+" is already in the list","warn"); return; }
+      state.drivers.push(dn); save(); render(); toast("Driver "+dn+" added","ok");
+    }
+    else if(act==="add-vehicle"){
+      var vnEl=document.getElementById("veh-new"), vn=(vnEl?vnEl.value:"").trim().toUpperCase();
+      if(!vn){ toast("Enter the vehicle number","warn"); return; }
+      if(!state.vehicles) state.vehicles=[];
+      if(state.vehicles.some(function(x){ return String(x).toUpperCase()===vn; })){ toast(vn+" is already in the list","warn"); return; }
+      state.vehicles.push(vn); save(); render(); toast("Vehicle "+vn+" added","ok");
     }
     else if(act==="close"){ closeSheet(); }
     else if(act==="sync"){ syncNow(); }

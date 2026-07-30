@@ -36,6 +36,13 @@ export const registry = {
     'created_at', 'updated_at',
   ]),
 
+  // What the presses mould. The curing settings live on the product because the
+  // same press moulds a different one tomorrow - see supabase/schema.sql.
+  [TABLES.products]: table('id', [
+    'id', 'name', 'cure_temp_c', 'cyclic_min', 'cavities', 'compound_rate',
+    'note', 'active', 'sort_order', 'created_at', 'updated_at',
+  ]),
+
   // ---- production ----
   [TABLES.runs]: table('id', [
     'id', ...AUDIT, 'updated_at',
@@ -49,6 +56,9 @@ export const registry = {
     'loaded_at', 'unloaded_at', 'pickcut_workers', 'pickcut_hours',
     // Added by supabase/schema.sql - the tablets never had these.
     'remarks', 'needs_weigh', 'paused', 'paused_at', 'non_production', 'weigh_entries',
+    // A moulding press run: the product, the curing settings copied off it as
+    // the run started, and what came out of the mould.
+    'product', 'cavities', 'cyclic_min', 'cure_temp_c', 'pieces', 'flash_kg', 'compound_rate',
   ]),
 
   [TABLES.shifts]: table('id', ['id', 'shift_date', 'shift', 'supervisor', 'updated_at']),

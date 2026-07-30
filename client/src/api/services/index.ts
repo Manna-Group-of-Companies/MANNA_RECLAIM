@@ -1,6 +1,7 @@
 export { authService } from './auth.service';
 export { userService } from './user.service';
 export { machineService } from './machine.service';
+export { productService } from './product.service';
 export { batchService } from './batch.service';
 export { runService } from './run.service';
 export { dispatchService } from './dispatch.service';

@@ -9,6 +9,7 @@ import {
   DashboardPage,
   EfficiencyPage,
   MaintenancePage,
+  ProductsPage,
   RatesPage,
   UsersPage,
 } from '@/pages/admin';
@@ -32,6 +33,7 @@ export const adminRoutes: RouteObject[] = [
           { path: 'costing', element: <CostingPage /> },
           { path: 'maintenance', element: <MaintenancePage /> },
           { path: 'bearings', element: <BearingsPage /> },
+          { path: 'products', element: <ProductsPage /> },
           { path: 'users', element: <UsersPage /> },
         ],
       },

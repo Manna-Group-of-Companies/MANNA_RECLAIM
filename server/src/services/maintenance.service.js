@@ -13,10 +13,11 @@ const bearings = crud(TABLES.bearingLogs, { defaultSort: 'ts' });
 /**
  * What has to be logged on a machine while it runs. Cracker and grinders are
  * checked every 2h, refiners every 3h; PR1, R1, R2 and Grinder 1 run on bushes
- * rather than bearings. Autoclaves have neither, so they get no spec at all.
+ * rather than bearings. Autoclaves have neither, and neither do the moulding
+ * presses, so both get no spec at all.
  */
 export function bearingSpec(machine) {
-  if (!machine || machine.kind === 'autoclave') return null;
+  if (!machine || machine.kind === 'autoclave' || machine.kind === 'press') return null;
   const id = machine.id ?? machine._id;
   return {
     type: BUSH_MACHINE_IDS.includes(id) ? 'bush' : 'bearing',

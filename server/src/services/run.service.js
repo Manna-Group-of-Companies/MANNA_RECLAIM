@@ -1,5 +1,6 @@
 import { crud, op } from './base.service.js';
 import { machineService } from './machine.service.js';
+import { productService } from './product.service.js';
 import { absentSchema } from '../config/supabase.js';
 import { TABLES, SACK_KG } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -39,12 +40,42 @@ const sourceColumns = (sources) => {
   };
 };
 
+const round2 = (value) => Math.round(value * 100) / 100;
+
+/**
+ * What a press run cost in material, and what that works out to per piece.
+ *
+ * Compound was spent on the flash as surely as on the piece, so the charge is
+ * the weight that came off the press plus the flash trimmed away, at the rate
+ * copied off the product when the run started. Nothing else about a press run is
+ * costed: it records no hours, no energy and no meters, so power, labour and
+ * overhead have nothing to be spread over - see the note in the spec.
+ *
+ * Null rather than zero wherever the figures are not all in. A press whose
+ * product has no compound rate against it yet is not a press that moulded for
+ * free, and a run with no pieces counted has no cost per piece to report.
+ */
+function pressCost(row) {
+  const rate = row.compound_rate == null ? null : Number(row.compound_rate);
+  const weight = Number(row.weight_kg ?? 0) + Number(row.flash_kg ?? 0);
+  if (rate == null || !weight) return { material_cost: null, cost_per_piece: null };
+  const material = round2(rate * weight);
+  const pieces = Number(row.pieces ?? 0);
+  return {
+    material_cost: material,
+    cost_per_piece: pieces > 0 ? round2(material / pieces) : null,
+  };
+}
+
 export const decorate = (row) => {
   if (!row) return row;
   const open = !row.ended_at;
   return {
     ...row,
     sources: sourcesOf(row),
+    // Only the presses are costed on the run itself; every other line is costed
+    // by the batch or the shift, out of the views the back office reads.
+    ...(row.kind === 'press' ? pressCost(row) : {}),
     status: open ? 'running' : 'done',
     stopped_at: row.ended_at ?? null,
     out_weight: row.weight_kg ?? null,
@@ -62,8 +93,6 @@ export const decorate = (row) => {
 };
 
 const decorateList = (result) => ({ ...result, rows: result.rows.map(decorate) });
-
-const round2 = (value) => Math.round(value * 100) / 100;
 
 /** What a meter pair says was used. Null unless both ends are on record. */
 const meterDiff = (start, end) =>
@@ -109,7 +138,35 @@ function lineFor(kind) {
   if (kind === 'grind') return 'grind';
   if (kind === 'coarse') return 'coarse';
   if (kind === 'refiner' || kind === 'prerefiner') return 'special';
+  // The presses are their own line: they mould finished goods out of reclaim
+  // rather than making it, so they belong to none of the three above.
+  if (kind === 'press') return 'press';
   return null;
+}
+
+/**
+ * The curing settings a press run is moulded at.
+ *
+ * Copied off the product as the run starts rather than read back through it, so
+ * a rate or a temperature changed next month does not rewrite what this run was
+ * moulded at, or what it cost. The two the floor may set for one run - the cycle
+ * time and the cavities, when a different mould is on - come off the sheet where
+ * it said so and off the product otherwise. Temperature and the compound rate
+ * are the product's alone; a tablet does not get to name either.
+ */
+async function pressFields(payload) {
+  const id = String(payload.product ?? '').trim();
+  if (!id) throw ApiError.badRequest('A press run has to say which product it is moulding');
+  const product = await productService.findById(id).catch(() => {
+    throw ApiError.badRequest(`No product on the list is called ${id}`);
+  });
+  return {
+    product: product.name ?? product.id,
+    cure_temp_c: product.cure_temp_c ?? null,
+    compound_rate: product.compound_rate ?? null,
+    cyclic_min: payload.cyclicMin ?? product.cyclic_min ?? null,
+    cavities: payload.cavities ?? product.cavities ?? null,
+  };
 }
 
 /**
@@ -215,6 +272,15 @@ const EDITABLE_COLUMNS = {
   capacity: 'capacity',
   packedSacks: 'packed_sacks',
   remarks: 'remarks',
+  // A press run. Its material cost follows the weight, the flash and the pieces,
+  // so correcting any of them re-costs the run on the next read - there is no
+  // stored total to drift out of step. The compound rate is deliberately not
+  // editable here: it is the rate that applied when the run was moulded.
+  product: 'product',
+  cavities: 'cavities',
+  cyclicMin: 'cyclic_min',
+  pieces: 'pieces',
+  flashKg: 'flash_kg',
 };
 
 /**
@@ -405,7 +471,14 @@ export const runService = {
     // only the fallback.
     const nonProduction = payload.nonProduction === true;
     const isAutoclave = machine.kind === 'autoclave';
+    const isPress = machine.kind === 'press';
     const startedAt = payload.startedAt || new Date().toISOString();
+    // A press is set up for a product, and moulds against a batch number of its
+    // own; the curing settings come off that product rather than off the sheet.
+    const press = isPress ? await pressFields(payload) : null;
+    if (isPress && !String(payload.batchNo ?? payload.batchId ?? '').trim()) {
+      throw ApiError.badRequest('A press run has to say which batch it is moulding');
+    }
 
     const row = await base.create({
       machine_id: payload.machineId,
@@ -438,10 +511,14 @@ export const runService = {
       // The special line can refine one batch with the tailings of others mixed
       // into it; the batch being refined is the first of them.
       ...sourceColumns(payload.sources),
+      // A press run: the product it is set up for and what it is moulded at.
+      ...(press ?? {}),
       ended_at: null,
       weight_kg: null,
       non_production: nonProduction,
-      needs_weigh: !nonProduction && Boolean(machine.out_weight || machine.weigh),
+      // A press weighs its own output at the machine and enters it at stop, so
+      // it never reaches the Weigh tab however its machine row is flagged.
+      needs_weigh: !nonProduction && !isPress && Boolean(machine.out_weight || machine.weigh),
     });
     return decorate(row);
   },
@@ -466,8 +543,15 @@ export const runService = {
     // follow the hours whenever the hours came from a reading: the two describe
     // the same run, and screens that show minutes read that column first.
     const recordedHours = hoursOf(run, payload);
-    const hoursRun =
-      recordedHours ?? run.hours_run ?? (clockMin != null ? +(clockMin / 60).toFixed(2) : null);
+    // A press records no run hours at all - it has no hour meter and none of the
+    // figures a plant machine's hours are read for: no energy per hour, no kilos
+    // per hour, no utilisation. Its start and stop times are still on the row, so
+    // how long it ran is there to be seen; it is simply not booked as run time
+    // that the plant's own hours are added up from.
+    const isPressRun = run.kind === 'press';
+    const hoursRun = isPressRun
+      ? run.hours_run ?? null
+      : recordedHours ?? run.hours_run ?? (clockMin != null ? +(clockMin / 60).toFixed(2) : null);
 
     // This start/stop on its own, before anything is decided about where it
     // gets filed.
@@ -475,7 +559,11 @@ export const runService = {
       ended_at: ended,
       // See start(): an autoclave keeps its own discharge time alongside.
       unloaded_at: run.kind === 'autoclave' ? ended : run.unloaded_at,
-      runtime_min: recordedHours != null ? Math.round(recordedHours * 60) : run.runtime_min ?? clockMin,
+      runtime_min: isPressRun
+        ? run.runtime_min ?? null
+        : recordedHours != null
+          ? Math.round(recordedHours * 60)
+          : run.runtime_min ?? clockMin,
       hours_run: hoursRun,
       elec_end: payload.elecEnd ?? run.elec_end,
       hour_end: payload.hourEnd ?? run.hour_end,
@@ -484,6 +572,10 @@ export const runService = {
       weight_kg: payload.outWeight ?? run.weight_kg,
       workers: payload.workers ?? run.workers,
       remarks: payload.remarks ?? run.remarks,
+      // A press counts what came out of the mould, and the flash trimmed off it.
+      // Both are charged as material - see pressCost().
+      pieces: payload.pieces ?? run.pieces,
+      flash_kg: payload.flashKg ?? run.flash_kg,
     };
 
     const record = await shiftRecordFor(run);

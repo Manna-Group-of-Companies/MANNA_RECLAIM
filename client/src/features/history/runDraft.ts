@@ -41,6 +41,12 @@ export const draftOf = (run: Run) => ({
   capacity: text(run.capacity),
   packedSacks: text(run.packed_sacks),
   remarks: text(run.remarks),
+  // A press run. Its compound rate is not here on purpose: that is what the
+  // product cost when this was moulded, not a figure to correct afterwards.
+  pieces: text(run.pieces),
+  flashKg: text(run.flash_kg),
+  cavities: text(run.cavities),
+  cyclicMin: text(run.cyclic_min),
 });
 
 export type Draft = ReturnType<typeof draftOf>;
@@ -54,6 +60,11 @@ export interface RunMath {
   /** Soorya reads off a TOD meter showing one phase, so its energy is ×3. */
   isTod: boolean;
   isAuto: boolean;
+  /** A moulding press: no meters, no hours - pieces, weight and flash. */
+  isPress: boolean;
+  /** Compound on the weight plus the flash, and that over the pieces made. */
+  material: number | null;
+  perPiece: number | null;
   elecStart: number | null;
   elecEnd: number | null;
   hourStart: number | null;
@@ -81,6 +92,16 @@ export function runMath(run: Run, draft: Draft): RunMath {
   const elecPair = elecDelta != null;
   const hourPair = hourDelta != null;
 
+  // A press run re-costs itself as it is corrected: material follows the weight
+  // and the flash, at the rate the run was moulded under, and cost per piece
+  // follows the count. The rate itself is not editable, so it comes off the run.
+  const isPress = run.kind === 'press';
+  const rate = run.compound_rate != null ? Number(run.compound_rate) : null;
+  const charged = round2((asNumber(draft.outWeight) ?? 0) + (asNumber(draft.flashKg) ?? 0));
+  const material = isPress && rate != null && charged > 0 ? round2(rate * charged) : null;
+  const pieces = asNumber(draft.pieces);
+  const perPiece = material != null && pieces != null && pieces > 0 ? round2(material / pieces) : null;
+
   const issues: string[] = [];
   if (elecDelta != null && elecDelta < 0) {
     issues.push('The electricity meter reads lower at the end than at the start.');
@@ -88,10 +109,16 @@ export function runMath(run: Run, draft: Draft): RunMath {
   if (hourDelta != null && hourDelta < 0) {
     issues.push('The hour meter reads lower at the end than at the start.');
   }
+  if (isPress && pieces != null && pieces <= 0) {
+    issues.push('A press run that made no pieces has nothing to cost.');
+  }
 
   return {
     isTod,
     isAuto: run.kind === 'autoclave',
+    isPress,
+    material,
+    perPiece,
     elecStart,
     elecEnd,
     hourStart,

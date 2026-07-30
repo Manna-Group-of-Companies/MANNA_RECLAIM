@@ -18,6 +18,11 @@ export const endpoints = {
     byId: (id: string) => `/machines/${id}`,
     enabled: (id: string) => `/machines/${id}/enabled`,
   },
+  /** What the moulding presses mould, and the curing settings on each. */
+  products: {
+    root: '/products',
+    byId: (id: string) => `/products/${id}`,
+  },
   batches: {
     root: '/batches',
     open: '/batches/open',

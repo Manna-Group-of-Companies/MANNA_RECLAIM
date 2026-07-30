@@ -117,10 +117,18 @@ export const reportService = {
       .sort((a, b) => ((a.down_start ?? '') < (b.down_start ?? '') ? 1 : -1));
   },
 
-  /** Headline numbers for the admin dashboard and the user Reports tab. */
+  /**
+   * Headline numbers for the admin dashboard and the user Reports tab.
+   *
+   * The presses are left out of the output figure. What comes off a press is
+   * finished goods moulded from reclaim the plant has already counted as its
+   * output, so adding their kilos in would count the same material twice. Press
+   * runs are reported on their own terms - pieces, and what they cost in
+   * material - in History.
+   */
   async production({ from, to } = {}) {
     const rows = (await runs.all()).filter(inWindow(from, to));
-    const outKg = sum(rows, 'weight_kg');
+    const outKg = sum(rows.filter((r) => r.kind !== 'press'), 'weight_kg');
     const runHours = rows.reduce((s, r) => s + runHoursOf(r), 0);
     return {
       window: { from: from ?? null, to: to ?? null },

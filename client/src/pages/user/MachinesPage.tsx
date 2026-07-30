@@ -19,6 +19,7 @@ import {
   markDown,
 } from '@/features/maintenance/maintenanceSlice';
 import { createBatch, fetchOpenBatches } from '@/features/batches/batchesSlice';
+import { fetchProducts } from '@/features/products/productsSlice';
 import { MachineCard } from '@/features/machines/MachineCard';
 import {
   BottomSheet,
@@ -59,7 +60,7 @@ import {
 } from '@/config/constants';
 import { atLocal, clock24, currentShift, dayMonth, shiftForTime, todayISO } from '@/utils/date';
 import { ago, elapsed } from '@/utils/format';
-import type { BearingDue, MaintenanceLog, Machine, Quality, Run, Shift } from '@/types/models';
+import type { BearingDue, MaintenanceLog, Machine, Product, Quality, Run, Shift } from '@/types/models';
 
 /** The line a run is on, for the machines that can be put on either. */
 type Line = 'coarse' | 'special';
@@ -107,11 +108,24 @@ const isDualLine = (machine: Machine) => machine.kind === 'coarse';
 const lineIsShiftwise = (line?: string | null) => line === 'grind' || line === 'coarse';
 
 /**
- * Every machine but the autoclaves is metered, so its sheets ask for the two
- * readings either side of the run. The autoclaves burn firewood and are timed
- * by their load instead.
+ * A moulding press. It moulds finished goods out of reclaim compound rather than
+ * making reclaim, so it shares almost nothing with the rest of the plant: no
+ * meters, no energy, no run hours, no bearings, nothing for the Weigh tab and no
+ * packing path. What it records is a count of pieces against a product.
  */
-const hasMeters = (kind?: string | null) => Boolean(kind) && kind !== 'autoclave';
+const isPress = (kind?: string | null) => kind === 'press';
+
+/**
+ * Every machine but the autoclaves and the presses is metered, so its sheets ask
+ * for the two readings either side of the run. The autoclaves burn firewood and
+ * are timed by their load; a press records neither energy nor hours at all.
+ */
+const hasMeters = (kind?: string | null) =>
+  Boolean(kind) && kind !== 'autoclave' && kind !== 'press';
+
+/** A figure the plant has not measured into the system yet reads as such. */
+const orNotSet = (value: number | null | undefined, unit: string) =>
+  value == null ? 'not set' : `${value} ${unit}`;
 
 /** A typed number field: blank reads as "not entered", not as zero. */
 const asNumber = (value: string) => {
@@ -136,6 +150,17 @@ const blankLoad = { paired: true, shiftDate: '', loadDate: '', loadTime: '' };
 /** The autoclave unload sheet - firewood burned, and when it was discharged. */
 const blankUnload = { firewood: '', dischargeDate: '', unloadTime: '' };
 
+/**
+ * The press start sheet. The product decides the cure and the mould, so both are
+ * filled in from it and left editable: a cycle can be run longer today, and a
+ * different mould can be on the press. The temperature is not here - it is a fact
+ * of the product, shown rather than typed.
+ */
+const blankPress = { product: '', cyclicMin: '', cavities: '' };
+
+/** The press stop sheet: what came out of the mould, and the flash trimmed off. */
+const blankPressStop = { pieces: '', flash: '' };
+
 /** Why Soorya's readings are not kWh, on both of its sheets. */
 const TOD_NOTE = (
   <>
@@ -154,6 +179,10 @@ export function MachinesPage() {
   const openDown = useAppSelector((s) => s.maintenance.open);
   const due = useAppSelector((s) => s.maintenance.due);
   const openBatches = useAppSelector((s) => s.batches.items);
+  // What the presses mould. A press cannot start without one, so an empty list is
+  // something the start sheet has to say out loud - see startNoProducts.
+  const products = useAppSelector((s) => s.products.items);
+  const productsLoaded = useAppSelector((s) => s.products.loaded);
   /**
    * The batches a refiner may be pointed at: open, and out of the autoclave.
    * A charge still cooking has nothing to refine yet, so it is kept off the
@@ -189,6 +218,9 @@ export function MachinesPage() {
   const [form, setForm] = useState<AutoclaveForm | null>(null);
   const [load, setLoad] = useState(blankLoad);
   const [unload, setUnload] = useState(blankUnload);
+  /** Press only: what it is moulding, and what it is set up to mould it at. */
+  const [press, setPress] = useState(blankPress);
+  const [pressStop, setPressStop] = useState(blankPressStop);
   const [downTime, setDownTime] = useState('');
   const [repair, setRepair] = useState(blankRepair);
   const [temps, setTemps] = useState<Record<string, string>>({});
@@ -205,6 +237,8 @@ export function MachinesPage() {
     void dispatch(fetchShiftRuns(undefined));
     // The batches the refiners can be pointed at.
     void dispatch(fetchOpenBatches());
+    // And what the presses mould.
+    void dispatch(fetchProducts());
   }, [dispatch]);
 
   const runByMachine = useMemo(() => new Map(active.map((r) => [r.machine_id, r])), [active]);
@@ -251,6 +285,19 @@ export function MachinesPage() {
     [startSpecial, batchNo, refinableBatches],
   );
 
+  // ---- the press being set up ----
+  const startIsPress = isPress(startMachine?.kind);
+  /** The product this run is being moulded to, once one is picked. */
+  const pressProduct: Product | undefined = startIsPress
+    ? products.find((p) => p.id === press.product)
+    : undefined;
+  /**
+   * A press cannot be started with nothing to mould. The list has to have been
+   * read first: a connection that dropped is not an empty product list, and
+   * telling the crew to go and add one would send them after the wrong problem.
+   */
+  const startNoProducts = startIsPress && productsLoaded && products.length === 0;
+
   // ---- the autoclave being charged ----
   const startIsAutoclave = startMachine?.kind === 'autoclave';
   /** What fits this vessel. A machine with one option has it picked already. */
@@ -275,6 +322,8 @@ export function MachinesPage() {
   const stopsWithMeters = Boolean(stopping) && hasMeters(stopKind);
   /** An autoclave is discharged rather than stopped: firewood, not meters. */
   const stopIsAutoclave = Boolean(stopping) && stopKind === 'autoclave';
+  /** A press is stopped on what came out of the mould: pieces, weight, flash. */
+  const stopIsPress = Boolean(stopping) && isPress(stopKind);
   // The line the run was started on has the last word: a coarse-line machine
   // put on the special line for a batch is not a shiftwise run.
   const stopShiftwise = stopping?.line ? lineIsShiftwise(stopping.line) : isShiftwise(stopKind);
@@ -338,8 +387,39 @@ export function MachinesPage() {
     }
   }
   if (weightValue != null && weightValue <= 0) {
-    stopIssues.push('Output weight: must be greater than zero (leave it blank to weigh later).');
+    stopIssues.push(
+      stopIsPress
+        ? 'Weight: must be greater than zero — weigh what came off the press.'
+        : 'Output weight: must be greater than zero (leave it blank to weigh later).',
+    );
   }
+
+  // ---- what came off a press, and what the compound in it cost ----
+  const piecesValue = asNumber(pressStop.pieces);
+  const flashValue = asNumber(pressStop.flash);
+  if (stopIsPress) {
+    if (piecesValue != null && (piecesValue <= 0 || !Number.isInteger(piecesValue))) {
+      stopIssues.push('How many: a whole number of pieces, above zero.');
+    }
+    if (flashValue != null && flashValue < 0) {
+      stopIssues.push('Flash: cannot be less than nothing.');
+    }
+  }
+  /**
+   * Material is charged on the weight plus the flash - that compound was spent
+   * either way - at the rate the run was started under, and cost per piece
+   * spreads it over the pieces made. Nothing else about a press run is costed: it
+   * records no hours and no units, so power, labour and overhead have nothing to
+   * be spread over.
+   */
+  const pressRate = stopping?.compound_rate != null ? Number(stopping.compound_rate) : null;
+  const pressCharged = round2((weightValue ?? 0) + (flashValue ?? 0));
+  const pressMaterial =
+    stopIsPress && pressRate != null && pressCharged > 0 ? round2(pressRate * pressCharged) : null;
+  const pressPerPiece =
+    pressMaterial != null && piecesValue != null && piecesValue > 0
+      ? round2(pressMaterial / piecesValue)
+      : null;
 
   /**
    * Every write goes through here so a failure always says so out loud. The
@@ -452,6 +532,34 @@ export function MachinesPage() {
     const machine = sheet.machine;
     if (machine.kind === 'autoclave') return confirmLoad();
     const metered = hasMeters(machine.kind);
+    const pressRun = isPress(machine.kind);
+
+    // A press has no meters, but it is still started for a named shift: it asks
+    // for the date and the shift the same way a metered machine does.
+    if (pressRun) {
+      if (!startDate) {
+        notify('Pick a date', 'warn');
+        return;
+      }
+      if (!press.product) {
+        notify('Pick what it is moulding', 'warn');
+        return;
+      }
+      if (!batchNo.trim()) {
+        notify('Enter the batch number', 'warn');
+        return;
+      }
+      const cavities = asNumber(press.cavities);
+      if (cavities != null && (cavities <= 0 || !Number.isInteger(cavities))) {
+        notify('Cavities must be a whole number above zero', 'warn');
+        return;
+      }
+      const cyclic = asNumber(press.cyclicMin);
+      if (cyclic != null && cyclic <= 0) {
+        notify('Cyclic time must be more than zero', 'warn');
+        return;
+      }
+    }
 
     // A meter reading is optional, but a zero or negative one is a mis-key
     // rather than a meter that has never turned - the same rule the back office
@@ -509,11 +617,21 @@ export function MachinesPage() {
           formulation: shiftwise ? null : picked?.formulation ?? null,
           tyreType: machine.tyre ? tyre : null,
           mesh: machine.tyre && tyre ? TYRES[tyre].mesh : null,
-          shiftDate: metered ? startDate : todayISO(),
-          shift: metered ? startShift : currentShift(),
+          shiftDate: metered || pressRun ? startDate : todayISO(),
+          shift: metered || pressRun ? startShift : currentShift(),
           supervisor: supervisor || null,
           elecStart: elec,
           hourStart: hour,
+          // A press: what it is moulding, and the two settings the floor may
+          // change for this run. The temperature and the compound rate are the
+          // product's, and the server copies both off it.
+          ...(pressRun
+            ? {
+                product: press.product,
+                cyclicMin: asNumber(press.cyclicMin),
+                cavities: asNumber(press.cavities),
+              }
+            : {}),
           nonProduction: special ? nonProd : undefined,
           // The batch being refined leads the list; the tailings mixed into it
           // follow. Sent only when there is a mix - a batch on its own is
@@ -528,7 +646,9 @@ export function MachinesPage() {
             ? ` · special line${nonProd ? ' · non-production' : ''}${
                 mix.length ? ` · mixed with ${mix.length}` : ''
               }`
-            : ''
+            : pressRun
+              ? ` · ${pressProduct?.name ?? press.product} · ${batchNo.trim()}`
+              : ''
       }`,
       'Could not start the run',
     );
@@ -537,6 +657,7 @@ export function MachinesPage() {
     setElecStart('');
     setHourStart('');
     setNonProd(false);
+    setPress(blankPress);
   };
 
   const confirmStop = async () => {
@@ -544,6 +665,18 @@ export function MachinesPage() {
     if (stopIssues.length) {
       notify('Check the highlighted readings before logging', 'warn');
       return;
+    }
+    // A press run is the count of what it made, so that count is the point of
+    // logging it - there is nothing to weigh later and no second chance at it.
+    if (stopIsPress) {
+      if (piecesValue == null) {
+        notify('Enter how many pieces it made', 'warn');
+        return;
+      }
+      if (weightValue == null) {
+        notify('Enter the weight that came off the press', 'warn');
+        return;
+      }
     }
 
     // Discharging an autoclave is dated by hand: the crew often logs a load
@@ -577,11 +710,19 @@ export function MachinesPage() {
           hourEnd: stopsWithMeters ? hourEndValue : null,
           kwh: stopsWithMeters ? asNumber(stop.elecDiff) : null,
           hoursRun: stopsWithMeters ? asNumber(stop.hourDiff) : null,
+          // What came out of the mould. The flash counts as material spent, so a
+          // press with no flash trimmed off it says zero rather than nothing.
+          pieces: stopIsPress ? piecesValue : null,
+          flashKg: stopIsPress ? flashValue ?? 0 : null,
         }),
       ),
       stopIsAutoclave
         ? 'Unloaded · logged'
-        : (payload) => {
+        : stopIsPress
+          ? `${stopMachine?.short ?? stopping?.machine_id} · ${piecesValue} pcs logged${
+              pressPerPiece != null ? ` · ₹${pressPerPiece}/pc` : ''
+            }`
+          : (payload) => {
             // A shiftwise stop is named by the shift it was run for, and says
             // so when it was folded into one the shift already had.
             const logged = payload as Run;
@@ -597,6 +738,7 @@ export function MachinesPage() {
       setOutWeight('');
       setStop(blankStop);
       setUnload(blankUnload);
+      setPressStop(blankPressStop);
       // Logging a run moves the batch on: unloading takes it out of the vessel
       // and releases it to the refiners, and an R4 pass marks the grade it
       // yielded. Both happen server-side, so the list is re-read rather than
@@ -780,6 +922,19 @@ export function MachinesPage() {
                     const fits = m.kind === 'autoclave' ? autoclaveFormsFor(m.capacity) : [];
                     setForm(fits.length === 1 ? fits[0] ?? null : null);
                     setLoad(blankLoad);
+                    // A press moulds one product at a time, and its cure and
+                    // cavities come off whichever is picked. A plant with only
+                    // one product on the list has it picked already.
+                    const only = m.kind === 'press' && products.length === 1 ? products[0] : null;
+                    setPress(
+                      only
+                        ? {
+                            product: only.id,
+                            cyclicMin: only.cyclic_min != null ? String(only.cyclic_min) : '',
+                            cavities: only.cavities != null ? String(only.cavities) : '',
+                          }
+                        : blankPress,
+                    );
                     // Both meters carry on from where the last run left them,
                     // so the crew only retypes a reading when it has moved.
                     const previous = lastByMachine.get(m.id);
@@ -795,6 +950,7 @@ export function MachinesPage() {
                   }}
                   onStop={(r) => {
                     setOutWeight('');
+                    setPressStop(blankPressStop);
                     const autoclave = machine.kind === 'autoclave';
                     const coarse = r.line ? lineIsShiftwise(r.line) : false;
                     // The crew this machine usually runs with, so the common
@@ -904,8 +1060,12 @@ export function MachinesPage() {
             ? undefined
             : startNothingReady
               ? 'No batches are ready yet.'
+              : startNoProducts
+                ? 'Nothing on the product list yet.'
               : startIsAutoclave
               ? `${sheet.machine.capacity ?? '—'} kg · firewood entered at unload`
+              : startIsPress
+                ? `Moulding press — pieces and weight at stop${supervisor ? ` · ${supervisor}` : ''}`
               : startShiftwise
               ? `${sheet.machine.kind === 'grind' ? 'Grinding line' : 'Coarse line'} — pick the shift it is running for. Units & crew at stop${
                   sheet.machine.out_weight ? '; output weighed shiftwise.' : '.'
@@ -919,7 +1079,7 @@ export function MachinesPage() {
         led="var(--led-brand)"
         onClose={closeSheet}
         footer={
-          startNothingReady ? (
+          startNothingReady || startNoProducts ? (
             <Button variant="ghost" onClick={closeSheet}>
               Close
             </Button>
@@ -943,6 +1103,17 @@ export function MachinesPage() {
             icon={icons.batches}
             title="Nothing to refine"
             hint="Unload the autoclave first to make a batch selectable."
+          />
+        )}
+
+        {/* A press moulds a product, and its cure, its mould and what its
+            compound costs all come off that product - so there is nothing to
+            fill in until one exists. */}
+        {sheet?.kind === 'start' && startNoProducts && (
+          <EmptyState
+            icon={icons.packing}
+            title="The product list is empty"
+            hint="Add what this press moulds before starting a run."
           />
         )}
 
@@ -1037,7 +1208,112 @@ export function MachinesPage() {
           </>
         )}
 
-        {sheet?.kind === 'start' && !startIsAutoclave && !startNothingReady && (
+        {/* ---- a moulding press ----
+            The curing settings belong to the product, so the floor never retypes
+            them: the temperature is read out as a fact, and the cure and the
+            cavities are filled in from the product and left editable for the run
+            in hand. No meters, no hours, no energy - a press records none. */}
+        {sheet?.kind === 'start' && startIsPress && !startNoProducts && (
+          <>
+            <SheetLabel>Product</SheetLabel>
+            {products.length ? (
+              <PickGrid>
+                {products.map((p) => (
+                  <Pick
+                    key={p.id}
+                    title={p.name}
+                    sub={[
+                      p.cure_temp_c != null ? `${p.cure_temp_c} °C` : null,
+                      p.cyclic_min != null ? `${p.cyclic_min} min` : null,
+                      p.cavities != null ? `${p.cavities} cav` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'settings not set yet'}
+                    selected={press.product === p.id}
+                    onClick={() =>
+                      setPress({
+                        product: p.id,
+                        cyclicMin: p.cyclic_min != null ? String(p.cyclic_min) : '',
+                        cavities: p.cavities != null ? String(p.cavities) : '',
+                      })
+                    }
+                  />
+                ))}
+              </PickGrid>
+            ) : (
+              <div className="hint">Reading the product list…</div>
+            )}
+
+            {/* Temperature is a fact of the product, not a decision at the run. */}
+            {pressProduct && (
+              <Readout
+                label="Curing temperature"
+                value={orNotSet(pressProduct.cure_temp_c, '°C')}
+                valueColor="var(--ember)"
+                className="mt-3.5"
+              />
+            )}
+
+            <FieldRow className="mt-4">
+              <TextField
+                label="Cyclic time"
+                note="— from the product"
+                type="number"
+                inputMode="decimal"
+                suffix="min"
+                placeholder={pressProduct?.cyclic_min != null ? String(pressProduct.cyclic_min) : 'not set'}
+                value={press.cyclicMin}
+                onChange={(e) => setPress({ ...press, cyclicMin: e.target.value })}
+              />
+              <TextField
+                label="Cavities"
+                note="— change if a different mould is on"
+                type="number"
+                inputMode="numeric"
+                placeholder={pressProduct?.cavities != null ? String(pressProduct.cavities) : 'not set'}
+                value={press.cavities}
+                onChange={(e) => setPress({ ...press, cavities: e.target.value })}
+              />
+            </FieldRow>
+
+            <TextField
+              label="Batch number"
+              placeholder="e.g. P-104"
+              autoComplete="off"
+              value={batchNo}
+              onChange={(e) => setBatchNo(e.target.value)}
+            />
+
+            <FieldRow>
+              <TextField
+                label="Date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <SelectField
+                label="Shift"
+                value={startShift}
+                onChange={(e) => setStartShift(e.target.value as Shift)}
+              >
+                {SHIFTS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </SelectField>
+            </FieldRow>
+
+            {pressProduct?.compound_rate == null && (
+              <div className="hint">
+                No compound rate is set against {pressProduct?.name ?? 'this product'} yet, so the run
+                will log without a material cost. It can be costed once the rate is entered.
+              </div>
+            )}
+          </>
+        )}
+
+        {sheet?.kind === 'start' && !startIsAutoclave && !startIsPress && !startNothingReady && (
           <>
             {startPicksBatch && refinableBatches.length > 0 && (
               <>
@@ -1253,7 +1529,7 @@ export function MachinesPage() {
 
         {/* Both halves of this sheet - the autoclave load and every other
             start - file the run against a name, so the pick sits under both. */}
-        {sheet?.kind === 'start' && !startNothingReady && (
+        {sheet?.kind === 'start' && !startNothingReady && !startNoProducts && (
           <SupervisorPick fieldClassName="mt-4" note={startIsAutoclave ? '— signs this load' : '— signs this run'} />
         )}
       </BottomSheet>
@@ -1273,6 +1549,10 @@ export function MachinesPage() {
             ? undefined
             : stopIsAutoclave
               ? [stopping.batch_no, stopping.formulation, stopping.quality].filter(Boolean).join(' · ')
+              : stopIsPress
+                ? [stopping.product, stopping.batch_no, `ran ${elapsed(stopping.started_at)}`]
+                    .filter(Boolean)
+                    .join(' · ')
               : stopShiftwise
               ? // A shift, not a batch: which shift it ran for, and on what.
                 [
@@ -1296,7 +1576,11 @@ export function MachinesPage() {
               {stopIsAutoclave ? 'Cancel' : 'Keep running'}
             </Button>
             <Button variant="primary" onClick={confirmStop} disabled={stopIssues.length > 0}>
-              {stopIsAutoclave ? 'Log & unload' : stopsWithMeters ? 'Log run' : 'Stop run'}
+              {stopIsAutoclave
+                ? 'Log & unload'
+                : stopsWithMeters || stopIsPress
+                  ? 'Log run'
+                  : 'Stop run'}
             </Button>
           </>
         }
@@ -1391,9 +1675,94 @@ export function MachinesPage() {
               />
             )}
 
+            {/* ---- what came off a press ----
+                Counted in pieces, and weighed rather than worked out: the flash
+                trimmed off is compound the run spent as surely as the piece is,
+                so it is charged with it. No meters and no hours - a press
+                records neither. */}
+            {stopIsPress && (
+              <>
+                <Readout
+                  label="Moulded at"
+                  value={`${orNotSet(stopping.cure_temp_c, '°C')} · ${orNotSet(
+                    stopping.cyclic_min,
+                    'min',
+                  )} · ${stopping.cavities ?? '—'} cavities`}
+                  className="mb-3.5"
+                />
+
+                <FieldRow>
+                  <TextField
+                    label="How many"
+                    note="— pieces produced"
+                    type="number"
+                    inputMode="numeric"
+                    suffix="nos"
+                    placeholder="0"
+                    value={pressStop.pieces}
+                    onChange={(e) => setPressStop({ ...pressStop, pieces: e.target.value })}
+                  />
+                  <TextField
+                    label="Workers"
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={stop.workers}
+                    onChange={(e) => setStop({ ...stop, workers: e.target.value })}
+                  />
+                </FieldRow>
+
+                <FieldRow>
+                  <TextField
+                    label="Weight"
+                    note="— weighed output"
+                    inputMode="decimal"
+                    suffix="kg"
+                    placeholder="0"
+                    value={outWeight}
+                    onChange={(e) => setOutWeight(e.target.value.replace(/[^\d.]/g, ''))}
+                  />
+                  <TextField
+                    label="Flash"
+                    note="— waste compound"
+                    inputMode="decimal"
+                    suffix="kg"
+                    placeholder="0"
+                    value={pressStop.flash}
+                    onChange={(e) => setPressStop({ ...pressStop, flash: e.target.value.replace(/[^\d.]/g, '') })}
+                  />
+                </FieldRow>
+
+                {/* The arithmetic, spelled out before it is committed - the same
+                    way a meter pair shows its difference. */}
+                {pressMaterial != null ? (
+                  <div className="diffout show">
+                    Material: ({weightValue ?? 0} + {flashValue ?? 0}) × ₹{pressRate} ={' '}
+                    <b>₹{pressMaterial}</b>
+                    {pressPerPiece != null && (
+                      <>
+                        {' '}
+                        ÷ {piecesValue} pcs = <b>₹{pressPerPiece}</b> a piece
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="hint">
+                    {pressRate == null
+                      ? 'No compound rate against this product, so the run logs without a material cost.'
+                      : 'Material cost shows once the weight is in.'}
+                  </div>
+                )}
+                <div className="hint">
+                  Power, labour and overhead are not costed on a press: it records no hours and no
+                  units for them to be spread over.
+                </div>
+              </>
+            )}
+
             {/* Nothing comes off an autoclave to weigh - the batch is weighed
                 once the refiners have worked through it. */}
-            {!stopIsAutoclave && (!stopsWithMeters || stopWeighs) && (
+            {!stopIsAutoclave && !stopIsPress && (!stopsWithMeters || stopWeighs) && (
               <TextField
                 label="Output weight"
                 note={stopWeighs ? '— optional, or weigh later' : '— blank sends it to the Weigh tab'}
@@ -1461,14 +1830,14 @@ export function MachinesPage() {
               ) : null}
             </FormWarning>
 
-            {(stopsWithMeters || stopIsAutoclave) && (
+            {(stopsWithMeters || stopIsAutoclave || stopIsPress) && (
               <Button
                 variant="danger"
                 size="lg"
                 className="mt-2"
                 onClick={() => setSheet({ kind: 'cancelLoad', run: stopping })}
               >
-                Cancel this load (entered by mistake)
+                Cancel this {stopIsPress ? 'run' : 'load'} (entered by mistake)
               </Button>
             )}
           </>

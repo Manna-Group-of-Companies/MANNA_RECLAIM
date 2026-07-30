@@ -7,4 +7,5 @@ export { RatesPage } from './RatesPage';
 export { CostingPage } from './CostingPage';
 export { MaintenancePage } from './MaintenancePage';
 export { BearingsPage } from './BearingsPage';
+export { ProductsPage } from './ProductsPage';
 export { UsersPage } from './UsersPage';

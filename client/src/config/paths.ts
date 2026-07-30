@@ -27,6 +27,8 @@ export const adminPaths = {
   costing: '/admin/costing',
   maintenance: '/admin/maintenance',
   bearings: '/admin/bearings',
+  /** What the moulding presses mould, and the curing settings on each. */
+  products: '/admin/products',
   users: '/admin/users',
 } as const;
 

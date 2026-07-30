@@ -151,6 +151,9 @@ export function MachineCard({
             <div className="what">
               {run.batch_no && <BatchRef>{run.batch_no}</BatchRef>}
               {run.formulation && <FormChip>{run.formulation}</FormChip>}
+              {/* A press says what it is moulding, and what it is moulding it at. */}
+              {run.product && <FormChip>{run.product}</FormChip>}
+              {run.cure_temp_c != null && <FormChip>{run.cure_temp_c} °C</FormChip>}
               {run.shift_date && !run.batch_no && <FormChip>{dayMonth(run.shift_date)}</FormChip>}
               {run.quality && <QualityChip quality={run.quality} />}
               {run.mesh && <FormChip style={{ color: 'var(--steel)' }}>{run.mesh}</FormChip>}

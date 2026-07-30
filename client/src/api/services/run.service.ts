@@ -36,6 +36,15 @@ export interface StartRunPayload {
    * then the tailings of others mixed into it. Up to four in all.
    */
   sources?: string[] | null;
+  /**
+   * A moulding press: the product it is set up for, and the two settings the
+   * floor may change for this run - the cure, and the mould that is on. The
+   * curing temperature and the compound rate are not sent: the server copies
+   * both off the product, so a tablet cannot name what a run cost.
+   */
+  product?: string | null;
+  cyclicMin?: number | null;
+  cavities?: number | null;
 }
 
 export interface StopRunPayload {
@@ -51,6 +60,9 @@ export interface StopRunPayload {
   kwh?: number | null;
   hoursRun?: number | null;
   firewoodKg?: number | null;
+  /** What came off a press: the pieces moulded, and the flash trimmed away. */
+  pieces?: number | null;
+  flashKg?: number | null;
 }
 
 /**
@@ -76,6 +88,12 @@ export interface UpdateRunPayload {
   capacity?: number | null;
   packedSacks?: number | null;
   remarks?: string | null;
+  /** A press run's own figures - its compound rate is not correctable. */
+  product?: string | null;
+  cavities?: number | null;
+  cyclicMin?: number | null;
+  pieces?: number | null;
+  flashKg?: number | null;
 }
 
 /** What a deleted run was carrying, so the screen can name what it removed. */
