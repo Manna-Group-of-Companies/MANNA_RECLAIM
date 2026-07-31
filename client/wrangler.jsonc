@@ -1,0 +1,31 @@
+// =============================================================================
+// MANNA RECLAIM - client, deployed to Cloudflare Workers.
+//
+// Workers Builds runs `npx wrangler deploy` from the root directory set in the
+// project settings (/client), and wrangler will not deploy anything it has not
+// been told about - so this file has to sit next to package.json, not at the
+// repo root. Vercel is configured separately in vercel.json; the two describe
+// the same build and neither reads the other.
+// =============================================================================
+{
+  "name": "manna-reclaim-client",
+  // Only meaningful for a Worker script; an assets-only deployment still wants
+  // it present, and pinning it means a future runtime change cannot alter how
+  // this deployment behaves.
+  "compatibility_date": "2025-06-01",
+
+  // No "main": there is no Worker script. Cloudflare serves dist/ straight from
+  // its edge cache, which is all a compiled React bundle needs.
+  "assets": {
+    "directory": "./dist",
+    /**
+     * The router is client-side, so /production and /back-office exist only
+     * once index.html has loaded and React has taken over. Without this, a hard
+     * refresh or a pasted link on any route but / asks the edge for a file that
+     * was never built and gets a 404 - the app appears to work until someone
+     * bookmarks a page. "single-page-application" serves index.html for those
+     * instead and lets the router read the URL.
+     */
+    "not_found_handling": "single-page-application"
+  }
+}
