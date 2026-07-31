@@ -10,6 +10,19 @@ const int = (v, fallback) =>
   v === undefined || String(v).trim() === '' || !Number.isFinite(Number(v)) ? fallback : Number(v);
 const list = (v, fallback = []) =>
   v ? String(v).split(',').map((s) => s.trim()).filter(Boolean) : fallback;
+const unique = (arr) => [...new Set(arr)];
+
+/**
+ * Browser origins this API answers to whatever the environment says.
+ *
+ * The dev server and the deployed client - the two that are ours and are not
+ * going to change without this file changing with them. Anything else (a
+ * custom domain, a preview deployment) belongs in CLIENT_URL, not here.
+ */
+const ALWAYS_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://manna-reclaim.odd-wind-70a0.workers.dev',
+];
 
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -17,14 +30,14 @@ export const env = {
   port: int(process.env.PORT, 5000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
   logLevel: process.env.LOG_LEVEL || 'dev',
-  // CLIENT_URL overrides this entirely; the fallback is what runs when nobody
-  // has set it. The deployed client is in the list because an unset CLIENT_URL
-  // otherwise refuses the only browser origin the plant actually uses, and the
-  // failure surfaces as a CORS error in devtools rather than as a boot error.
-  // Neither of these is a secret - both are public URLs of ours.
-  corsOrigins: list(process.env.CLIENT_URL, [
-    'http://localhost:5173',
-    'https://manna-reclaim.odd-wind-70a0.workers.dev',
+  // Added to whatever CLIENT_URL says rather than used only when it is unset.
+  // A CLIENT_URL that names some other deployment - an older host, one entry
+  // where two were needed - silently replaces the whole list, and the plant's
+  // own client is then refused with nothing in the server log to say so. These
+  // two are ours and are not secret, so they hold regardless.
+  corsOrigins: unique([
+    ...ALWAYS_ALLOWED_ORIGINS,
+    ...list(process.env.CLIENT_URL),
   ]),
   trustProxy: bool(process.env.TRUST_PROXY, false),
   jwt: {
