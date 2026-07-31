@@ -17,7 +17,15 @@ export const env = {
   port: int(process.env.PORT, 5000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
   logLevel: process.env.LOG_LEVEL || 'dev',
-  corsOrigins: list(process.env.CLIENT_URL, ['http://localhost:5173']),
+  // CLIENT_URL overrides this entirely; the fallback is what runs when nobody
+  // has set it. The deployed client is in the list because an unset CLIENT_URL
+  // otherwise refuses the only browser origin the plant actually uses, and the
+  // failure surfaces as a CORS error in devtools rather than as a boot error.
+  // Neither of these is a secret - both are public URLs of ours.
+  corsOrigins: list(process.env.CLIENT_URL, [
+    'http://localhost:5173',
+    'https://manna-reclaim.odd-wind-70a0.workers.dev',
+  ]),
   trustProxy: bool(process.env.TRUST_PROXY, false),
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-access-secret',
