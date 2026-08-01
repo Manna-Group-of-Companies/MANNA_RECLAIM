@@ -2,8 +2,10 @@ import { crud, op } from './base.service.js';
 import { machineService } from './machine.service.js';
 import { productService } from './product.service.js';
 import { dispatchService } from './dispatch.service.js';
+import { stockService } from './stock.service.js';
 import { absentSchema } from '../config/supabase.js';
-import { TABLES, SACK_KG } from '../config/constants.js';
+import { logger } from '../config/logger.js';
+import { TABLES, SACK_KG, COARSE_GRADE } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { currentShift, todayISO } from '../utils/shift.js';
 

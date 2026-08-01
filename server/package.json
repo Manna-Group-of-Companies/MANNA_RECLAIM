@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "lint": "eslint src scripts test --ext .js --max-warnings 0",
+    "test": "node --test test/",
     "db:report": "node scripts/supabase-report.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",
@@ -27,6 +29,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "eslint": "^8.57.1",
     "nodemon": "^3.1.14"
   },
   "engines": {
