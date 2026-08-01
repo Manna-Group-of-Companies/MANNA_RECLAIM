@@ -1,10 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import { crud } from './base.service.js';
-import { absentSchema } from '../config/supabase.js';
+import { absentSchema, rpc } from '../config/supabase.js';
 import { TABLES } from '../config/constants.js';
+import { ApiError } from '../utils/ApiError.js';
+import { displayLabel } from '../utils/stockPeriod.js';
 import { rateService } from './rate.service.js';
 
 const base = crud(TABLES.dispatches, { defaultSort: 'dispatched_at' });
 const loads = crud(TABLES.dispatchLoads, { defaultSort: 'created_at' });
+const lines = crud(TABLES.dispatchLines, { defaultSort: 'created_at' });
+const groups = crud(TABLES.stockGroups, { defaultSort: 'created_at' });
 
 /**
  * Supabase named these columns after the weighbridge slip - `customer_name`,
@@ -54,36 +59,141 @@ const priced = (raw, card, kg) => {
   };
 };
 
+/**
+ * What post_dispatch() raised, as something a screen can act on.
+ *
+ * The function marks the two refusals a manager can do anything about with a
+ * prefix and the offending group's label, because a form needs to put the
+ * message on one line rather than at the top of the page. Anything else is
+ * whatever Postgres said.
+ */
+const MARKERS = {
+  STOCK_SHORT: (label) =>
+    ApiError.conflict(`${label} does not have that many sacks left - reload the stock and try again`, [
+      { field: 'sacks', message: `Not enough stock in ${label}`, label },
+    ]),
+  STOCK_QC: (label) =>
+    ApiError.conflict(`${label} has not passed QC, so it cannot be dispatched`, [
+      { field: 'stock_group_id', message: `${label} has not passed QC`, label },
+    ]),
+  STOCK_PRICE: (label) =>
+    ApiError.unprocessable(`A unit price above zero is required for ${label}`, [
+      { field: 'unit_price', message: 'A price above zero is required', label },
+    ]),
+  STOCK_SACKS: (label) =>
+    ApiError.unprocessable(`A sack count above zero is required for ${label}`, [
+      { field: 'sacks', message: 'A count above zero is required', label },
+    ]),
+  STOCK_MISSING: (label) => ApiError.notFound(`Stock group ${label} is not on the list`),
+};
+
+function translatePostError(err) {
+  const message = err?.pgMessage ?? err?.message ?? '';
+  const match = /^(STOCK_[A-Z]+):(.*)$/s.exec(String(message).trim());
+  if (match && MARKERS[match[1]]) return MARKERS[match[1]](displayLabel(match[2].trim()));
+  return err instanceof ApiError ? err : ApiError.badRequest(String(message) || 'The dispatch was refused');
+}
+
+const num = (value) => Number(value ?? 0);
+const round2 = (n) => Math.round(n * 100) / 100;
+
 export const dispatchService = {
   ...base,
   loads,
+  lines,
 
+  /**
+   * Posts a whole dispatch - header and lines - in one transaction.
+   *
+   * Everything that decides whether it may go out happens inside
+   * post_dispatch(): each group is locked, its QC verdict checked, and its stock
+   * drawn down with a conditional UPDATE that only matches while the sacks are
+   * actually there. Two vehicles loading the same coarse pool therefore queue
+   * behind one another rather than both reading the same availability, and the
+   * one that loses gets a 409 naming the group instead of a silent oversell.
+   *
+   * Nothing is written from here in pieces, because a header that survived a
+   * failed line would be a delivery note for goods that never left.
+   */
+  async post(payload = {}, createdBy = null) {
+    const id = payload.id ?? randomUUID();
+    const body = {
+      p_id: id,
+      p_customer_id: payload.customer_id,
+      p_dispatch_date: payload.dispatch_date,
+      p_transport_provided: Boolean(payload.transport_provided),
+      p_transport_charge: num(payload.transport_charge),
+      p_remarks: payload.remarks ?? null,
+      p_created_by: createdBy,
+      p_lines: (payload.lines ?? []).map((line) => ({
+        stock_group_id: line.stock_group_id,
+        // The grade is copied off the group by the function when a line does not
+        // carry one, so a client cannot re-label what it is buying.
+        quality: line.quality ?? null,
+        sacks: line.sacks,
+        unit_price: line.unit_price,
+      })),
+    };
+
+    let result;
+    try {
+      result = await rpc('post_dispatch', body);
+    } catch (err) {
+      throw translatePostError(err);
+    }
+    return dispatchService.detailOf(id, result);
+  },
+
+  /** One posted dispatch with its lines and the groups they drew from. */
+  async detailOf(id, totals = null) {
+    const header = await base.findById(id);
+    const own = await lines.all({ dispatch_id: id }, { sort: 'created_at', ascending: true });
+    const groupIds = [...new Set(own.map((line) => line.stock_group_id).filter(Boolean))];
+    const stock = groupIds.length ? await groups.all({ id: groupIds }, { sort: 'created_at' }) : [];
+    const labelOf = new Map(stock.map((group) => [group.id, displayLabel(group.label)]));
+
+    const rows = own.map((line) => ({
+      id: line.id,
+      stock_group_id: line.stock_group_id,
+      label: labelOf.get(line.stock_group_id) ?? null,
+      quality: line.quality ?? null,
+      sacks: num(line.sacks),
+      unit_price: num(line.unit_price),
+      line_total: round2(num(line.line_total) || num(line.sacks) * num(line.unit_price)),
+    }));
+    const goods = round2(totals ? num(totals.goods_total) : rows.reduce((s, l) => s + l.line_total, 0));
+    const transport = round2(num(header.transport_charge));
+
+    return {
+      id: header.id,
+      customer_id: header.customer_id ?? null,
+      dispatch_date: header.dispatch_date ?? null,
+      transport_provided: Boolean(header.transport_provided),
+      transport_charge: transport,
+      remarks: header.remarks ?? null,
+      created_by: header.created_by ?? null,
+      created_at: header.created_at ?? null,
+      sacks: rows.reduce((sum, line) => sum + line.sacks, 0),
+      goods_total: goods,
+      total: round2(goods + transport),
+      lines: rows,
+    };
+  },
+
+  /**
+   * The legacy weighbridge rows, priced off the rate card.
+   *
+   * These are what the tablets wrote before a dispatch had lines: a customer
+   * name, a grade and a weight, with no stock behind them. Nothing writes one
+   * any more - the only way in is post() above - but the costing report still
+   * reads the plant's history through here, so the pricing stays.
+   */
   async list(query = {}, filters = {}) {
     const [result, card] = await Promise.all([
       base.list({ order: 'desc', ...query }, toRow(filters)),
       rateService.card(),
     ]);
     return { ...result, rows: result.rows.map((row) => priced(row, card)) };
-  },
-
-  async findById(id) {
-    return fromRow(await base.findById(id));
-  },
-
-  create: (payload) => base.create(toRow(payload)).then(fromRow),
-
-  update: (id, patch) => base.update(id, toRow(patch)).then(fromRow),
-
-  /** Dispatch header plus its weighed loads and the priced total. */
-  async detail(id) {
-    const [dispatch, card] = await Promise.all([base.findById(id), rateService.card()]);
-    const { rows } = await loads.list({ limit: 200, order: 'asc' }, { dispatch_id: id });
-    // A dispatch with weighed loads is priced off them; one entered straight
-    // from the shop floor carries its own weight instead.
-    const kg = rows.length
-      ? rows.reduce((sum, l) => sum + Number(l.net_kg || 0), 0)
-      : Number(dispatch.weight_kg || 0);
-    return { ...priced(dispatch, card, kg), loads: rows };
   },
 
   /**
@@ -106,20 +216,6 @@ export const dispatchService = {
     }, {});
   },
 
-  async addLoad(dispatchId, payload) {
-    const net = Number(payload.grossKg || 0) - Number(payload.tareKg || 0);
-    return loads.create({
-      dispatch_id: dispatchId,
-      vehicle_no: payload.vehicle ?? payload.vehicleNo ?? null,
-      driver: payload.driver ?? null,
-      gross_kg: payload.grossKg ?? null,
-      tare_kg: payload.tareKg ?? null,
-      net_kg: payload.netKg ?? (net > 0 ? net : null),
-      bags: payload.bags ?? null,
-    });
-  },
-
-  removeLoad: (loadId) => loads.remove(loadId),
 };
 
 export default dispatchService;

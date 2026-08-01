@@ -11,6 +11,13 @@ import { z } from 'zod';
  */
 const positive = z.coerce.number().positive().optional().nullable();
 
+/**
+ * A cost input may legitimately be zero - a grade that burns no firewood, a
+ * product with no machine time against it - so these take zero and refuse only
+ * a negative, which is never a cost.
+ */
+const nonNegative = z.coerce.number().min(0).optional().nullable();
+
 export const createProductSchema = z.object({
   id: z.string().max(40).optional(),
   name: z.string().min(1).max(80),
@@ -21,6 +28,21 @@ export const createProductSchema = z.object({
   note: z.string().max(300).optional().nullable(),
   active: z.boolean().optional(),
   sortOrder: z.coerce.number().int().min(0).optional(),
+
+  /**
+   * The other half of a product record: what it is ordered under, what it ships
+   * as, which machine it comes off, and the cost inputs behind a unit of it.
+   * `code` is unique across the list, which is what an order is matched on.
+   */
+  code: z.string().trim().max(40).optional().nullable(),
+  quality: z.string().trim().max(40).optional().nullable(),
+  packSizeKg: positive,
+  machineId: z.string().trim().max(40).optional().nullable(),
+  rawMaterialCost: nonNegative,
+  firewoodCost: nonNegative,
+  powerKwh: nonNegative,
+  labourCost: nonNegative,
+  machineHours: nonNegative,
 });
 
 export const updateProductSchema = createProductSchema

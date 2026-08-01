@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MACHINE_KINDS } from '../config/constants.js';
+import { MACHINE_KINDS, MACHINE_TYPES } from '../config/constants.js';
 
 /**
  * A machine on the plant's list.
@@ -32,6 +32,19 @@ export const createMachineSchema = z.object({
   def_tyre: text(40),
   enabled: z.boolean().optional(),
   sort_order: z.coerce.number().int().min(0).optional(),
+
+  /**
+   * The finer name the back office lists this under, and - on a press - the
+   * platen it moulds on. Every one of these is null on a machine that is not a
+   * press, which is most of them, so none is required: a grinder has no platen
+   * and stating a zero for one would read as a measurement rather than as an
+   * absence.
+   */
+  type: z.enum(MACHINE_TYPES).optional().nullable(),
+  platen_length_mm: z.coerce.number().positive().optional().nullable(),
+  platen_width_mm: z.coerce.number().positive().optional().nullable(),
+  platen_count: z.coerce.number().int().positive().max(50).optional().nullable(),
+  capacity_kg: z.coerce.number().positive().optional().nullable(),
 });
 
 export const updateMachineSchema = createMachineSchema

@@ -1,35 +1,20 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { ok, created, paginated } from '../utils/ApiResponse.js';
+import { ok, created } from '../utils/ApiResponse.js';
 import { dispatchService } from '../services/dispatch.service.js';
 
-export const list = asyncHandler(async (req, res) =>
-  paginated(res, await dispatchService.list(req.query, {
-    customer: req.query.customer,
-    grade: req.query.grade,
-    status: req.query.status,
-  })),
+/**
+ * Posting a dispatch is one call and one transaction - see post_dispatch() in
+ * supabase/migrations/0001_stock_and_dispatch.sql. The stock draw-down, the QC
+ * check and both writes happen inside it, so there is nothing to sequence here
+ * and nothing that can be left half-posted.
+ *
+ * The service turns the function's refusals into a 409 naming the group that
+ * was short or on hold, which is what the form puts against the offending line.
+ */
+export const create = asyncHandler(async (req, res) =>
+  created(res, await dispatchService.post(req.body, req.user?.id ?? null), 'Dispatch posted'),
 );
 
 export const getOne = asyncHandler(async (req, res) =>
-  ok(res, await dispatchService.detail(req.params.id)),
-);
-
-export const create = asyncHandler(async (req, res) =>
-  created(res, await dispatchService.create({ ...req.body, created_by: req.user?.name }), 'Dispatch created'),
-);
-
-export const update = asyncHandler(async (req, res) =>
-  ok(res, await dispatchService.update(req.params.id, req.body), 'Dispatch updated'),
-);
-
-export const addLoad = asyncHandler(async (req, res) =>
-  created(res, await dispatchService.addLoad(req.params.id, req.body), 'Load added'),
-);
-
-export const removeLoad = asyncHandler(async (req, res) =>
-  ok(res, await dispatchService.removeLoad(req.params.loadId), 'Load removed'),
-);
-
-export const remove = asyncHandler(async (req, res) =>
-  ok(res, await dispatchService.remove(req.params.id), 'Dispatch removed'),
+  ok(res, await dispatchService.detailOf(req.params.id)),
 );

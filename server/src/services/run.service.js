@@ -778,13 +778,45 @@ export const runService = {
     if (left < 0) {
       throw ApiError.badRequest('That is more than the ' + total + ' kg available on this run');
     }
-    return decorate(
-      await base.update(id, {
-        packed_sacks: Number(sacks),
-        leftout_in: carriedIn,
-        leftout_out: left,
-      }),
-    );
+
+    const before = Number(run.packed_sacks || 0);
+    const saved = await base.update(id, {
+      packed_sacks: Number(sacks),
+      leftout_in: carriedIn,
+      leftout_out: left,
+    });
+
+    /*
+     * Bagged sacks are stock from here on, so the yard's ledger is filed in the
+     * same call that records the packing rather than being reconciled later.
+     *
+     * The *change* goes across, not the total: this endpoint is also where a
+     * wrong figure gets corrected, and sending the count again would file the
+     * same sacks twice. Coarse output carries no batch number - the line runs
+     * for a shift, not for a batch - so its sacks pool by the ten-day period
+     * they were packed in, and that label is worked out from the server's own
+     * date. It is never taken from the request: a client that could name its
+     * own pool could file today's sacks into last month's.
+     *
+     * A failure here must not lose the packing. The run is already saved, and
+     * the group is a derived ledger that packing again will put right, so it is
+     * logged rather than raised at a crew standing at the bagging line.
+     */
+    const delta = Number(sacks) - before;
+    if (delta) {
+      try {
+        await stockService.recordPacking({
+          quality: run.quality ?? (run.line === 'coarse' ? COARSE_GRADE : null),
+          batchNo: run.batch_no,
+          delta,
+          packedOn: todayISO(),
+        });
+      } catch (err) {
+        logger.warn(`Packing run ${id}: the stock group was not updated - ${err.message}`);
+      }
+    }
+
+    return decorate(saved);
   },
 
   pause: (id, paused = true) =>

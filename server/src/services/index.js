@@ -5,6 +5,8 @@ export { productService } from './product.service.js';
 export { batchService } from './batch.service.js';
 export { runService } from './run.service.js';
 export { dispatchService } from './dispatch.service.js';
+export { stockService } from './stock.service.js';
+export { customerService } from './customer.service.js';
 export { qualityService } from './quality.service.js';
 export { maintenanceService } from './maintenance.service.js';
 export { rateService } from './rate.service.js';

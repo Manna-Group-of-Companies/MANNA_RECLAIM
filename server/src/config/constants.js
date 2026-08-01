@@ -41,7 +41,29 @@ export const BATCH_QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium'];
 
 export const DISPATCH_GRADES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Coarse', 'Sillsheet'];
 
+/**
+ * Where a stock group stands with the lab. Only `pass` may be dispatched - the
+ * check is in post_dispatch() rather than only in the screen, so a group on
+ * hold cannot leave the yard however the request was made.
+ */
+export const QC_STATUSES = ['pass', 'fail', 'pending'];
+
+/** The coarse line is not batch-identified, so its sacks are pooled by period. */
+export const COARSE_GRADE = 'Coarse';
+
 export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'];
+
+/**
+ * The finer name a machine is listed under in the back office.
+ *
+ * `kind` is what the run rules switch on - does it weigh, does it need a
+ * quality, does it log bearings - and a cracker and a grinder answer all three
+ * the same way, so both are `kind='grind'`. To anyone standing in front of them
+ * they are two different machines, and this is the column that says so.
+ */
+export const MACHINE_TYPES = [
+  'grinder', 'cracker', 'autoclave', 'prerefiner', 'refiner', 'press', 'other',
+];
 
 /**
  * The moulding presses. They mould finished goods out of reclaim compound rather
@@ -83,6 +105,15 @@ export const TABLES = {
   bearingLogs: 'bearing_logs',
   customers: 'customers',
   rates: 'rates',
+
+  /**
+   * What packing files sacks into and a dispatch draws them out of: one group
+   * per batch and grade on the special line, one per ten-day period on the
+   * coarse line, which is not batch-identified. See utils/stockPeriod.js.
+   */
+  stockGroups: 'stock_groups',
+  /** The priced rows of a dispatch: which group, how many sacks, at what price. */
+  dispatchLines: 'dispatch_lines',
 
   // The prototype kept batches, leftouts and the seq counter inside one
   // "plant" blob rather than as their own table, so batch reads go through it -

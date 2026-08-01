@@ -59,6 +59,16 @@ const FIELD_COLUMNS = {
   note: 'note',
   active: 'active',
   sortOrder: 'sort_order',
+  // What it is ordered as, ships as, comes off, and costs to make.
+  code: 'code',
+  quality: 'quality',
+  packSizeKg: 'pack_size_kg',
+  machineId: 'machine_id',
+  rawMaterialCost: 'raw_material_cost',
+  firewoodCost: 'firewood_cost',
+  powerKwh: 'power_kwh',
+  labourCost: 'labour_cost',
+  machineHours: 'machine_hours',
 };
 
 function toColumns(payload = {}) {

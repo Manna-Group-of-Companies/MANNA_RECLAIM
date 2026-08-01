@@ -294,6 +294,56 @@ export async function request(
 }
 
 /**
+ * Calls a Postgres function and answers with whatever it returned.
+ *
+ * The one thing PostgREST cannot do over tables is a transaction: each request
+ * is its own, so a header written by one call and lines written by the next can
+ * be left half-posted by anything that goes wrong in between. A function is one
+ * request and therefore one transaction, which is why posting a dispatch is a
+ * function rather than four writes from here - see post_dispatch() in
+ * supabase/migrations/0001_stock_and_dispatch.sql.
+ *
+ * Errors are deliberately left alone rather than mapped: a function raises
+ * messages the caller is going to read (which group was short, which failed QC)
+ * and toApiError's generic 400 would throw the label away. Callers catch and
+ * translate their own.
+ */
+export async function rpc(fn, args = {}) {
+  if (!isDbReady()) throw ApiError.unavailable('Supabase is not configured');
+
+  const url = `${env.supabase.url}/rest/v1/rpc/${fn}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(args),
+    });
+  } catch (err) {
+    throw new ApiError(503, `Supabase unreachable: ${err.message}`);
+  }
+
+  const text = await res.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { message: text.slice(0, 300) };
+  }
+
+  if (!res.ok) {
+    const error = new ApiError(res.status < 500 ? 400 : 502, payload?.message ?? `RPC ${fn} failed`);
+    // What the function raised, kept intact so the caller can read the marker
+    // and the label out of it.
+    error.pgCode = payload?.code ?? null;
+    error.pgMessage = payload?.message ?? null;
+    error.pgDetails = payload?.details ?? payload?.hint ?? null;
+    throw error;
+  }
+  return payload;
+}
+
+/**
  * Every matching row, however many there are.
  *
  * PostgREST caps a single response at its own max-rows - 1000 on a default
@@ -409,4 +459,4 @@ export async function verifySchema(registry) {
   return problems;
 }
 
-export default { request, op, isDbReady, dbInfo, verifySchema, absentSchema, uploadObject };
+export default { request, rpc, op, isDbReady, dbInfo, verifySchema, absentSchema, uploadObject };
