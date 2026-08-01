@@ -239,6 +239,17 @@ alter table public.dispatch_loads add column if not exists bags        integer;
 create index if not exists dispatch_loads_dispatch_id_idx
   on public.dispatch_loads (dispatch_id);
 
+-- Where the sacks on a load came from: the packed run they were drawn off and
+-- the batch they were made on, plus the line's own note. `run_id` is what lets
+-- the packed stock still in the yard be worked out - packed sacks less the ones
+-- already dispatched against that run - so a load entered by hand simply leaves
+-- it null and draws nothing down.
+alter table public.dispatches add column if not exists run_id   text;
+alter table public.dispatches add column if not exists batch_no text;
+alter table public.dispatches add column if not exists remarks  text;
+
+create index if not exists dispatches_run_id_idx on public.dispatches (run_id);
+
 
 -- -----------------------------------------------------------------------------
 -- 4. Constraints the API's upserts rely on

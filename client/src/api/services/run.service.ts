@@ -122,6 +122,8 @@ export const runService = {
   listWeighed: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.weighed, params),
   /** Weighed runs that still have full sacks to bag. */
   listPendingPack: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.pendingPack, params),
+  /** Packed sacks not yet dispatched - the Dispatch tab's stock list. */
+  listPacked: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.packed, params),
   byShift: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.shift, params),
 
   async start(payload: StartRunPayload): Promise<Run> {

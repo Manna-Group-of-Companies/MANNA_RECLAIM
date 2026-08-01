@@ -115,6 +115,14 @@ alter table public.dispatch_loads add column if not exists tare_kg     numeric;
 alter table public.dispatch_loads add column if not exists net_kg      numeric;
 alter table public.dispatch_loads add column if not exists bags        integer;
 
+-- Where the sacks on a dispatch came from: the packed run they were drawn off
+-- and the batch they were made on, plus the line's note. Without `run_id` the
+-- Dispatch tab cannot tell which packed sacks have already gone out, so the
+-- packed stock it offers never draws down.
+alter table public.dispatches add column if not exists run_id   text;
+alter table public.dispatches add column if not exists batch_no text;
+alter table public.dispatches add column if not exists remarks  text;
+
 -- A quality test pinned to the run and machine it was drawn from.
 alter table public.quality_tests add column if not exists run_id     text;
 alter table public.quality_tests add column if not exists machine_id text;

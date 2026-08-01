@@ -220,6 +220,15 @@ export interface Run {
   hour_end?: number | null;
   firewood_kg?: number | null;
   packed_sacks?: number | null;
+  /**
+   * Packed stock, as /runs/packed reports it: how many of the sacks bagged off
+   * this run have already gone out, and what is still in the yard. Derived per
+   * read from the dispatches tied back to the run, so they are only ever set on
+   * that list.
+   */
+  dispatched_sacks?: number | null;
+  avail_sacks?: number | null;
+  avail_kg?: number | null;
   /** Sub-sack remainder carried in from the previous batch of this grade. */
   leftout_in?: number | null;
   /** What this run leaves for the next batch of the same grade. */
@@ -312,6 +321,14 @@ export interface Dispatch {
   own_vehicle?: boolean | null;
   driver?: string | null;
   total_kg?: number | null;
+  /**
+   * Where the sacks came from: the packed run they were drawn off and the batch
+   * they were made on. Null on a load typed in by hand, which draws no packed
+   * stock down.
+   */
+  run_id?: string | null;
+  batch_no?: string | null;
+  sacks?: number | null;
   status: 'draft' | 'dispatched' | 'invoiced';
   remarks?: string | null;
   loads?: DispatchLoad[];

@@ -106,6 +106,10 @@ export const registry = {
     // Added by supabase/schema.sql - which vehicle left with the load, and
     // whether it was one of ours or the customer's.
     'vehicle_no', 'own_vehicle',
+    // Which packed run the sacks came off, and the batch they were made on.
+    // `run_id` is what ties a load back to the stock it drew down, so the
+    // packed sacks still in the yard can be worked out.
+    'run_id', 'batch_no', 'remarks',
   ]),
 
   [TABLES.dispatchLoads]: table('id', [

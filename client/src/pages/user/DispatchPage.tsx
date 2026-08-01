@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { createDispatch, fetchDispatches } from '@/features/dispatch/dispatchSlice';
+import { fetchPacked } from '@/features/machines/runsSlice';
 import { fetchRateCard } from '@/features/rates/ratesSlice';
 import {
   BatchRef,
@@ -11,6 +12,7 @@ import {
   PageLoader,
   Pick,
   PickGrid,
+  QualityChip,
   Readout,
   SelectField,
   SheetLabel,
@@ -22,19 +24,32 @@ import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { kg, rupees } from '@/utils/format';
 import { dayMonth, todayISO } from '@/utils/date';
-import type { DispatchGrade, Rate } from '@/types/models';
+import type { DispatchGrade, Rate, Run } from '@/types/models';
 
 interface Item {
   grade: DispatchGrade;
   batchNo: string;
   sacks: string;
   weight: string;
+  /**
+   * The packed run these sacks were taken off, when the line was filled from
+   * stock rather than typed. It is what draws that stock down, so an item
+   * carrying one is counted in sacks and never in a loose weight.
+   */
+  runId?: string;
 }
 
 const blankItem: Item = { grade: 'Special', batchNo: '', sacks: '', weight: '' };
 
 const itemKg = (item: Item) =>
   item.weight.trim() ? Number(item.weight) || 0 : (Number(item.sacks) || 0) * SACK_KG;
+
+/** What a packed run is bagged as - the coarse line carries no quality. */
+const gradeOf = (run: Run): DispatchGrade =>
+  (run.quality as DispatchGrade | null) ?? 'Coarse';
+
+/** How a stock chip names itself: the batch, or the shift for a coarse run. */
+const stockRef = (run: Run) => run.batch_no ?? dayMonth(run.shift_date);
 
 /** Customer's negotiated rate if there is one, otherwise the list price. */
 function rateFor(rates: Rate[], priceList: Record<string, number>, customer: string, grade: string) {
@@ -54,6 +69,7 @@ export function DispatchPage() {
   const notify = useToast();
   const { items: loads, loading } = useAppSelector((s) => s.dispatch);
   const { rates, customers, priceList } = useAppSelector((s) => s.rates);
+  const stock = useAppSelector((s) => s.runs.packed);
   const held = useAppSelector((s) => s.quality.held);
 
   const [building, setBuilding] = useState(false);
@@ -69,6 +85,7 @@ export function DispatchPage() {
   useEffect(() => {
     void dispatch(fetchDispatches(undefined));
     void dispatch(fetchRateCard());
+    void dispatch(fetchPacked());
   }, [dispatch]);
 
   const customerList = customers.length ? customers : CUSTOMERS;
@@ -103,12 +120,62 @@ export function DispatchPage() {
     return { kg: Math.round(weight * 100) / 100, amount: Math.round(amount * 100) / 100, missing };
   }, [items, customer, rates, priceList]);
 
+  /** Sacks of each packed run this load has already claimed. */
+  const claimed = useMemo(() => {
+    const taken: Record<string, number> = {};
+    for (const item of items) {
+      if (item.runId) taken[item.runId] = (taken[item.runId] ?? 0) + (Number(item.sacks) || 0);
+    }
+    return taken;
+  }, [items]);
+
+  /** What is left of a run's packed sacks once this load is counted against it. */
+  const availOf = (run: Run) => (run.avail_sacks ?? 0) - (claimed[run.id] ?? 0);
+
+  const available = stock.filter((run) => availOf(run) > 0);
+
+  /** What is bagged and waiting altogether - the yard's own running total. */
+  const readySacks = available.reduce((sum, run) => sum + availOf(run), 0);
+
+  /**
+   * Fills the item form from packed stock, all of what is left of it. The sacks
+   * stay editable, so part of a batch can go out and the rest stay in the yard.
+   */
+  const takeFromStock = (run: Run) => {
+    setDraft({
+      grade: gradeOf(run),
+      batchNo: run.batch_no ?? '',
+      sacks: String(availOf(run)),
+      weight: '',
+      runId: run.id,
+    });
+  };
+
+  /** The ready list's own button: open a load with that stock already on it. */
+  const dispatchStock = (run: Run) => {
+    takeFromStock(run);
+    setBuilding(true);
+  };
+
   const addItem = () => {
-    if (!itemKg(draft)) {
+    const fromStock = stock.find((run) => run.id === draft.runId);
+    if (fromStock) {
+      const sacks = Number(draft.sacks) || 0;
+      // Stock goes out in sacks - that is what draws it down - so a loose
+      // weight is not a way of taking it off the yard.
+      if (sacks <= 0) {
+        notify('Enter the sacks going out of this stock', 'warn');
+        return;
+      }
+      if (sacks > availOf(fromStock)) {
+        notify(`Only ${availOf(fromStock)} sacks left of ${stockRef(fromStock)}`, 'warn');
+        return;
+      }
+    } else if (!itemKg(draft)) {
       notify('Enter sacks or a weight', 'warn');
       return;
     }
-    setItems([...items, draft]);
+    setItems([...items, { ...draft, weight: fromStock ? '' : draft.weight }]);
     setDraft({ ...blankItem, grade: draft.grade });
   };
 
@@ -163,6 +230,11 @@ export function DispatchPage() {
             own_vehicle: ownVehicle,
             driver: driver.trim() || null,
             total_kg: itemKg(item),
+            sacks: Number(item.sacks) || null,
+            // The packed run the sacks came off, so the yard's stock is drawn
+            // down by what left it; null on a line that was typed in by hand.
+            run_id: item.runId ?? null,
+            batch_no: item.batchNo.trim() || null,
             status: 'dispatched',
             remarks: item.batchNo ? `Batch ${item.batchNo}` : null,
           }),
@@ -176,6 +248,8 @@ export function DispatchPage() {
       return;
     }
     notify(`${customer} · ${totals.kg} kg dispatched`, 'ok');
+    // What went out is no longer in the yard - read the stock back as it stands.
+    void dispatch(fetchPacked());
     reset();
   };
 
@@ -185,7 +259,12 @@ export function DispatchPage() {
 
   return (
     <>
-      <ViewHead title="Dispatch" meta={`${loads.length} load${loads.length === 1 ? '' : 's'}`} />
+      <ViewHead
+        title="Dispatch"
+        meta={`${loads.length} load${loads.length === 1 ? '' : 's'}${
+          readySacks ? ` · ${readySacks} sacks ready` : ''
+        }`}
+      />
 
       <Button variant="primary" size="lg" className="mb-3.5" onClick={() => setBuilding(true)}>
         + New dispatch
@@ -197,6 +276,48 @@ export function DispatchPage() {
           <div className="bhint">{held.map((b) => `Batch ${b}`).join(' · ')}</div>
           <div className="hint">You can still dispatch these — check with QC and decide.</div>
         </div>
+      )}
+
+      {/*
+        What packing has bagged and nothing has carried away yet. The Packing
+        tab hands the sacks over here the moment they are counted, so the yard
+        reads what it can load off this tab instead of off a tally sheet - and
+        each row opens a dispatch with that stock already on it.
+      */}
+      {available.length > 0 && (
+        <>
+          <div className="wsec">
+            <div>
+              <b>Packed &amp; ready</b>{' '}
+              <small>
+                — {readySacks} sack{readySacks === 1 ? '' : 's'} · {kg(readySacks * SACK_KG)} in the
+                yard
+              </small>
+            </div>
+          </div>
+          <div className="stack mb-3.5">
+            {available.map((run) => (
+              <div key={run.id} className="wcard">
+                <div className="info">
+                  <div className="row1">
+                    <BatchRef>{stockRef(run)}</BatchRef>
+                    <QualityChip quality={gradeOf(run)} />
+                    {run.formulation && <FormChip>{run.formulation}</FormChip>}
+                  </div>
+                  <small>
+                    {availOf(run)} sacks · {availOf(run) * SACK_KG} kg ready
+                    {run.dispatched_sacks
+                      ? ` · ${run.dispatched_sacks} of ${run.packed_sacks} already gone`
+                      : ''}
+                  </small>
+                </div>
+                <Button variant="primary" onClick={() => dispatchStock(run)}>
+                  Dispatch ▸
+                </Button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {!loads.length ? (
@@ -224,7 +345,9 @@ export function DispatchPage() {
                 {load.own_vehicle != null && (
                   <span className="muted"> ({load.own_vehicle ? 'our vehicle' : 'hired'})</span>
                 )}{' '}
-                · {kg(load.total_kg)} · {dayMonth(load.dispatch_date)}
+                {load.batch_no ? `· Batch ${load.batch_no} ` : ''}
+                {load.sacks ? `· ${load.sacks} sacks ` : ''}· {kg(load.total_kg)} ·{' '}
+                {dayMonth(load.dispatch_date)}
               </div>
             </div>
           ))}
@@ -295,11 +418,42 @@ export function DispatchPage() {
           <div className="hint">No items yet. Add each grade going on this vehicle.</div>
         )}
 
+        <SheetLabel>Packed stock</SheetLabel>
+        {available.length ? (
+          <>
+            <PickGrid>
+              {available.map((run) => (
+                <Pick
+                  key={run.id}
+                  title={`${gradeOf(run)} · ${stockRef(run)}`}
+                  sub={`${availOf(run)} sacks · ${availOf(run) * SACK_KG} kg`}
+                  selected={draft.runId === run.id}
+                  onClick={() => takeFromStock(run)}
+                />
+              ))}
+            </PickGrid>
+            <div className="hint">
+              Tap what is going out - it fills the line below. Send part of it by changing the
+              sacks; the rest stays in the yard.
+            </div>
+          </>
+        ) : (
+          <div className="hint">
+            {stock.length
+              ? 'All the packed sacks are on this load already.'
+              : 'Nothing bagged and waiting. Pack a weighed batch and it turns up here.'}
+          </div>
+        )}
+
         <div className="field-inline mt-2 items-stretch">
           <SelectField
             label="Grade"
             value={draft.grade}
-            onChange={(e) => setDraft({ ...draft, grade: e.target.value as DispatchGrade })}
+            onChange={(e) =>
+              // Off the picked stock's own grade, so the line is no longer that
+              // stock's - it saves as a hand-typed one and draws nothing down.
+              setDraft({ ...draft, grade: e.target.value as DispatchGrade, runId: undefined })
+            }
             fieldClassName="!mb-0"
           >
             {DISPATCH_GRADES.map((g) => (
@@ -313,7 +467,7 @@ export function DispatchPage() {
             note="opt."
             placeholder="—"
             value={draft.batchNo}
-            onChange={(e) => setDraft({ ...draft, batchNo: e.target.value })}
+            onChange={(e) => setDraft({ ...draft, batchNo: e.target.value, runId: undefined })}
             fieldClassName="!mb-0"
           />
         </div>
@@ -332,7 +486,9 @@ export function DispatchPage() {
             inputMode="decimal"
             suffix="kg"
             placeholder="kg"
-            value={draft.weight}
+            // Stock leaves the yard in sacks - that is what is counted off it.
+            disabled={Boolean(draft.runId)}
+            value={draft.runId ? '' : draft.weight}
             onChange={(e) => setDraft({ ...draft, weight: e.target.value.replace(/[^\d.]/g, '') })}
             fieldClassName="!mb-0"
           />
@@ -340,7 +496,12 @@ export function DispatchPage() {
             + Add
           </Button>
         </div>
-        <div className="hint">1 sack = {SACK_KG} kg. Enter sacks or a direct weight.</div>
+        <div className="hint">
+          1 sack = {SACK_KG} kg.{' '}
+          {draft.runId
+            ? 'Taken off packed stock, so it goes out in sacks.'
+            : 'Enter sacks or a direct weight.'}
+        </div>
 
         <SheetLabel>Customer</SheetLabel>
         <PickGrid>

@@ -11,6 +11,14 @@ export const createDispatchSchema = z.object({
   own_vehicle: z.boolean().optional().nullable(),
   driver: z.string().optional().nullable(),
   total_kg: z.coerce.number().min(0).optional().nullable(),
+  /**
+   * Where the sacks came from: the packed run they were drawn off and the batch
+   * they were made on. Both are left out by a load typed in by hand - the run is
+   * what draws the packed stock down, so a load without one draws down nothing.
+   */
+  run_id: z.string().optional().nullable(),
+  batch_no: z.string().max(60).optional().nullable(),
+  sacks: z.coerce.number().int().min(0).optional().nullable(),
   status: z.enum(['draft', 'dispatched', 'invoiced']).default('draft'),
   remarks: z.string().max(500).optional().nullable(),
 });

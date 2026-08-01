@@ -1,4 +1,5 @@
 import { crud } from './base.service.js';
+import { absentSchema } from '../config/supabase.js';
 import { TABLES } from '../config/constants.js';
 import { rateService } from './rate.service.js';
 
@@ -83,6 +84,26 @@ export const dispatchService = {
       ? rows.reduce((sum, l) => sum + Number(l.net_kg || 0), 0)
       : Number(dispatch.weight_kg || 0);
     return { ...priced(dispatch, card, kg), loads: rows };
+  },
+
+  /**
+   * How many sacks have already gone out against each of the given packed runs,
+   * keyed by run id - what the Dispatch tab's packed stock is drawn down by.
+   *
+   * A project that has not run supabase/schema.sql has no `run_id` to tie a load
+   * back with, so nothing can be said to have left: it answers empty rather than
+   * failing the read, and every packed sack reads as still in the yard.
+   */
+  async sacksByRun(runIds = []) {
+    const ids = [...new Set(runIds.filter(Boolean))];
+    if (!ids.length) return {};
+    if ((absentSchema()[TABLES.dispatches] ?? []).includes('run_id')) return {};
+
+    const rows = await base.all({ run_id: ids }, { sort: 'dispatched_at' });
+    return rows.reduce((totals, row) => {
+      totals[row.run_id] = (totals[row.run_id] ?? 0) + Number(row.sacks || 0);
+      return totals;
+    }, {});
   },
 
   async addLoad(dispatchId, payload) {

@@ -1,6 +1,7 @@
 import { crud, op } from './base.service.js';
 import { machineService } from './machine.service.js';
 import { productService } from './product.service.js';
+import { dispatchService } from './dispatch.service.js';
 import { absentSchema } from '../config/supabase.js';
 import { TABLES, SACK_KG } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -428,6 +429,50 @@ export const runService = {
         return row.packed_sacks == null || total - packed >= SACK_KG;
       });
     return { ...result, rows, total: rows.length };
+  },
+
+  /**
+   * The packed sacks still in the yard - what the Dispatch tab loads a vehicle
+   * from, rather than having the grade, the batch and the count typed again.
+   *
+   * The same graded output the Packing tab bags, read from the other end: a run
+   * enters this list the moment it has sacks against it, and leaves it once as
+   * many have been dispatched as were ever packed. Packing is not waited on to
+   * finish, because part of a batch can go out while the rest is still being
+   * bagged.
+   *
+   * What has already left is counted off the dispatches tied to the run, so a
+   * load saved against it draws its stock down and the same sacks cannot go out
+   * twice. A load typed in by hand carries no run, and draws nothing down.
+   */
+  async listPacked(query = {}) {
+    const result = await base.list(
+      { order: 'desc', sort: 'ended_at', limit: 200, ...query },
+      {
+        weight_kg: op.gt(0),
+        packed_sacks: op.gt(0),
+        or: ['quality.not.is.null', 'line.eq.coarse'],
+      },
+    );
+    // As in listPendingPack: Postgres cannot tell a blank quality from a grade,
+    // so a run without one only belongs here on the coarse line.
+    const rows = result.rows.map(decorate).filter((row) => row.quality || row.line === 'coarse');
+    const gone = await dispatchService.sacksByRun(rows.map((row) => row.id));
+
+    const stock = rows
+      .map((row) => {
+        const dispatched = gone[row.id] ?? 0;
+        const avail = Number(row.packed_sacks || 0) - dispatched;
+        return {
+          ...row,
+          dispatched_sacks: dispatched,
+          avail_sacks: avail,
+          avail_kg: round2(avail * SACK_KG),
+        };
+      })
+      .filter((row) => row.avail_sacks > 0);
+
+    return { ...result, rows: stock, total: stock.length };
   },
 
   /**

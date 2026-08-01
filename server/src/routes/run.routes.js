@@ -23,6 +23,7 @@ router.get('/active', runs.active);
 router.get('/pending-weigh', runs.pendingWeigh);
 router.get('/weighed', runs.weighed);
 router.get('/pending-pack', runs.pendingPack);
+router.get('/packed', runs.packed);
 router.get('/shift', runs.byShift);
 router.get('/:id', validate({ params: idParam }), runs.getOne);
 router.post('/start', validate({ body: startRunSchema }), runs.start);

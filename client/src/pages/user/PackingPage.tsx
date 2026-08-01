@@ -65,8 +65,12 @@ export function PackingPage() {
       packRun({ id: target.id, sacks: count, leftoutIn: target.leftout_in ?? 0, leftoutOut: leftOut }),
     );
     const okay = packRun.fulfilled.match(result);
+    // Bagged sacks are stock from here on: they show up on the Dispatch tab as
+    // ready to load, so the toast says where they went.
     notify(
-      okay ? `${count} sacks packed · ${leftOut} kg carried forward` : 'Could not record the packing',
+      okay
+        ? `${count} sacks packed → Dispatch · ${leftOut} kg carried forward`
+        : 'Could not record the packing',
       okay ? 'ok' : 'err',
     );
     if (okay) setTarget(null);

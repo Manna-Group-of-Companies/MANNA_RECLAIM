@@ -21,6 +21,8 @@ interface RunsState {
   weighedAll: boolean;
   /** Weighed runs that still have full sacks to bag. */
   pendingPack: Run[];
+  /** Sacks already bagged and not yet dispatched - the Dispatch tab's stock. */
+  packed: Run[];
   shift: Run[];
   /** Which shift `shift` actually holds - the server falls back to the
    *  latest one on record when the requested day has no runs. */
@@ -39,6 +41,7 @@ const initialState: RunsState = {
   weighedTotal: 0,
   weighedAll: false,
   pendingPack: [],
+  packed: [],
   shift: [],
   shiftDate: null,
   shiftName: null,
@@ -48,6 +51,19 @@ const initialState: RunsState = {
 };
 
 const fail = (err: unknown) => toRequestError(err).message;
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * A freshly packed run as the stock list holds it. The pack answer carries the
+ * sacks but not what has left against them, so whatever the list already knew
+ * about this run stands until /runs/packed is read again.
+ */
+const asStock = (run: Run, known?: Run): Run => {
+  const gone = known?.dispatched_sacks ?? 0;
+  const avail = (run.packed_sacks ?? 0) - gone;
+  return { ...run, dispatched_sacks: gone, avail_sacks: avail, avail_kg: round2(avail * SACK_KG) };
+};
 
 /** Same rule as the server: under one sack left means the run is done packing. */
 const stillPacking = (run: Run) => {
@@ -96,6 +112,15 @@ export const fetchWeighed = createAsyncThunk(
 export const fetchPendingPack = createAsyncThunk('runs/pendingPack', async (_, { rejectWithValue }) => {
   try {
     return (await runService.listPendingPack({ limit: 100 })).rows;
+  } catch (err) {
+    return rejectWithValue(fail(err));
+  }
+});
+
+/** The packed sacks the Dispatch tab loads a vehicle from. */
+export const fetchPacked = createAsyncThunk('runs/packed', async (_, { rejectWithValue }) => {
+  try {
+    return (await runService.listPacked({ limit: 100 })).rows;
   } catch (err) {
     return rejectWithValue(fail(err));
   }
@@ -251,6 +276,12 @@ const runsSlice = createSlice({
       .addCase(fetchPendingPack.fulfilled, (state, action) => {
         state.pendingPack = action.payload;
       })
+      .addCase(fetchPacked.fulfilled, (state, action) => {
+        state.packed = action.payload;
+      })
+      .addCase(fetchPacked.rejected, (state, action) => {
+        state.error = action.payload as string;
+      })
       .addCase(fetchShiftRuns.pending, (state) => {
         state.loading = true;
       })
@@ -324,6 +355,13 @@ const runsSlice = createSlice({
         state.pendingPack = stillPacking(run)
           ? state.pendingPack.map((r) => (r.id === run.id ? run : r))
           : state.pendingPack.filter((r) => r.id !== run.id);
+        // Bagging is what puts stock in the yard, so the Dispatch tab has it
+        // without waiting for a refetch. Sacks corrected back down to none -
+        // or all of them already gone out - take the run off the list again.
+        const known = state.packed.find((r) => r.id === run.id);
+        const stock = asStock(run, known);
+        state.packed = state.packed.filter((r) => r.id !== run.id);
+        if ((stock.avail_sacks ?? 0) > 0) state.packed.unshift(stock);
       })
       .addCase(flushQueue.fulfilled, (state) => {
         state.queue = [];

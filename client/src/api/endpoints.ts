@@ -37,6 +37,8 @@ export const endpoints = {
     pendingWeigh: '/runs/pending-weigh',
     weighed: '/runs/weighed',
     pendingPack: '/runs/pending-pack',
+    /** Packed sacks still in the yard, for the Dispatch tab. */
+    packed: '/runs/packed',
     shift: '/runs/shift',
     byId: (id: string) => `/runs/${id}`,
     start: '/runs/start',

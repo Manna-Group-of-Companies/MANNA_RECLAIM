@@ -34,6 +34,11 @@ export const pendingPack = asyncHandler(async (req, res) =>
   paginated(res, await runService.listPendingPack(req.query)),
 );
 
+/** Packed sacks still in the yard - what the Dispatch tab loads from. */
+export const packed = asyncHandler(async (req, res) =>
+  paginated(res, await runService.listPacked(req.query)),
+);
+
 export const byShift = asyncHandler(async (req, res) => {
   const result = await runService.byShift(req.query);
   // The service may have fallen back to the latest shift on record, so the
