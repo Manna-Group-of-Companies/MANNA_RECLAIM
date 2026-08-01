@@ -12,6 +12,13 @@ export const ROLES: Record<string, Role> = {
 export const ADMIN_ROLES: Role[] = ['manager', 'admin'];
 
 /**
+ * Who may load a vehicle, and therefore who is shown what has left in one.
+ * Mirrors DISPATCH_ROLES on the server, which is where it is actually enforced -
+ * this list only keeps a screen from asking for something it will be refused.
+ */
+export const DISPATCH_ROLES: Role[] = ['supervisor', 'manager', 'admin'];
+
+/**
  * Who gets which half of the shop-floor app.
  *
  * Quality is the lab's page and the lab's only page: the lab bench tests what

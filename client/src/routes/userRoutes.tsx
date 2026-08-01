@@ -5,13 +5,13 @@ import { RoleHome } from './RoleHome';
 import {
   BatchesPage,
   BearingPage,
-  DispatchPage,
   HistoryPage,
   MachinesPage,
   PackingPage,
   QualityPage,
   ReportsPage,
   SettingsPage,
+  StockPage,
   WeighPage,
 } from '@/pages/user';
 import { userPaths } from '@/config/paths';
@@ -44,7 +44,11 @@ export const userRoutes: RouteObject[] = [
               { path: 'batches', element: <BatchesPage /> },
               { path: 'weigh', element: <WeighPage /> },
               { path: 'packing', element: <PackingPage /> },
-              { path: 'dispatch', element: <DispatchPage /> },
+              // The yard, both ways round. The page asks for whichever endpoint
+              // the account is entitled to and the server refuses the other, so
+              // a supervisor here is reading the summary and could not read the
+              // full table by any route through this component.
+              { path: 'stock', element: <StockPage /> },
               { path: 'history', element: <HistoryPage /> },
               { path: 'bearing', element: <BearingPage /> },
               { path: 'reports', element: <ReportsPage /> },

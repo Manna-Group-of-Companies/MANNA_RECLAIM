@@ -10,6 +10,7 @@ const base = crud(TABLES.dispatches, { defaultSort: 'dispatched_at' });
 const loads = crud(TABLES.dispatchLoads, { defaultSort: 'created_at' });
 const lines = crud(TABLES.dispatchLines, { defaultSort: 'created_at' });
 const groups = crud(TABLES.stockGroups, { defaultSort: 'created_at' });
+const customers = crud(TABLES.customers, { defaultSort: 'name' });
 
 /**
  * Supabase named these columns after the weighbridge slip - `customer_name`,
@@ -142,6 +143,66 @@ export const dispatchService = {
       throw translatePostError(err);
     }
     return dispatchService.detailOf(id, result);
+  },
+
+  /**
+   * What has gone out lately, newest first.
+   *
+   * There was deliberately no standalone dispatch ledger while only the back
+   * office could post one - the question was always "what has this customer
+   * bought", which is answered off the customer. That stopped being the whole
+   * truth when the yard started loading vehicles: a supervisor who has just
+   * posted a document and cannot see it afterwards has no way to tell a double
+   * entry from a failed one, and will post it twice to be sure.
+   *
+   * It is a header list. The sacks and the money are summed off the lines
+   * rather than read off the header, because post_dispatch() does not denormalise
+   * either onto it - the lines are the record of what left. Tapping a row is
+   * what fetches the detail, so this stays three reads however long the list is.
+   */
+  async recent(query = {}) {
+    const result = await base.list({ order: 'desc', limit: 20, ...query });
+    const rows = result.rows.map(fromRow);
+    if (!rows.length) return { ...result, rows };
+
+    const ids = rows.map((row) => row.id).filter(Boolean);
+    const own = ids.length ? await lines.all({ dispatch_id: ids }) : [];
+
+    // One read for the names rather than one per row. A dispatch always names a
+    // customer, but a customer deleted since is not a reason to hide the load.
+    const customerIds = [...new Set(rows.map((row) => row.customer_id).filter(Boolean))];
+    const named = customerIds.length ? await customers.all({ id: customerIds }) : [];
+    const nameOf = new Map(named.map((row) => [row.id, row.name]));
+
+    const summed = new Map();
+    for (const line of own) {
+      const tally = summed.get(line.dispatch_id) ?? { sacks: 0, goods: 0, lines: 0 };
+      tally.sacks += num(line.sacks);
+      tally.goods += num(line.line_total) || num(line.sacks) * num(line.unit_price);
+      tally.lines += 1;
+      summed.set(line.dispatch_id, tally);
+    }
+
+    return {
+      ...result,
+      rows: rows.map((row) => {
+        const tally = summed.get(row.id) ?? { sacks: 0, goods: 0, lines: 0 };
+        const transport = num(row.transport_charge);
+        return {
+          id: row.id,
+          dispatch_date: row.dispatch_date,
+          customer: nameOf.get(row.customer_id) ?? row.customer ?? null,
+          vehicle: row.vehicle ?? null,
+          sacks: tally.sacks,
+          lines: tally.lines,
+          goods_total: round2(tally.goods),
+          transport_charge: transport,
+          total: round2(tally.goods + transport),
+          remarks: row.remarks ?? null,
+          created_at: row.created_at ?? null,
+        };
+      }),
+    };
   },
 
   /** One posted dispatch with its lines and the groups they drew from. */

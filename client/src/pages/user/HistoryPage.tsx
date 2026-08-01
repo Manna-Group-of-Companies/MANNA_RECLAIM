@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchRunFilters } from '@/features/reports/reportsSlice';
 import { runService } from '@/api/services/run.service';
+import { dispatchService } from '@/api/services/dispatch.service';
 import { toRequestError } from '@/api/axiosClient';
 import {
   BottomSheet,
@@ -25,11 +26,11 @@ import {
   text,
   type Draft,
 } from '@/features/history/runDraft';
-import { QUALITIES, SHIFTS, TYRES, type TyreType } from '@/config/constants';
+import { DISPATCH_ROLES, QUALITIES, SHIFTS, TYRES, type TyreType } from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
 import { clock24, dayMonth } from '@/utils/date';
-import { hours, kwhOf, num } from '@/utils/format';
-import type { Run } from '@/types/models';
+import { hours, kwhOf, num, rupees } from '@/utils/format';
+import type { DispatchSummary, Run } from '@/types/models';
 
 /** "9.3 h" the way the prototype's history column reads it. */
 const runHours = (run: Run) => {
@@ -474,6 +475,80 @@ function RunSheet({
 }
 
 /**
+ * What has left the yard lately, above the run log.
+ *
+ * A dispatch is the last thing that happens to a batch and the one thing the
+ * crew who posted it could not see afterwards - the ledger is read per customer
+ * in the back office, which is a question the floor cannot ask. Without this,
+ * checking whether a document landed means posting it again.
+ *
+ * Newest first and short. This is "did that go through", not the sales record;
+ * the amounts are here because whoever posted one typed them a minute ago.
+ */
+function RecentDispatches() {
+  const [rows, setRows] = useState<DispatchSummary[]>([]);
+  const [failed, setFailed] = useState(false);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+  const role = useAppSelector((s) => s.auth.user?.role);
+  // The route refuses anyone else anyway - this is only so a worker's History
+  // tab does not fire a request every time it opens to be told 403.
+  const maySee = Boolean(role && DISPATCH_ROLES.includes(role));
+
+  useEffect(() => {
+    if (!maySee) return;
+    let live = true;
+    dispatchService
+      .recent({ limit: 8 })
+      .then((res) => {
+        if (live) setRows(res.rows);
+      })
+      // Quietly: the run log underneath is the point of this tab, and a yard
+      // panel that could not load is not a reason to put an error over it.
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [refreshTick, maySee]);
+
+  if (!maySee || failed || !rows.length) return null;
+
+  return (
+    <section className="panel mb-3">
+      <SheetLabel className="!mt-0">Recently dispatched</SheetLabel>
+      <div className="scroll-x">
+        <table className="hist min-w-[420px]">
+          <thead>
+            <tr>
+              <th>Went to</th>
+              <th>When</th>
+              <th className="text-right">Sacks</th>
+              <th className="text-right">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((d) => (
+              <tr key={d.id}>
+                <td>
+                  <b>{show(d.customer)}</b>
+                  {d.lines > 1 && (
+                    <div className="muted text-[10px]">{d.lines} stock groups</div>
+                  )}
+                </td>
+                <td>{d.dispatch_date ? dayMonth(d.dispatch_date) : <span className="muted">—</span>}</td>
+                <td className="tnum">{d.sacks}</td>
+                <td className="tnum">{rupees(d.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/**
  * The whole run history, not just one shift.
  *
  * Every row on record comes down - the plant has well over a thousand and the
@@ -553,6 +628,8 @@ export function HistoryPage() {
           </>
         }
       />
+
+      <RecentDispatches />
 
       <div className="histbar">
         <SelectField

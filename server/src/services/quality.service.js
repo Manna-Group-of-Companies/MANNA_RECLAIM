@@ -1,5 +1,7 @@
 import { crud } from './base.service.js';
+import { stockService } from './stock.service.js';
 import { uploadObject } from '../config/supabase.js';
+import { logger } from '../config/logger.js';
 import { TABLES, QUALITIES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 
@@ -56,27 +58,51 @@ export const qualityService = {
   listForBatch: async (batchRef, query = {}) =>
     decorateList(await base.list({ ...query, order: 'asc' }, { batch_no: String(batchRef) })),
 
-  record: (payload) =>
-    base
-      .create({
-        kind: payload.kind ?? 'batch',
-        batch_no: payload.batchNo ?? payload.batchId ?? null,
-        run_id: payload.runId ?? null,
-        machine_id: payload.machineId ?? null,
-        quality: payload.grade ?? payload.quality ?? null,
-        verdict: payload.verdict, // pass | hold
-        params: payload.params ?? [],
-        tester: payload.testedBy ?? null,
-        notes: payload.remarks ?? null,
-        shift_date: payload.shiftDate ?? null,
-        shift: payload.shift ?? null,
-        // Carried over when a grade is re-tested and the old report still
-        // stands; a new file replaces it through attachReport() below.
-        attachment_url: payload.attachmentUrl ?? null,
-        attachment_name: payload.attachmentName ?? null,
-        ts: payload.testedAt || new Date().toISOString(),
-      })
-      .then(decorate),
+  async record(payload) {
+    const test = await base.create({
+      kind: payload.kind ?? 'batch',
+      batch_no: payload.batchNo ?? payload.batchId ?? null,
+      run_id: payload.runId ?? null,
+      machine_id: payload.machineId ?? null,
+      quality: payload.grade ?? payload.quality ?? null,
+      verdict: payload.verdict, // pass | hold
+      params: payload.params ?? [],
+      tester: payload.testedBy ?? null,
+      notes: payload.remarks ?? null,
+      shift_date: payload.shiftDate ?? null,
+      shift: payload.shift ?? null,
+      // Carried over when a grade is re-tested and the old report still
+      // stands; a new file replaces it through attachReport() below.
+      attachment_url: payload.attachmentUrl ?? null,
+      attachment_name: payload.attachmentName ?? null,
+      ts: payload.testedAt || new Date().toISOString(),
+    });
+
+    /*
+     * The yard keeps its own copy of the verdict, because a stock group's
+     * `qc_status` is what post_dispatch() checks and it cannot read a test row.
+     * Passing a batch here is what releases its sacks, so it happens in the
+     * same call rather than being a second thing for the back office to
+     * remember - and there is no screen that would remind them.
+     *
+     * A failure here must not lose the test. The lab is on a tablet at a bench
+     * and the row is already filed; the group is a derived status that the next
+     * packing or `npm run stock:qc-sync` will put right, so it is logged rather
+     * than raised at someone holding a sample.
+     */
+    try {
+      await stockService.applyLabVerdict({
+        kind: test.kind,
+        batchNo: test.batch_no,
+        quality: test.quality,
+        verdict: test.verdict,
+      });
+    } catch (err) {
+      logger.warn(`Quality test ${test.id}: the stock group was not released - ${err.message}`);
+    }
+
+    return decorate(test);
+  },
 
   /**
    * Hangs the lab's report - a photo of the sheet, or a PDF - on a test that is

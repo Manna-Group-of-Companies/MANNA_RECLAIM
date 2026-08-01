@@ -1,16 +1,19 @@
 /**
  * Boots the real app against a stub PostgREST.
  *
- * `config/env.js` reads process.env once, as the module loads, so everything
- * has to be set before the first import of anything that reaches it - hence the
- * dynamic imports below. dotenv does not overwrite a variable that is already
- * set, so a developer's own server/.env cannot point a test at the plant's real
- * project.
+ * `config/env.js` calls dotenv and reads process.env once, as the module loads,
+ * so setting a variable here would only take if nothing had imported it yet -
+ * and a test file that imports a service for a unit assertion has already
+ * imported it. The database URL is therefore pointed at the stub by writing to
+ * the loaded `env` object, which `request()` reads on every call. Doing it this
+ * way rather than through process.env is what guarantees a developer's own
+ * server/.env can never aim a test at the plant's real Supabase project,
+ * whatever order the file's imports happen to be in.
  *
- * For the same reason there is one API per process rather than one per test:
- * the second boot would import a cached env still pointing at the first stub.
- * Node's test runner gives each file its own process, so a file gets its own
- * server, and each test inside it re-seeds the same store.
+ * There is one API per process rather than one per test, because a second boot
+ * would get the same cached modules anyway. Node's test runner gives each file
+ * its own process, so a file gets its own server and each test re-seeds the
+ * same store.
  */
 
 let started = null;
@@ -20,15 +23,13 @@ async function boot() {
   const functions = {};
   const db = await startPostgrest({ tables: {}, functions });
 
-  process.env.NODE_ENV = 'test';
-  process.env.SUPABASE_URL = db.url;
-  process.env.SUPABASE_SERVICE_KEY = 'test-service-key';
-  process.env.JWT_SECRET = 'test-access-secret-that-is-long-enough-32';
-  process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-that-is-long-enough';
-
   const { createApp } = await import('../../src/app.js');
   const { signAccessToken } = await import('../../src/utils/jwt.js');
   const { env } = await import('../../src/config/env.js');
+
+  env.supabase.url = db.url;
+  env.supabase.key = 'test-service-key';
+  env.supabase.verifySchema = false;
 
   const app = createApp();
   const server = await new Promise((resolve) => {

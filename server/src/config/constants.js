@@ -18,6 +18,19 @@ export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
  */
 export const QUALITY_WRITE_ROLES = [ROLES.LAB, ...ADMIN_ROLES];
 
+/**
+ * Who may load a vehicle.
+ *
+ * A dispatch is the step straight after the lab passes a batch, and it happens
+ * at the yard rather than in the office - so the supervisor standing at the
+ * gate posts it. That is a deliberate widening of what the shop floor may see:
+ * post_dispatch() refuses a line without a unit price, so anyone who can post
+ * one can necessarily see the customer it is going to and the rate it is going
+ * at. The rest of the commercial record stays shut - what a customer has bought
+ * before, and what any of it earned, is still ADMIN_ROLES only.
+ */
+export const DISPATCH_ROLES = [ROLES.SUPERVISOR, ...ADMIN_ROLES];
+
 export const SHIFTS = { DAY: 'Day', NIGHT: 'Night' };
 
 /** Day 08:30-20:30, Night 20:30-08:30 (minutes from midnight). */

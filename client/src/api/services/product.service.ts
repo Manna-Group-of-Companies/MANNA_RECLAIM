@@ -17,6 +17,21 @@ export interface ProductPayload {
   note?: string | null;
   active?: boolean;
   sortOrder?: number;
+
+  /**
+   * The other half of a product record: what it is ordered under, what it ships
+   * as, which machine it comes off, and the cost inputs behind a unit of it.
+   * `code` is unique across the list - that is what an order is matched on.
+   */
+  code?: string | null;
+  quality?: string | null;
+  packSizeKg?: number | null;
+  machineId?: string | null;
+  rawMaterialCost?: number | null;
+  firewoodCost?: number | null;
+  powerKwh?: number | null;
+  labourCost?: number | null;
+  machineHours?: number | null;
 }
 
 export const productService = {

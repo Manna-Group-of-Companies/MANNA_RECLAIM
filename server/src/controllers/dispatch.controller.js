@@ -1,5 +1,5 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { ok, created } from '../utils/ApiResponse.js';
+import { ok, created, paginated } from '../utils/ApiResponse.js';
 import { dispatchService } from '../services/dispatch.service.js';
 
 /**
@@ -13,6 +13,11 @@ import { dispatchService } from '../services/dispatch.service.js';
  */
 export const create = asyncHandler(async (req, res) =>
   created(res, await dispatchService.post(req.body, req.user?.id ?? null), 'Dispatch posted'),
+);
+
+/** What has gone out lately, newest first - the yard's own record of it. */
+export const list = asyncHandler(async (req, res) =>
+  paginated(res, await dispatchService.recent(req.query)),
 );
 
 export const getOne = asyncHandler(async (req, res) =>

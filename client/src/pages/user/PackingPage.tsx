@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchPendingPack, packRun } from '@/features/machines/runsSlice';
 import {
@@ -13,6 +13,7 @@ import {
   TextField,
   ViewHead,
 } from '@/components/ui';
+import { cn } from '@/utils/cn';
 import { SACK_KG } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
@@ -38,10 +39,45 @@ export function PackingPage() {
   const { pendingPack, loading } = useAppSelector((s) => s.runs);
   const [target, setTarget] = useState<Run | null>(null);
   const [sacks, setSacks] = useState('');
+  const [grade, setGrade] = useState('');
 
   useEffect(() => {
     void dispatch(fetchPendingPack());
   }, [dispatch]);
+
+  /*
+   * The grades actually waiting, rather than every grade the plant makes. A
+   * bagging line works one grade at a time and the crew wants the rest off the
+   * screen, but offering a grade with nothing under it is a dead option on a
+   * tablet - it is picked once, shows an empty list, and is never trusted again.
+   */
+  // How many runs are waiting under each grade - the number on its chip.
+  const counts = useMemo(() => {
+    const tally: Record<string, number> = {};
+    for (const run of pendingPack) tally[gradeOf(run)] = (tally[gradeOf(run)] ?? 0) + 1;
+    return tally;
+  }, [pendingPack]);
+
+  // Widened to string: this is what the filter is set to, and it holds whatever
+  // a chip carried rather than a member of the grade union.
+  const grades = useMemo<string[]>(
+    () => Object.keys(counts).sort((a, b) => a.localeCompare(b)),
+    [counts],
+  );
+
+  const visible = useMemo(
+    () => (grade ? pendingPack.filter((run) => gradeOf(run) === grade) : pendingPack),
+    [pendingPack, grade],
+  );
+
+  /*
+   * A grade that has just been bagged off the list stops being an option, and
+   * leaving the picker on it would show an empty screen with no clue why. The
+   * filter falls back to all rather than stranding the crew on a dead one.
+   */
+  useEffect(() => {
+    if (grade && !grades.includes(grade)) setGrade('');
+  }, [grade, grades]);
 
   const open = (run: Run) => {
     setTarget(run);
@@ -93,10 +129,43 @@ export function PackingPage() {
 
   return (
     <>
-      <ViewHead title="Packing" meta={`${pendingPack.length} to pack`} />
+      <ViewHead
+        title="Packing"
+        meta={
+          grade ? `${visible.length} of ${pendingPack.length} to pack` : `${pendingPack.length} to pack`
+        }
+      />
+
+      {/* One grade waiting is not something to filter, so the row only appears
+          once there is a choice to make. */}
+      {grades.length > 1 && (
+        <div className="gradebar" role="group" aria-label="Filter by quality">
+          <button
+            type="button"
+            className={cn('gradebtn all-grades', !grade && 'on')}
+            aria-pressed={!grade}
+            onClick={() => setGrade('')}
+          >
+            All <span className="n">{pendingPack.length}</span>
+          </button>
+          {grades.map((g) => (
+            <button
+              key={g}
+              type="button"
+              // The selected fill is the grade's own colour, off the same
+              // `.q-<Grade>` class its chip wears on the cards below.
+              className={cn('gradebtn', grade === g && `on q-${g}`)}
+              aria-pressed={grade === g}
+              onClick={() => setGrade(g)}
+            >
+              {g} <span className="n">{counts[g]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="stack">
-        {pendingPack.map((run) => {
+        {visible.map((run) => {
           const packed = run.packed_sacks ?? 0;
           const total = totalFor(run);
           return (

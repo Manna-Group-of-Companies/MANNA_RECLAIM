@@ -3,9 +3,12 @@ import { AdminLayout } from '@/components/layout';
 import { ProtectedRoute } from './ProtectedRoute';
 import {
   AdminHistoryPage,
+  AdminMachinesPage,
   AdminQualityPage,
   BearingsPage,
   CostingPage,
+  CustomerDetailPage,
+  CustomersPage,
   DashboardPage,
   EfficiencyPage,
   MaintenancePage,
@@ -34,6 +37,12 @@ export const adminRoutes: RouteObject[] = [
           { path: 'maintenance', element: <MaintenancePage /> },
           { path: 'bearings', element: <BearingsPage /> },
           { path: 'products', element: <ProductsPage /> },
+          { path: 'machines', element: <AdminMachinesPage /> },
+          // Who the plant sells to, and what has gone out to them. Inside the
+          // admin guard, which is manager and admin - a supervisor typing the
+          // address is turned away here and refused by the API as well.
+          { path: 'customers', element: <CustomersPage /> },
+          { path: 'customers/:id', element: <CustomerDetailPage /> },
           { path: 'users', element: <UsersPage /> },
         ],
       },

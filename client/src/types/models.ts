@@ -3,6 +3,15 @@ export type Shift = 'Day' | 'Night';
 export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
 export type MachineKind = 'grind' | 'autoclave' | 'prerefiner' | 'refiner' | 'coarse' | 'press';
+/** The finer name a machine is listed under. Mirrors MACHINE_TYPES on the server. */
+export type MachineType =
+  | 'grinder'
+  | 'cracker'
+  | 'autoclave'
+  | 'prerefiner'
+  | 'refiner'
+  | 'press'
+  | 'other';
 export type RunStatus = 'running' | 'done';
 export type Verdict = 'pass' | 'hold';
 
@@ -30,6 +39,17 @@ export interface Machine {
   enabled: boolean;
   sort_order?: number;
   sub?: string | null;
+  /**
+   * The finer name the back office lists this under - a cracker and a grinder
+   * are both `kind: 'grind'` to the run rules and two different machines to
+   * anyone standing in front of them - and, on a press, the platen it moulds on.
+   * The platen figures are null on everything that is not a press.
+   */
+  type?: MachineType | null;
+  platen_length_mm?: number | null;
+  platen_width_mm?: number | null;
+  platen_count?: number | null;
+  capacity_kg?: number | null;
 }
 
 /**
@@ -57,6 +77,22 @@ export interface Product {
   note?: string | null;
   active: boolean;
   sort_order?: number;
+
+  /**
+   * The other half of a product record: what it is ordered under, what it ships
+   * as, which machine it comes off, and the cost inputs behind a unit of it.
+   * Every one may be null - the plant has not measured all of them into this
+   * system, and the table says "not set" rather than inventing a figure.
+   */
+  code?: string | null;
+  quality?: DispatchGrade | null;
+  pack_size_kg?: number | null;
+  machine_id?: string | null;
+  raw_material_cost?: number | null;
+  firewood_cost?: number | null;
+  power_kwh?: number | null;
+  labour_cost?: number | null;
+  machine_hours?: number | null;
 }
 
 /**
@@ -299,41 +335,111 @@ export interface BatchDetail extends Batch {
   qualityTests: QualityTest[];
 }
 
-export interface DispatchLoad {
+export type QcStatus = 'pass' | 'fail' | 'pending';
+
+/**
+ * What packing files sacks into, and what a dispatch draws them out of.
+ *
+ * A special-line batch makes a group per grade it yielded, keyed on the batch
+ * number. Coarse output is not batch-identified - the line runs for a shift, not
+ * for a batch - so its sacks are pooled by the ten-day period they were packed
+ * in, and the pool's label is worked out on the server from the packing date.
+ * `label` is the stored one; `display_label` is what the yard reads, AUG-H2.
+ */
+export interface StockGroup {
   id: string;
-  dispatch_id: string;
-  vehicle?: string | null;
-  driver?: string | null;
-  gross_kg?: number | null;
-  tare_kg?: number | null;
-  net_kg?: number | null;
-  bags?: number | null;
+  kind: 'batch' | 'pool';
+  label: string;
+  display_label: string;
+  quality: DispatchGrade | null;
+  packed_sacks: number;
+  dispatched_sacks: number;
+  available_sacks: number;
+  qc_status: QcStatus;
+  period_start?: string | null;
+  period_end?: string | null;
+  created_at?: string | null;
 }
 
-export interface Dispatch {
+/**
+ * The shop floor's copy of the same row, as /stock/summary sends it.
+ *
+ * These four fields are the whole response, not a subset the screen chose to
+ * draw: the server builds this shape with its own serializer, so a price or a
+ * customer is absent from the body rather than merely unrendered. Kept as its
+ * own type for the same reason - a StockGroup with fields marked optional would
+ * invite reading one where the other is all there is.
+ */
+export interface StockSummaryRow {
+  /** The group's key - what a dispatch line names. Carries nothing else. */
   id: string;
-  customer: string;
-  grade: DispatchGrade;
-  dispatch_date: string;
-  invoice_no?: string | null;
-  vehicle?: string | null;
-  /** One of the plant's own vehicles, rather than a hired or customer one. */
-  own_vehicle?: boolean | null;
-  driver?: string | null;
-  total_kg?: number | null;
-  /**
-   * Where the sacks came from: the packed run they were drawn off and the batch
-   * they were made on. Null on a load typed in by hand, which draws no packed
-   * stock down.
-   */
-  run_id?: string | null;
-  batch_no?: string | null;
-  sacks?: number | null;
-  status: 'draft' | 'dispatched' | 'invoiced';
+  label: string;
+  quality: DispatchGrade | null;
+  available_sacks: number;
+  qc_status: QcStatus;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone?: string | null;
+  address?: string | null;
+  region?: string | null;
+  active: boolean;
+  created_at?: string | null;
+}
+
+/** One priced row of a dispatch: which group it drew from, and at what. */
+export interface DispatchLine {
+  id: string;
+  stock_group_id: string;
+  /** The group's label as the yard reads it - AUG-H2, or B1041-Fine. */
+  label: string | null;
+  quality: DispatchGrade | null;
+  sacks: number;
+  unit_price: number;
+  line_total: number;
+}
+
+/**
+ * A posted dispatch. Written once and never edited: a load that went out wrong
+ * is corrected by a reversal document and a fresh dispatch, so there is no
+ * update path here and none on the server either.
+ */
+/**
+ * One line of "what has gone out lately" - the header with its lines summed,
+ * not the document. The lines themselves are fetched by tapping it.
+ */
+export interface DispatchSummary {
+  id: string;
+  dispatch_date: string | null;
+  customer: string | null;
+  vehicle: string | null;
+  sacks: number;
+  /** How many stock groups this vehicle was loaded off. */
+  lines: number;
+  goods_total: number;
+  transport_charge: number;
+  total: number;
   remarks?: string | null;
-  loads?: DispatchLoad[];
-  rate?: number | null;
-  amount?: number | null;
+  created_at?: string | null;
+}
+
+export interface DispatchDoc {
+  id: string;
+  customer_id: string | null;
+  dispatch_date: string | null;
+  transport_provided: boolean;
+  transport_charge: number;
+  remarks?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  sacks: number;
+  goods_total: number;
+  total: number;
+  lines: DispatchLine[];
+  /** On a customer's history: the sacks that went out, split by grade. */
+  sacks_by_quality?: Record<string, number>;
 }
 
 /**

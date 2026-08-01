@@ -837,6 +837,121 @@
     background: var(--t-warn-bg);
   }
 
+  /* ---------- grade filter ---------- */
+  /*
+   * Filtering a work list by grade, as a row of grades rather than a dropdown.
+   *
+   * A bagging line runs one grade at a time and the tablet is held in a glove:
+   * a chip is one tap where a `<select>` is a tap, a scroll and a second tap,
+   * and the whole row is readable without opening anything. It scrolls sideways
+   * because the plant makes six grades and a phone fits about four - the same
+   * trick `.scroll-x` plays on the wide tables.
+   */
+  .gradebar {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    margin: 0 2px 12px;
+    padding-bottom: 2px;
+    /* The row is short and the chips are self-evidently a row; a bar under it
+       would take more height than it earns on a phone. */
+    scrollbar-width: none;
+  }
+  .gradebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gradebtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      color 0.15s;
+  }
+  /*
+   * The unselected background is set here rather than on `.gradebtn`, and the
+   * hover with it. A selected chip takes its fill from the `.q-<Grade>` class
+   * below, which is written further up this file at the same specificity - so a
+   * plain `.gradebtn { background }` would be the later rule and would win,
+   * leaving every selected chip the colour of the panel.
+   */
+  .gradebtn:not(.on) {
+    background: var(--panel);
+  }
+  .gradebtn:not(.on):hover {
+    border-color: var(--line2);
+    color: var(--ink);
+  }
+  .gradebtn:active {
+    transform: translateY(1px);
+  }
+
+  /* How much work is under a grade, before it is picked. The count is what
+     makes the row worth reading rather than only worth tapping. */
+  .gradebtn .n {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    opacity: 0.72;
+  }
+
+  /*
+   * Selected, a grade wears its own colour - the same one its chip wears on
+   * every card underneath - so the filter and the rows it filtered read as one
+   * thing rather than as a control sitting above a list. The fill comes from
+   * the `.q-<Grade>` classes the chips already use, so a grade added there is
+   * added here for free.
+   */
+  .gradebtn.on {
+    color: var(--on-quality);
+    border-color: transparent;
+  }
+  .gradebtn.on .n {
+    opacity: 0.85;
+  }
+  /* "All" belongs to no grade, so it takes the app's own accent. Named at
+     length because a bare `.all` is too generic to sit in a shared sheet. */
+  .gradebtn.on.all-grades {
+    color: var(--on-brand);
+    background: var(--brand);
+  }
+
+  /*
+   * The same row, filtering on the lab's verdict instead of the grade. Tinted
+   * rather than filled: these three are the app's status colours and they are
+   * worn as `.pill.ok` / `.warn` / `.down` wear them everywhere else, which
+   * also keeps a solid amber from carrying white text.
+   */
+  .gradebtn.on.qc-pass {
+    color: var(--ok);
+    background: var(--t-ok-bg);
+    border-color: var(--t-ok-line);
+  }
+  .gradebtn.on.qc-pending {
+    color: var(--warn);
+    background: var(--t-warn-bg);
+    border-color: var(--t-warn-line);
+  }
+  .gradebtn.on.qc-fail {
+    color: var(--err);
+    background: var(--t-err-bg);
+    border-color: var(--t-err-line);
+  }
+
   /* ---------- generic panels ---------- */
   .panel {
     background: var(--panel);
@@ -1112,6 +1227,121 @@
     font-family: var(--mono);
     display: block;
   }
+  /* ---------- the yard ---------- */
+  /*
+   * A stock group as a card rather than a table row.
+   *
+   * The back office's table ran to six columns before a dispatch button was put
+   * on the end of it, which on the tablets the yard actually uses meant a
+   * sideways scroll to reach the one control on the row. A card carries the
+   * label, the grade and what is left on one line, and the verdict with its
+   * action underneath - at the width of a phone, and laid out into columns by
+   * the `.stack` grid on anything wider.
+   *
+   * The stripe is the lab's verdict, and it is the first thing read: the only
+   * question this screen is asked from across a yard is which pallets may go on
+   * the lorry. Nothing here is colour alone - the badge underneath says it in
+   * words, and the reason sits beside it.
+   */
+  .scard {
+    position: relative;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    padding: 13px 14px 12px 17px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.15s ease;
+  }
+  .scard::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--line2);
+  }
+  .scard.pass::before {
+    background: var(--ok);
+  }
+  .scard.pending::before {
+    background: var(--warn);
+  }
+  .scard.fail::before {
+    background: var(--err);
+  }
+  /* A failed group is the one thing on this screen somebody has to act on. */
+  .scard.fail {
+    border-color: var(--t-err-line);
+  }
+
+  .scard .top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .scard .who {
+    min-width: 0;
+  }
+  .scard .who .row1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .scard .who small {
+    display: block;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+    font-family: var(--mono);
+  }
+
+  /* What is left, as the number the yard counts in - the figure somebody walks
+     out to check against a pallet, so it is the largest thing on the card. */
+  .scard .left {
+    flex: 0 0 auto;
+    text-align: right;
+    line-height: 1.05;
+  }
+  .scard .left b {
+    font-family: var(--mono);
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .scard .left span {
+    display: block;
+    margin-top: 3px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  /* An emptied group stays on the list - it is stock that existed - but it is
+     not stock anybody is going to load, so its count stops shouting. */
+  .scard.spent .left b {
+    color: var(--ink-faint);
+  }
+
+  .scard .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 11px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .scard .why {
+    margin-top: 3px;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+
   /* Divider between the weigh queue and the scale record under it, carrying
      how much of that record is on screen and the way to see the rest. */
   .wsec {

@@ -4,7 +4,6 @@ import machinesReducer from '@/features/machines/machinesSlice';
 import productsReducer from '@/features/products/productsSlice';
 import runsReducer from '@/features/machines/runsSlice';
 import batchesReducer from '@/features/batches/batchesSlice';
-import dispatchReducer from '@/features/dispatch/dispatchSlice';
 import reportsReducer from '@/features/reports/reportsSlice';
 import maintenanceReducer from '@/features/maintenance/maintenanceSlice';
 import qualityReducer from '@/features/quality/qualitySlice';
@@ -17,7 +16,6 @@ export const rootReducer = combineReducers({
   products: productsReducer,
   runs: runsReducer,
   batches: batchesReducer,
-  dispatch: dispatchReducer,
   reports: reportsReducer,
   maintenance: maintenanceReducer,
   quality: qualityReducer,

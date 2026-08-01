@@ -8,4 +8,7 @@ export { CostingPage } from './CostingPage';
 export { MaintenancePage } from './MaintenancePage';
 export { BearingsPage } from './BearingsPage';
 export { ProductsPage } from './ProductsPage';
+export { MachinesPage as AdminMachinesPage } from './MachinesPage';
+export { CustomersPage } from './CustomersPage';
+export { CustomerDetailPage } from './CustomerDetailPage';
 export { UsersPage } from './UsersPage';

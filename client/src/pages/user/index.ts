@@ -3,7 +3,7 @@ export { MachinesPage } from './MachinesPage';
 export { BatchesPage } from './BatchesPage';
 export { WeighPage } from './WeighPage';
 export { PackingPage } from './PackingPage';
-export { DispatchPage } from './DispatchPage';
+export { StockPage } from './StockPage';
 export { QualityPage } from './QualityPage';
 export { HistoryPage } from './HistoryPage';
 export { BearingPage } from './BearingPage';

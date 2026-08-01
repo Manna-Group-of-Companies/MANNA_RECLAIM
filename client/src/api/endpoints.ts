@@ -57,11 +57,27 @@ export const endpoints = {
     byId: (id: string) => `/quality-tests/${id}`,
     report: (id: string) => `/quality-tests/${id}/report`,
   },
+  /**
+   * The yard. `/stock` is the back office's whole table; `/stock/summary` is
+   * the shop floor's, and is a different response built by a different
+   * serializer rather than the same one with fields left out.
+   */
+  stock: {
+    root: '/stock',
+    summary: '/stock/summary',
+    byId: (id: string) => `/stock/${id}`,
+    qc: (id: string) => `/stock/${id}/qc`,
+  },
+  /** Posted once, never edited - a correction is a reversal and a new one. */
   dispatch: {
     root: '/dispatches',
     byId: (id: string) => `/dispatches/${id}`,
-    loads: (id: string) => `/dispatches/${id}/loads`,
-    load: (id: string, loadId: string) => `/dispatches/${id}/loads/${loadId}`,
+  },
+  customers: {
+    root: '/customers',
+    byId: (id: string) => `/customers/${id}`,
+    dispatches: (id: string) => `/customers/${id}/dispatches`,
+    lastPrices: (id: string) => `/customers/${id}/last-prices`,
   },
   rates: {
     root: '/rates',

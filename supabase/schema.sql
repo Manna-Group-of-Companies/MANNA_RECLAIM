@@ -512,14 +512,14 @@ begin
     p_period_start, p_period_end, coalesce(p_qc_status, 'pending')
   )
   on conflict (label) do update
-    set packed_sacks = public.stock_groups.packed_sacks + coalesce(p_delta, 0),
-        quality      = coalesce(public.stock_groups.quality, excluded.quality),
+    set packed_sacks = stock_groups.packed_sacks + coalesce(p_delta, 0),
+        quality      = coalesce(stock_groups.quality, excluded.quality),
         -- The lab's verdict is the lab's to change. Packing only ever fills it
         -- in where nothing has been recorded yet.
         qc_status    = case
-                         when p_qc_status is null then public.stock_groups.qc_status
-                         when public.stock_groups.qc_status = 'pending' then p_qc_status
-                         else public.stock_groups.qc_status
+                         when p_qc_status is null then stock_groups.qc_status
+                         when stock_groups.qc_status = 'pending' then p_qc_status
+                         else stock_groups.qc_status
                        end
   returning * into v_group;
 
@@ -579,7 +579,14 @@ begin
     p_remarks, p_created_by, p_dispatch_date
   );
 
-  for v_line in select * from jsonb_array_elements(p_lines) loop
+  -- Sorted, so two dispatches that share groups always take their locks in
+  -- the same order. Unsorted, one could hold A and want B while the other
+  -- holds B and wants A - a deadlock, which Postgres would break by aborting
+  -- one of them with an error that says nothing about stock.
+  for v_line in
+    select t.value from jsonb_array_elements(p_lines) as t(value)
+     order by (t.value ->> 'stock_group_id')
+  loop
     v_sacks := (v_line ->> 'sacks')::integer;
     v_price := (v_line ->> 'unit_price')::numeric;
 

@@ -8,7 +8,12 @@ export const userPaths = {
   batches: '/batches',
   weigh: '/weigh',
   packing: '/packing',
-  dispatch: '/dispatch',
+  /**
+   * The yard. One route, two answers: a manager gets the whole table and the
+   * New Dispatch form, a supervisor gets what is in stock and nothing else -
+   * see StockPage, and /stock/summary on the server.
+   */
+  stock: '/stock',
   quality: '/quality',
   history: '/history',
   bearing: '/bearing',
@@ -27,8 +32,13 @@ export const adminPaths = {
   costing: '/admin/costing',
   maintenance: '/admin/maintenance',
   bearings: '/admin/bearings',
-  /** What the moulding presses mould, and the curing settings on each. */
+  /** What the plant makes and sells, and what a unit of it costs. */
   products: '/admin/products',
+  /** The machine list, including the presses and the platens they mould on. */
+  machines: '/admin/machines',
+  /** Who the plant sells to, and what has gone out to each. */
+  customers: '/admin/customers',
+  customer: (id: string) => `/admin/customers/${id}`,
   users: '/admin/users',
 } as const;
 
