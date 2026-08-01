@@ -2,15 +2,23 @@
  * Boots the real app against a stub PostgREST.
  *
  * `config/env.js` reads process.env once, as the module loads, so everything
- * here has to be set before the first import of anything that reaches it -
- * hence the dynamic imports. dotenv does not overwrite a variable that is
- * already set, so a developer's own server/.env cannot point a test at the
- * plant's real project.
+ * has to be set before the first import of anything that reaches it - hence the
+ * dynamic imports below. dotenv does not overwrite a variable that is already
+ * set, so a developer's own server/.env cannot point a test at the plant's real
+ * project.
+ *
+ * For the same reason there is one API per process rather than one per test:
+ * the second boot would import a cached env still pointing at the first stub.
+ * Node's test runner gives each file its own process, so a file gets its own
+ * server, and each test inside it re-seeds the same store.
  */
 
-export async function startApi({ tables = {}, functions = {} } = {}) {
+let started = null;
+
+async function boot() {
   const { startPostgrest } = await import('./postgrestStub.js');
-  const db = await startPostgrest({ tables, functions });
+  const functions = {};
+  const db = await startPostgrest({ tables: {}, functions });
 
   process.env.NODE_ENV = 'test';
   process.env.SUPABASE_URL = db.url;
@@ -26,14 +34,33 @@ export async function startApi({ tables = {}, functions = {} } = {}) {
   const server = await new Promise((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
+  // Unreferenced so the runner is free to exit once the tests are done rather
+  // than waiting on a listener nothing is going to call again.
+  server.unref();
   const base = `http://127.0.0.1:${server.address().port}${env.apiPrefix}`;
 
-  /** A signed-in account of the given role, as a bearer header. */
-  const tokenFor = (role, name = role) =>
-    signAccessToken({ id: `user-${role}`, role, name });
+  return { db, functions, server, base, signAccessToken };
+}
+
+/**
+ * The API, with the database holding exactly the rows this test asked for.
+ * Re-seeds rather than restarts, so every test in a file starts from a known
+ * store without paying for another listener.
+ */
+export async function startApi({ tables = {}, functions = {} } = {}) {
+  started ??= await boot();
+  const api = started;
+
+  for (const key of Object.keys(api.db.tables)) delete api.db.tables[key];
+  Object.assign(api.db.tables, tables);
+  for (const key of Object.keys(api.functions)) delete api.functions[key];
+  Object.assign(api.functions, functions);
+
+  /** A signed-in account of the given role, as a bearer token. */
+  const tokenFor = (role, name = role) => api.signAccessToken({ id: `user-${role}`, role, name });
 
   const call = (path, { role = 'manager', method = 'GET', body } = {}) =>
-    fetch(base + path, {
+    fetch(api.base + path, {
       method,
       headers: {
         Authorization: `Bearer ${tokenFor(role)}`,
@@ -45,11 +72,9 @@ export async function startApi({ tables = {}, functions = {} } = {}) {
   return {
     call,
     tokenFor,
-    tables: db.tables,
-    async stop() {
-      await new Promise((resolve) => server.close(resolve));
-      await db.stop();
-    },
+    tables: api.db.tables,
+    /** The listener outlives the test; the process ending is what closes it. */
+    stop: async () => {},
   };
 }
 

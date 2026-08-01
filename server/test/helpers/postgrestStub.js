@@ -130,6 +130,7 @@ export async function startPostgrest({ tables = {}, functions = {} } = {}) {
   });
 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  server.unref();
   const { port } = server.address();
 
   return {

@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "eslint src scripts test --ext .js --max-warnings 0",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "db:report": "node scripts/supabase-report.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",

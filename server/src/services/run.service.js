@@ -749,7 +749,9 @@ export const runService = {
    * and quietly rewriting either would lose what the crew recorded.
    */
   async weigh(id, outWeight, entries) {
-    const run = await base.findById(id);
+    // Read for its own sake: findById raises a 404 for a run that is not there,
+    // which is what keeps a weight off a row that does not exist.
+    await base.findById(id);
     if (outWeight == null || Number.isNaN(Number(outWeight))) {
       throw ApiError.badRequest('A weight in kg is required');
     }
