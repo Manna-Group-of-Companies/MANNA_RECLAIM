@@ -2609,6 +2609,199 @@
   }
 
   /* ==================================================================
+   * back office: responsive, and alive under a pointer
+   *
+   * Kept with the rest of the room rather than in the responsive section
+   * below, which belongs to the shop floor. The two rooms answer to
+   * different screens: the floor is a tablet on a wall, the back office is
+   * a phone in a pocket on the way to a desk browser, and it has to read
+   * on both without becoming two layouts.
+   * ================================================================== */
+
+  /* Title on the left, three buttons on the right. Below about 400px that
+     is more than one line holds, so the buttons drop to their own line
+     instead of squeezing the plant name down to an ellipsis. */
+  .back-office .bo-head .row {
+    flex-wrap: wrap;
+  }
+
+  /* The strip is ten tabs. At their narrowest that is 794px, wider than
+     the 820px column has left after padding, so it scrolls on everything
+     short of a desk screen - which is fine, until a tab lands half off the
+     edge and reads as a rendering fault. Hence the snap.
+
+     `flex: 0 0 auto` here on purpose: `flex: 1` on a strip that overflows
+     does not fit ten tabs, it just makes ten equally cramped ones. They go
+     back to sharing the row at the width where they genuinely fit. */
+  .back-office .tabstrip {
+    scroll-snap-type: x proximity;
+    scroll-padding-left: 6px;
+    padding-bottom: 2px;
+  }
+  .back-office .tab {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+      transform 0.06s ease;
+  }
+  .back-office .chip {
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
+      transform 0.06s ease;
+  }
+  .back-office .mrow {
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .back-office .tab:active,
+  .back-office .chip:active {
+    transform: scale(0.98);
+  }
+
+  /* KPIs arrive four to a group. Two rows of two reads better on a phone
+     than a wrapping flex row, which puts three up and leaves the fourth
+     stretched across the width on its own. */
+  .back-office .kpis {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .back-office .kpi {
+    /* A grid item's floor is its content, and a rupee total is long enough
+       to push the column past its track without this. */
+    min-width: 0;
+  }
+  .back-office .kpi b {
+    overflow-wrap: anywhere;
+  }
+  @media (min-width: 560px) {
+    .back-office .kpis {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* A five-column table does not fit a phone, and the honest answer is to
+     let it scroll sideways inside its panel rather than to crush the
+     columns or drop them. The panel clips its own rounded corners. */
+  .back-office .panel.scroll-x {
+    overflow-y: hidden;
+  }
+
+  /* ---- desk: the column widens ----
+     820px is a reading width, and the back office is not reading - it is
+     tables of five to seven columns and rows of four KPIs. From 960px, so
+     that a tablet in landscape counts as a desk, there is room to give
+     them; the ten tabs fit the row at that width too, so they go back to
+     sharing it rather than scrolling. */
+  @media (min-width: 960px) {
+    .back-office .wrap {
+      max-width: 1060px;
+      padding: 0 24px 60px;
+    }
+    .back-office h1 {
+      font-size: 22px;
+    }
+    .back-office .tab {
+      flex: 1;
+    }
+    .back-office .panel {
+      padding: 16px;
+    }
+    .back-office table.tt {
+      font-size: 13px;
+    }
+    .back-office table.tt th,
+    .back-office table.tt td {
+      padding: 9px 10px;
+    }
+  }
+
+  /* ---- touch ----
+     A 12.5px tab at 9px padding is a 35px target, which is under the
+     guideline everywhere and under a thumb in particular. The floor side
+     sizes its own targets; these are the desk's. */
+  @media (pointer: coarse) {
+    .back-office .tab {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+    }
+    .back-office .chip,
+    .back-office .refresh {
+      display: inline-flex;
+      align-items: center;
+      min-height: 40px;
+    }
+  }
+
+  /* ---- short viewports ----
+     A phone on its side. The sticky header and the tab strip were taking a
+     third of the height between them, off a page that is mostly table. */
+  @media (max-height: 520px) and (orientation: landscape) {
+    .back-office .bo-head {
+      padding: 8px 0 6px;
+    }
+    .back-office .tabstrip {
+      margin-top: 8px;
+    }
+    .back-office .wrap {
+      padding-bottom: 24px;
+    }
+  }
+
+  /* ---- pointer devices ----
+     The back office was ported from a page with `:active` and nothing
+     else, and it is the half of the app most likely to be driven by a
+     mouse. Without these, every tab, row and chip in it feels dead.
+     Keyboard focus is handled globally by `:focus-visible`. */
+  @media (hover: hover) and (pointer: fine) {
+    .back-office .tab:hover:not(.on) {
+      background: var(--hover);
+      border-color: var(--line2);
+      color: var(--ink);
+    }
+    .back-office .chip:hover:not(.on) {
+      border-color: var(--line2);
+      color: var(--ink);
+    }
+    .back-office .mrow:hover {
+      background: var(--panel2);
+      border-color: var(--line2);
+    }
+    .back-office .metric:hover .mv {
+      color: var(--brand);
+    }
+    .back-office .refresh:hover {
+      border-color: var(--line2);
+      color: var(--ink);
+    }
+    .back-office .refresh:disabled:hover {
+      border-color: var(--line);
+      color: var(--ink-dim);
+    }
+    .back-office .back:hover {
+      color: var(--brand-soft);
+    }
+    .back-office .btn:hover:not(:disabled) {
+      background: var(--brand-soft);
+    }
+    .back-office .btn.ghost:hover:not(:disabled),
+    .back-office .btn.outline:hover:not(:disabled) {
+      background: var(--hover);
+      border-color: var(--line2);
+      color: var(--ink);
+    }
+    .back-office .btn.danger:hover:not(:disabled) {
+      background: var(--t-err-bg);
+      border-color: var(--err);
+    }
+    /* Five numbers across a 12.5px row is easy to lose your place in, and
+       the row tint is what carries the eye from the machine name to the
+       kg/h at the far end. */
+    .back-office table.tt tbody tr:hover {
+      background: var(--hover);
+    }
+  }
+
+  /* ==================================================================
    * responsive
    *
    * One column and a bottom bar on a phone; two columns from a tablet;

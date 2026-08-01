@@ -124,8 +124,8 @@ export function RatesPage() {
       <div className="sub mt-2 text-center">Saved figures load automatically for everyone.</div>
 
       <div className="grouphead">Customer selling rates</div>
-      <div className="panel mt-0 p-0">
-        <table className="tt">
+      <div className="panel scroll-x mt-0 p-0">
+        <table className="tt min-w-[520px]">
           <thead>
             <tr>
               <th>Customer</th>

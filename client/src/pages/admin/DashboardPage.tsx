@@ -112,8 +112,8 @@ export function DashboardPage() {
       {!efficiency.length ? (
         <div className="empty">No runs in this window.</div>
       ) : (
-        <div className="panel mt-0 p-0">
-          <table className="tt">
+        <div className="panel scroll-x mt-0 p-0">
+          <table className="tt min-w-[480px]">
             <thead>
               <tr>
                 <th>Machine</th>

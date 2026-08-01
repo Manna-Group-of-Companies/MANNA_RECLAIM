@@ -260,8 +260,8 @@ export function AdminQualityPage() {
       {!summary.length ? (
         <div className="empty">No tests in this window.</div>
       ) : (
-        <div className="panel">
-          <table className="tt">
+        <div className="panel scroll-x">
+          <table className="tt min-w-[420px]">
             <thead>
               <tr>
                 <th>Grade</th>
@@ -346,8 +346,8 @@ export function AdminQualityPage() {
       {!rows.length ? (
         <div className="empty">No verdicts match these filters.</div>
       ) : (
-        <div className="panel">
-          <table className="tt">
+        <div className="panel scroll-x">
+          <table className="tt min-w-[720px]">
             <thead>
               <tr>
                 <th>Batch</th>

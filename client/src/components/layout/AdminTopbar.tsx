@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { requestRefresh } from '@/features/ui/uiSlice';
 import { logout } from '@/features/auth/authSlice';
@@ -28,6 +29,34 @@ export function AdminTopbar() {
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
   const online = useAppSelector((s) => s.ui.online);
+  /*
+   * Every tab fetches from a different slice, and the header has no way of
+   * knowing which one the current page is using - so it watches all of them.
+   * Refresh dispatches a tick and nothing visibly happens for a second or
+   * two otherwise, which reads as a dead button and gets clicked again.
+   */
+  const busy = useAppSelector(
+    (s) =>
+      s.reports.loading ||
+      s.maintenance.loading ||
+      s.quality.loading ||
+      s.rates.loading ||
+      s.products.loading ||
+      s.runs.loading,
+  );
+
+  /*
+   * Ten tabs do not fit a phone, so the strip scrolls - and on Users, the
+   * last of them, a reload would show tabs one to five and no sign of where
+   * you are. Pull the active one into view whenever the route changes.
+   */
+  const strip = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    strip.current
+      ?.querySelector('.tab.on')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [pathname]);
 
   return (
     <header className="bo-head">
@@ -41,8 +70,17 @@ export function AdminTopbar() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="refresh" onClick={() => dispatch(requestRefresh())}>
-            ↻ Refresh
+          <button
+            type="button"
+            className="refresh"
+            onClick={() => dispatch(requestRefresh())}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            <span className={cn('inline-block', busy && 'animate-spin')} aria-hidden="true">
+              ↻
+            </span>{' '}
+            {busy ? 'Loading…' : 'Refresh'}
           </button>
           <NavLink to={userPaths.machines} className="refresh">
             Shop floor
@@ -53,7 +91,7 @@ export function AdminTopbar() {
         </div>
       </div>
 
-      <nav className="tabstrip">
+      <nav className="tabstrip" ref={strip}>
         {tabs.map(({ to, label }) => (
           <NavLink key={to} to={to} className={({ isActive }) => cn('tab', isActive && 'on')}>
             {label}

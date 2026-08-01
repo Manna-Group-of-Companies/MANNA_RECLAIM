@@ -210,8 +210,8 @@ export function CostingPage() {
       {!loading && (
         <>
           <div className="grouphead">What it cost</div>
-          <div className="panel mt-0 p-0">
-            <table className="tt">
+          <div className="panel scroll-x mt-0 p-0">
+            <table className="tt min-w-[420px]">
               <thead>
                 <tr>
                   <th>Line</th>
