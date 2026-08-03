@@ -66,7 +66,8 @@ function RunDetail({
   const set = (field: keyof Draft, value: string) => setDraft({ ...draft, [field]: value });
 
   const math = runMath(run, draft);
-  const { isAuto, isPress, isTod, elecStart, elecEnd, hourStart, hourEnd } = math;
+  const { isAuto, isPress, isTod, isCracker, pickingLabourHours } = math;
+  const { elecStart, elecEnd, hourStart, hourEnd } = math;
   const { elecPair, hourPair, elecDelta, hourDelta, energy, runHours, output, issues } = math;
 
   const changed = changedFields(draft, base);
@@ -312,6 +313,27 @@ function RunDetail({
           field('Packed sacks', numberInput('packedSacks'))
         )}
         {isAuto && field(<>Firewood <span className="muted font-normal">(kg)</span></>, numberInput('firewoodKg'))}
+
+        {/* The yard gang that fed the cracker. What was entered at the machine
+            was an estimate at the end of a shift, so it is correctable here -
+            and correcting it re-prices the crumb that window made, because the
+            costing works the figure out from the runs rather than storing it. */}
+        {isCracker && (
+          <>
+            <div className="grouphead">Picking — scrap yard</div>
+            {field('Labourers', numberInput('pickingLabourers'))}
+            {field(
+              <>Time worked <span className="muted font-normal">(hrs)</span></>,
+              numberInput('pickingHours'),
+              pickingLabourHours != null ? (
+                <div className="diffout show mt-1.5">
+                  <b>{pickingLabourHours}</b> labourer-hours — costed into ₹/kg crumb, and from there
+                  into the reclaim.
+                </div>
+              ) : undefined,
+            )}
+          </>
+        )}
         {field(
           'Remarks',
           <textarea rows={2} value={draft.remarks} onChange={(e) => set('remarks', e.target.value)} />,

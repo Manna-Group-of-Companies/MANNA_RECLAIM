@@ -1056,6 +1056,12 @@
   .bcard.orphan {
     border-color: var(--t-err-line);
   }
+  /* A coarse pool with a hold on one of its samples. The same red edge as an
+     orphan, because it means the same thing to whoever is scanning the list:
+     this one needs looking at. It is not a stop - the pool still sells. */
+  .bcard.hold {
+    border-color: var(--t-err-line);
+  }
   .borphan {
     font-size: 10.5px;
     color: var(--ink-dim);
@@ -1327,6 +1333,7 @@
     color: var(--ink-faint);
   }
 
+
   .scard .foot {
     display: flex;
     align-items: center;
@@ -1340,6 +1347,95 @@
     margin-top: 3px;
     font-size: 11.5px;
     color: var(--ink-faint);
+  }
+  /* The two things the back office can do to a group: change its verdict, and
+     load it onto a vehicle. Wrapping on a narrow tablet rather than squeezing,
+     because both are real targets for a thumb. */
+  .scard .acts {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  /* ---------------------------------------------------------------------- *
+   * The yard by QC state.
+   *
+   * Three cells above the cards - what can go out, what is waiting on the lab,
+   * what the lab stopped. The cards below answer "which batch"; this answers
+   * "how much is stuck", which is the question a manager actually walks in
+   * with and which the card list makes you add up by eye.
+   *
+   * Deliberately three cells even when one of them is empty, unlike the bands
+   * below, which drop when they have nothing in them. A band is a heading over
+   * work; this is a reading of the plant, and "nothing failed today" is one of
+   * the more useful things it can say - a cell that vanished would leave the
+   * same blank as a cell that was never rendered.
+   * ---------------------------------------------------------------------- */
+  .qcstat {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 12px;
+  }
+  .qcstat-cell {
+    position: relative;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 9px 10px 9px 12px;
+  }
+  .qcstat-cell::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--line2);
+  }
+  .qcstat-cell.pass::before {
+    background: var(--ok);
+  }
+  .qcstat-cell.pending::before {
+    background: var(--warn);
+  }
+  .qcstat-cell.fail::before {
+    background: var(--err);
+  }
+  .qcstat-cell b {
+    display: block;
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--ink);
+  }
+  /* Nothing standing in this state. Still shown - see above - but it stops
+     competing with the states that have stock in them. */
+  .qcstat-cell.nil {
+    opacity: 0.55;
+  }
+  .qcstat-cell.nil b {
+    color: var(--ink-faint);
+  }
+
+  /* One line under each band heading saying what the band means. Three states
+     that all sound like QC are easy to confuse from their names alone, and the
+     difference between them is what somebody has to do next: chase the lab, or
+     rework the stock. */
+  .qcband-hint {
+    margin: -4px 2px 9px;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+
+  @media (max-width: 480px) {
+    .qcstat {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* Divider between the weigh queue and the scale record under it, carrying
@@ -1528,6 +1624,82 @@
     gap: 6px;
     margin-top: 9px;
   }
+  /*
+   * A coarse pool's three sample points, on its card in the lab's tab.
+   *
+   * Three equal columns rather than a list, because the shape is the point: the
+   * period has exactly three of these and a missing one has to read as a gap in
+   * a row of three, not as a list that happens to be short. They stay side by
+   * side on the narrowest phone - the labels are two short lines and the dates
+   * are five characters - so the row never reflows into something that looks
+   * like a different number of samples.
+   */
+  .qslots {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .qslot {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 8px;
+    border-radius: 10px;
+    border: 1px dashed var(--line2);
+    background: var(--panel2);
+    color: var(--ink-dim);
+    text-align: left;
+    min-height: 62px;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
+      transform 0.06s ease;
+  }
+  .qslot:active {
+    transform: scale(0.98);
+  }
+  .qslot b {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .qslot small {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .qslot .v {
+    margin-top: auto;
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  /*
+   * Taken, so the border goes solid - a filled slot and an empty one differ in
+   * more than colour, which is what keeps the row readable to someone who
+   * cannot separate the two tints.
+   */
+  .qslot.pass,
+  .qslot.hold {
+    border-style: solid;
+  }
+  .qslot.pass {
+    border-color: var(--t-ok-line);
+    background: var(--t-ok-bg);
+  }
+  .qslot.pass .v {
+    color: var(--ok);
+  }
+  .qslot.hold {
+    border-color: var(--t-err-line);
+    background: var(--t-err-bg);
+  }
+  .qslot.hold .v {
+    color: var(--err);
+  }
+
   /* One grade of a batch inside the QC sheet: its chip, where it stands, in. */
   .qcrow {
     width: 100%;
@@ -1673,8 +1845,24 @@
   .btn:disabled,
   .btn.is-off {
     opacity: 0.4;
-    pointer-events: none;
     cursor: not-allowed;
+  }
+  /*
+   * `is-off` is a look rather than a state, so it still has to be stopped from
+   * being pressed. A real `:disabled` must not be - it keeps its pointer events
+   * on purpose.
+   *
+   * The reason is that a dead control has to be able to say why it is dead. The
+   * Stock page disables Dispatch on stock the lab has not passed rather than
+   * hiding the button, and the explanation rides on the button's `title`; with
+   * pointer events off the browser never shows it, and the control is not only
+   * dead but mute. A disabled button fires no click either way, so nothing is
+   * risked by letting the cursor reach it. On a tablet, where there is no hover
+   * at all, the same sentence is printed on the card beside the badge - see
+   * blockedReason() - because a tooltip is not an answer on a touchscreen.
+   */
+  .btn.is-off {
+    pointer-events: none;
   }
 
   /* ---------- form fields ---------- */
@@ -3090,10 +3278,17 @@
   /* Every card list a tab renders is a direct child of `.app-view`, so the
      columns can be added here without a page knowing about them. Scoped with
      `>` deliberately: a `.stack` nested inside a sheet must stay one column,
-     because the sheet is narrow whatever the viewport is doing. */
+     because the sheet is narrow whatever the viewport is doing.
+
+     `section > .stack` is the Stock page. It bands its cards by QC state, so
+     each band is a `<section>` and its list is a grandchild rather than a
+     child - which is how it stayed stubbornly one column wide while every
+     other tab went two-up beside it. Same rule, one more step down; the
+     `section > .mlist` beside it is the Machines page for the same reason. */
   @media (min-width: 760px) {
     .app-view > .stack,
     .app-view > .mlist,
+    .app-view > section > .stack,
     .app-view > section > .mlist {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3215,6 +3410,7 @@
   @media (min-width: 1280px) {
     .app-view > .stack,
     .app-view > .mlist,
+    .app-view > section > .stack,
     .app-view > section > .mlist {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }

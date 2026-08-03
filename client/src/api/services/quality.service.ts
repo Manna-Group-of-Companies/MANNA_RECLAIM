@@ -4,8 +4,28 @@ import type { ApiEnvelope, ListQuery } from '@/types/api';
 import type { QualityGradeSummary, QualityTest, Quality, Shift, Verdict } from '@/types/models';
 
 export interface RecordTestPayload {
+  /**
+   * What is being certified.
+   *
+   *   batch    one grade of one lot, and passing it releases that lot's sacks.
+   *   pool     one sample of a coarse period. Coarse has no lot to certify, so
+   *            the period is sampled three times instead and a sample records
+   *            what the line was doing without releasing or gating anything.
+   *   product  what a press moulded. The bench tests loops rather than a grade
+   *            of rubber, so `grade` carries the product's id - which is why
+   *            this is its own kind rather than a batch test with the grade
+   *            loosened. Passing it releases every pack of that product.
+   *
+   * Defaults to `batch`.
+   */
+  kind?: 'batch' | 'pool' | 'product';
+  /**
+   * The batch number; on a pool sample, the pool's label; on a moulded test,
+   * the batch of compound the press was running.
+   */
   batchNo?: string | null;
   machineId?: string | null;
+  /** The grade on a batch or pool test, and the product's id on a moulded one. */
   grade: Quality | string;
   verdict: Verdict;
   params?: { name: string; value: string; unit?: string }[];

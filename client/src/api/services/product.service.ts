@@ -26,6 +26,15 @@ export interface ProductPayload {
   code?: string | null;
   quality?: string | null;
   packSizeKg?: number | null;
+  /**
+   * How a moulded product is boxed, and what one piece weighs. `packSizeKg`
+   * above is a different figure - what a sack of a reclaim grade weighs -
+   * because a moulded product is sold by the piece rather than by weight, so its
+   * pack is a count. The yard keys moulded stock on the product and this pack.
+   */
+  packSize?: number | null;
+  packLabel?: string | null;
+  pieceKg?: number | null;
   machineId?: string | null;
   rawMaterialCost?: number | null;
   firewoodCost?: number | null;

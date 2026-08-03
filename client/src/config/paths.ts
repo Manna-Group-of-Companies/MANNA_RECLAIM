@@ -9,9 +9,11 @@ export const userPaths = {
   weigh: '/weigh',
   packing: '/packing',
   /**
-   * The yard. One route, two answers: a manager gets the whole table and the
-   * New Dispatch form, a supervisor gets what is in stock and nothing else -
-   * see StockPage, and /stock/summary on the server.
+   * What is packed and ready to dispatch. One route, two answers: a manager
+   * gets the whole table and the form to issue a dispatch from it, a supervisor
+   * gets what is in stock and nothing else - see StockPage, and /stock/summary
+   * on the server. Issuing a dispatch is the manager's alone, because the form
+   * cannot be filled in without the customer list.
    */
   stock: '/stock',
   quality: '/quality',

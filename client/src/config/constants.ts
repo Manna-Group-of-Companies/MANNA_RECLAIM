@@ -1,4 +1,4 @@
-import type { Quality, DispatchGrade, Role, Shift } from '@/types/models';
+import type { Quality, DispatchGrade, Role, Shift, StockUnit } from '@/types/models';
 
 /** Mirrors server/src/config/constants.js - keep both sides in step. */
 export const ROLES: Record<string, Role> = {
@@ -12,9 +12,20 @@ export const ROLES: Record<string, Role> = {
 export const ADMIN_ROLES: Role[] = ['manager', 'admin'];
 
 /**
- * Who may load a vehicle, and therefore who is shown what has left in one.
- * Mirrors DISPATCH_ROLES on the server, which is where it is actually enforced -
- * this list only keeps a screen from asking for something it will be refused.
+ * Who may issue a dispatch, and therefore who is shown the customer list.
+ *
+ * The yard as well as the back office. The vehicle is loaded at the yard and
+ * the supervisor standing at it knows what went on it, so that is where the
+ * document is raised.
+ *
+ * The cost is real and worth stating: a dispatch names the customer it goes to
+ * and the price it goes at, so everyone on this list can read the customer list
+ * and the rate against each grade. That is a commercial judgement the plant
+ * made deliberately - see the longer note on DISPATCH_ROLES in
+ * server/src/config/constants.js for what did and did not move with it.
+ *
+ * Mirrors the server's list, which is where it is actually enforced. This one
+ * only keeps a screen from asking for something it will be refused.
  */
 export const DISPATCH_ROLES: Role[] = ['supervisor', 'manager', 'admin'];
 
@@ -127,6 +138,28 @@ export const autoclaveWorkers = (paired: boolean) => (paired ? 1 : 2);
 export const SACK_KG = 50;
 
 /**
+ * What a stock count counts, and how to say it.
+ *
+ * Reclaim and coarse are bagged, so they are sacks. A moulding press makes
+ * finished goods and counts them one at a time, so they are pieces. Both live in
+ * the same field on a stock group and on a dispatch line - see the note in
+ * server/src/services/stock.service.js - so `unit` is the only thing standing
+ * between "4,000 loops" and a screen reading four thousand sacks.
+ *
+ * Kept here rather than in each screen because that is exactly the sort of
+ * two-line table that gets copied into a third file with `sacks` hard-coded, and
+ * the whole point of the field is that nothing assumes.
+ */
+export const UNIT_NOUN: Record<StockUnit, { one: string; many: string }> = {
+  sacks: { one: 'sack', many: 'sacks' },
+  pieces: { one: 'piece', many: 'pieces' },
+};
+
+/** "40 sacks", "1 piece" - a count that says what it is counting. */
+export const counted = (n: number, unit: StockUnit = 'sacks') =>
+  `${n} ${n === 1 ? UNIT_NOUN[unit].one : UNIT_NOUN[unit].many}`;
+
+/**
  * How many weighed runs the Weigh tab lists before its Show all. The plant has
  * years of them and a correction is nearly always to something weighed this
  * shift, so the tab opens on the newest handful rather than the whole record.
@@ -161,6 +194,22 @@ export const TYRES = {
 } as const;
 
 export type TyreType = keyof typeof TYRES;
+
+/**
+ * The cracker, singled out of the grinding line for one thing: picking.
+ *
+ * Picking is the gang that pulls scrap tyres out of the yard and feeds them to
+ * the cracker - the first labour spent on a kg of reclaim. It is the cracker's
+ * own and nothing else's, so the cracker's stop sheet is the only one that asks
+ * for it, and the API drops it from anything else. A list rather than an id
+ * because a second cracker is a machine the plant could buy.
+ *
+ * Mirrors CRACKER_IDS in server/src/config/constants.js.
+ */
+export const CRACKER_IDS = ['CRK'];
+
+export const isCracker = (machineId?: string | null) =>
+  Boolean(machineId) && CRACKER_IDS.includes(machineId as string);
 
 /** The clock each shift covers, shown under the shift picks. */
 export const SHIFT_HOURS: Record<Shift, string> = {
@@ -235,8 +284,14 @@ export interface CostRateGroup {
 export const COST_RATE_GROUPS: CostRateGroup[] = [
   {
     title: 'Raw materials',
+    note: 'the rubber only — the grinding line adds its own works cost',
     fields: [
-      { key: 'crumbTruckPerKg', label: 'Rubber crumb — Truck', unit: '₹/kg' },
+      {
+        key: 'crumbTruckPerKg',
+        label: 'Rubber crumb — Truck',
+        unit: '₹/kg',
+        hint: 'The rubber in a kg of crumb; power, crews and picking are added from the line',
+      },
       { key: 'crumbBikePerKg', label: 'Rubber crumb — Bike', unit: '₹/kg' },
       { key: 'crumbDrcPerKg', label: 'Rubber crumb — DRC', unit: '₹/kg' },
       { key: 'raPerKg', label: 'Reclaiming agent (RA)', unit: '₹/kg' },
@@ -246,11 +301,28 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
     ],
   },
   {
-    title: 'Packing & loading',
+    title: 'Packing',
     fields: [
       { key: 'packLabourPerSack', label: 'Packing labour', unit: '₹/sack', hint: 'Costed per kg at 50 kg/sack' },
       { key: 'packMaterialPerSack', label: 'Packing raw material', unit: '₹/sack', hint: 'Costed per kg at 50 kg/sack' },
-      { key: 'loadingPerKg', label: 'Loading labour', unit: '₹/kg' },
+    ],
+  },
+  {
+    title: 'Loading',
+    note: 'costed at dispatch, not in ₹/kg',
+    fields: [
+      {
+        key: 'loadingPerKg',
+        label: 'Contract rate',
+        unit: '₹/kg',
+        hint: 'One plant-wide rate to the loading gang',
+      },
+      {
+        key: 'loadingLabourPerHour',
+        label: 'Daily labour',
+        unit: '₹/labourer/hour',
+        hint: 'Man-hour rate — the only method for moulded goods',
+      },
     ],
   },
   {
@@ -260,6 +332,24 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
       { key: 'transDriverPerKg', label: 'Driver cost', unit: '₹/kg' },
       { key: 'transVehiclePerKm', label: 'Vehicle cost', unit: '₹/km', hint: '× distance entered at dispatch' },
       { key: 'transFuelPerKm', label: 'Fuel cost', unit: '₹/km', hint: '× distance entered at dispatch' },
+    ],
+  },
+  {
+    title: 'Grinding line',
+    note: 'flows into ₹/kg crumb, and from there into the reclaim',
+    fields: [
+      {
+        key: 'pickingLabourPerHour',
+        label: 'Picking & line labour',
+        unit: '₹/labourer/hour',
+        hint: 'The yard gang that feeds the cracker, and the cracker and grinder crews',
+      },
+      {
+        key: 'grinderKwhRate',
+        label: 'Grinding electricity',
+        unit: '₹/kWh',
+        hint: 'Cracker and grinders — falls back to the refiner rate if left blank',
+      },
     ],
   },
   {

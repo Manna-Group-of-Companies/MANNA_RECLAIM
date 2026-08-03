@@ -21,7 +21,7 @@ interface RunsState {
   weighedAll: boolean;
   /** Weighed runs that still have full sacks to bag. */
   pendingPack: Run[];
-  /** Sacks already bagged and not yet dispatched - the Dispatch tab's stock. */
+  /** Sacks already bagged and not yet dispatched - the Stock tab's stock. */
   packed: Run[];
   shift: Run[];
   /** Which shift `shift` actually holds - the server falls back to the
@@ -65,8 +65,18 @@ const asStock = (run: Run, known?: Run): Run => {
   return { ...run, dispatched_sacks: gone, avail_sacks: avail, avail_kg: round2(avail * SACK_KG) };
 };
 
-/** Same rule as the server: under one sack left means the run is done packing. */
+/**
+ * Same rule as the server: a run is done packing when there is nothing left on
+ * it worth filing.
+ *
+ * On a bagged run that means under one sack of material left, because the
+ * remainder is carried into the next batch of the same grade rather than
+ * bagged. On a press run it means every piece it moulded has been boxed - there
+ * is no weight to divide and no remainder to carry, so the comparison is
+ * between two counts.
+ */
 const stillPacking = (run: Run) => {
+  if (run.kind === 'press') return (run.pieces ?? 0) > (run.packed_pieces ?? 0);
   const total = (run.weight_kg ?? run.out_weight ?? 0) + (run.leftout_in ?? 0);
   const packed = (run.packed_sacks ?? 0) * SACK_KG;
   return run.packed_sacks == null || total - packed >= SACK_KG;
@@ -117,7 +127,7 @@ export const fetchPendingPack = createAsyncThunk('runs/pendingPack', async (_, {
   }
 });
 
-/** The packed sacks the Dispatch tab loads a vehicle from. */
+/** The packed sacks the Stock tab loads a vehicle from. */
 export const fetchPacked = createAsyncThunk('runs/packed', async (_, { rejectWithValue }) => {
   try {
     return (await runService.listPacked({ limit: 100 })).rows;
@@ -355,7 +365,7 @@ const runsSlice = createSlice({
         state.pendingPack = stillPacking(run)
           ? state.pendingPack.map((r) => (r.id === run.id ? run : r))
           : state.pendingPack.filter((r) => r.id !== run.id);
-        // Bagging is what puts stock in the yard, so the Dispatch tab has it
+        // Bagging is what puts stock in the yard, so the Stock tab has it
         // without waiting for a refetch. Sacks corrected back down to none -
         // or all of them already gone out - take the run off the list again.
         const known = state.packed.find((r) => r.id === run.id);

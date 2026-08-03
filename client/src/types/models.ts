@@ -87,6 +87,22 @@ export interface Product {
   code?: string | null;
   quality?: DispatchGrade | null;
   pack_size_kg?: number | null;
+  /**
+   * How a moulded product is boxed, and what one piece weighs.
+   *
+   * `pack_size_kg` above is a different figure - what a sack of a reclaim grade
+   * weighs - because a moulded product is not sold by weight at all: it is sold
+   * by the piece, boxed some number at a time. So `pack_size` is a count of
+   * pieces, and `pack_label` is what the box is called on the floor.
+   *
+   * Both may be unset. The presses run whether or not the back office has filled
+   * them in - the yard then shows the pieces as loose and says so, rather than a
+   * shift's moulding being stranded for want of a settings field. `piece_kg`
+   * unset means moulded stock reports no weight, which is honest.
+   */
+  pack_size?: number | null;
+  pack_label?: string | null;
+  piece_kg?: number | null;
   machine_id?: string | null;
   raw_material_cost?: number | null;
   firewood_cost?: number | null;
@@ -282,6 +298,12 @@ export interface Run {
   cyclic_min?: number | null;
   cure_temp_c?: number | null;
   pieces?: number | null;
+  /**
+   * How many of those pieces have been boxed and filed into the yard - the
+   * mirror of `packed_sacks` on a bagged run. Null while nobody has been to the
+   * boxing bench, which is a different state from "boxed, and it came to none".
+   */
+  packed_pieces?: number | null;
   flash_kg?: number | null;
   compound_rate?: number | null;
   /**
@@ -291,6 +313,19 @@ export interface Run {
    */
   material_cost?: number | null;
   cost_per_piece?: number | null;
+  /**
+   * The picking gang on a cracker shift: how many hands were put on pulling
+   * scrap tyres out of the yard, and roughly how long they were at it.
+   *
+   * Only the cracker records it - picking is what feeds the cracker - and it is
+   * an estimate the supervisor gives at the end of the shift rather than a
+   * clocked figure. `picking_labour_hours` is the two multiplied out, derived by
+   * the API so no screen has to do it and get it slightly differently. All three
+   * are null on every run that never picked, which is not the same as a zero.
+   */
+  picking_labourers?: number | null;
+  picking_hours?: number | null;
+  picking_labour_hours?: number | null;
   /** A special-line pass that yields nothing to weigh - never bagged. */
   non_production?: boolean | null;
   status: RunStatus;
@@ -326,6 +361,24 @@ export interface QualityTest {
   /** The lab's report, once it has been uploaded - a photo or a PDF. */
   attachment_url?: string | null;
   attachment_name?: string | null;
+  /**
+   * The stock group this verdict moved, or null if it moved none.
+   *
+   * Null is not an error. A verdict releases stock that already exists and does
+   * not create any, so passing a batch nobody has bagged yet moves nothing -
+   * which is correct, and looks exactly like a broken app from the bench unless
+   * the screen says so.
+   */
+  stock_released?: {
+    id: string;
+    label: string;
+    display_label: string;
+    /** What is left, and what it counts - a moulded group answers in pieces. */
+    unit?: StockUnit;
+    available_qty?: number;
+    available_sacks: number;
+    qc_status: QcStatus;
+  } | null;
 }
 
 /** The whole record of one batch - what the batch detail view is drawn from. */
@@ -337,25 +390,78 @@ export interface BatchDetail extends Batch {
 
 export type QcStatus = 'pass' | 'fail' | 'pending';
 
+/** The three things a stock group can be - the three ways the plant makes goods. */
+export type StockKind = 'batch' | 'pool' | 'product';
+
 /**
- * What packing files sacks into, and what a dispatch draws them out of.
+ * What a stock count counts.
+ *
+ * Reclaim and coarse are bagged, so they are sacks. A press moulds finished
+ * goods and counts them one at a time, so they are pieces. The number is in the
+ * same field either way and this is what says what it means, so nothing on a
+ * screen should print a count without reading it.
+ */
+export type StockUnit = 'sacks' | 'pieces';
+
+/**
+ * Where a verdict came from. `lab` is one pushed across from a test filed at the
+ * bench; `manual` is the back office setting the status directly. Both are
+ * legitimate and they are not the same event - one has a test row behind it.
+ */
+export type QcSource = 'lab' | 'manual';
+
+/**
+ * What packing files stock into, and what a dispatch draws it out of.
  *
  * A special-line batch makes a group per grade it yielded, keyed on the batch
  * number. Coarse output is not batch-identified - the line runs for a shift, not
  * for a batch - so its sacks are pooled by the ten-day period they were packed
- * in, and the pool's label is worked out on the server from the packing date.
+ * in, and the pool's label is worked out on the server from the packing date. A
+ * moulding press makes a group per product and pack, counted in pieces.
  * `label` is the stored one; `display_label` is what the yard reads, AUG-H2.
  */
 export interface StockGroup {
   id: string;
-  kind: 'batch' | 'pool';
+  kind: StockKind;
   label: string;
   display_label: string;
-  quality: DispatchGrade | null;
+  /** The grade on a batch or pool, and the product's id on a moulded group. */
+  quality: DispatchGrade | string | null;
+  product_id?: string | null;
+
+  /** What the counts count. Everything printing one has to read this first. */
+  unit: StockUnit;
+  /**
+   * The counts, under both names. `packed_sacks` is what the column is called
+   * and what this app has always asked for; `packed_qty` is what it means once a
+   * group can be pieces. They are the same number, not two figures.
+   */
   packed_sacks: number;
   dispatched_sacks: number;
   available_sacks: number;
+  packed_qty: number;
+  dispatched_qty: number;
+  available_qty: number;
+
+  /** Pieces to a pack on a moulded group, and what the counts come to in packs. */
+  pack_size?: number | null;
+  packed_packs?: number | null;
+  available_packs?: number | null;
+
+  /** What one of them weighs, and what the counts therefore weigh. Null if unset. */
+  kg_per_unit?: number | null;
+  packed_kg?: number | null;
+  available_kg?: number | null;
+
   qc_status: QcStatus;
+  /** Who put it on that verdict, when, and whether it came from the bench. */
+  qc_by?: string | null;
+  qc_at?: string | null;
+  qc_source?: QcSource | null;
+
+  /** The span it was packed across - a pool runs ten days, a batch a shift. */
+  first_packed_on?: string | null;
+  last_packed_on?: string | null;
   period_start?: string | null;
   period_end?: string | null;
   created_at?: string | null;
@@ -364,19 +470,126 @@ export interface StockGroup {
 /**
  * The shop floor's copy of the same row, as /stock/summary sends it.
  *
- * These four fields are the whole response, not a subset the screen chose to
- * draw: the server builds this shape with its own serializer, so a price or a
- * customer is absent from the body rather than merely unrendered. Kept as its
- * own type for the same reason - a StockGroup with fields marked optional would
- * invite reading one where the other is all there is.
+ * These fields are the whole response, not a subset the screen chose to draw:
+ * the server builds this shape with its own serializer, so a price or a customer
+ * is absent from the body rather than merely unrendered. Kept as its own type
+ * for the same reason - a StockGroup with fields marked optional would invite
+ * reading one where the other is all there is.
+ *
+ * It carries the physical facts about the goods and none of the commercial ones:
+ * what is left, in what unit, what it weighs and when it was packed, but not the
+ * packed/dispatched split and not who signed the verdict off.
  */
 export interface StockSummaryRow {
   /** The group's key - what a dispatch line names. Carries nothing else. */
   id: string;
+  kind: StockKind;
   label: string;
-  quality: DispatchGrade | null;
+  quality: DispatchGrade | string | null;
+  unit: StockUnit;
   available_sacks: number;
+  available_qty: number;
+  available_packs?: number | null;
+  pack_size?: number | null;
+  available_kg?: number | null;
   qc_status: QcStatus;
+  first_packed_on?: string | null;
+  last_packed_on?: string | null;
+}
+
+/**
+ * One sample taken from a coarse pool. Thinner than a QualityTest because that
+ * is all the pools endpoint sends - a reading and who took it, with no batch
+ * anywhere, because a pool has none.
+ */
+export interface PoolSample {
+  id: string;
+  verdict: Verdict;
+  grade: DispatchGrade;
+  params?: QualityParam[];
+  tested_at?: string | null;
+  tested_by?: string | null;
+  /** The day the sample was taken - what decides which slot it lands in. */
+  sampled_on?: string | null;
+  remarks?: string | null;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+}
+
+/**
+ * One of a pool's three sample points, and whatever has been filed against it.
+ *
+ * `test` is null while nobody has sampled that stretch of the period. That is
+ * the point of numbering them: a sample never taken shows as an empty slot
+ * rather than as an absence nobody can see.
+ */
+export interface PoolSlot {
+  slot: 1 | 2 | 3;
+  from: string;
+  to: string;
+  test: PoolSample | null;
+}
+
+/**
+ * A coarse pool as the lab and the yard both read it.
+ *
+ * Coarse is not batch-identified - the line runs for a shift, not for a batch,
+ * and the volumes are too large to name a pallet by - so it is pooled into
+ * ten-day thirds of the month and the period is sampled three times instead of
+ * a lot being certified. Absence is not refusal - a pool nobody has sampled
+ * still sells, because coarse goes out on the line running to specification
+ * rather than on a certificate per pool - but a hold is: holding any sample
+ * stops the whole period until a later one passes.
+ */
+export interface StockPool {
+  id: string;
+  label: string;
+  display_label: string;
+  quality: DispatchGrade | null;
+  unit?: StockUnit;
+  available_sacks: number;
+  packed_sacks: number;
+  available_kg?: number | null;
+  qc_status: QcStatus;
+  period_start?: string | null;
+  period_end?: string | null;
+  slots: PoolSlot[];
+  samples_taken: number;
+  samples_total: number;
+  /** Any sample that came back a hold - the thing worth acting on. */
+  any_hold: boolean;
+}
+
+/**
+ * What a press made, as the lab's own list sends it.
+ *
+ * The bench's third list, beside the batches it tests and the coarse pools it
+ * samples - and the only way it can reach moulded goods at all, because a
+ * moulded group is keyed on the product and the pack it was boxed in and so
+ * appears on neither of the others.
+ *
+ * Thinner than a StockGroup and deliberately so: stock and verdicts, with no
+ * price, no customer and no packed-against-dispatched split. That is what makes
+ * it safe in front of the lab, on the same reasoning as the pool list.
+ */
+export interface MouldedStock {
+  id: string;
+  label: string;
+  display_label: string;
+  /** The product - what a verdict on moulded goods is filed against. */
+  product_id: string | null;
+  quality: string | null;
+  unit: StockUnit;
+  available_qty: number;
+  available_packs?: number | null;
+  pack_size?: number | null;
+  available_kg?: number | null;
+  qc_status: QcStatus;
+  qc_by?: string | null;
+  qc_at?: string | null;
+  qc_source?: QcSource | null;
+  first_packed_on?: string | null;
+  last_packed_on?: string | null;
 }
 
 export interface Customer {
@@ -393,12 +606,54 @@ export interface Customer {
 export interface DispatchLine {
   id: string;
   stock_group_id: string;
-  /** The group's label as the yard reads it - AUG-H2, or B1041-Fine. */
+  /** The group's label as the yard reads it - AUG-H2, B1041-Fine, or LOOP-50. */
   label: string | null;
-  quality: DispatchGrade | null;
+  /** The grade, or the product on a moulded line. */
+  quality: DispatchGrade | string | null;
+  /** What the quantity counts, and the quantity - `sacks` is the older name. */
+  unit?: StockUnit;
+  qty?: number;
   sacks: number;
+  kg?: number;
   unit_price: number;
   line_total: number;
+  /** This line's share of the one loading job, split by kg. */
+  loading_share?: number;
+  /** What the reclaim on this line cost to make, frozen at the batch. Null on a pool. */
+  reclaim_cost?: number | null;
+}
+
+/** How the crew that loaded a vehicle was paid. */
+export type LoadingMode = 'contract' | 'manhour' | 'mixed';
+
+/** What was loaded. Moulded goods have no per-kg contract, so they are man-hour only. */
+export type LoadingMaterial = 'reclaim' | 'moulded';
+
+/**
+ * One loading job - one truck - and what it cost.
+ *
+ * Both rates are snapshots taken when the entry was written, never a current
+ * lookup: revising a rate in the settings prices the next job and leaves every
+ * job already done exactly where it was.
+ */
+export interface LoadingActivity {
+  id: string;
+  dispatch_id: string;
+  loading_mode: LoadingMode;
+  material_kind: LoadingMaterial;
+  kg_loaded: number;
+  contract_rate_per_kg: number;
+  manhour_labourers: number;
+  manhour_hours: number;
+  daily_labour_rate: number;
+  contract_cost: number;
+  manhour_cost: number;
+  loading_cost: number;
+  vehicle_no?: string | null;
+  remarks?: string | null;
+  created_at?: string | null;
+  /** False when the job recorded no labour at all - flagged rather than hidden. */
+  has_labour: boolean;
 }
 
 /**
@@ -416,11 +671,30 @@ export interface DispatchSummary {
   customer: string | null;
   vehicle: string | null;
   sacks: number;
+  /**
+   * Moulded goods on the same document, counted in their own unit. Kept apart
+   * from the sacks rather than added to them: forty sacks plus four thousand
+   * loops is arithmetic on two different quantities.
+   */
+  pieces?: number;
+  /**
+   * What went, split by grade or product. A load is one row and usually more
+   * than one product, so a bare count says how much left without saying what.
+   */
+  sacks_by_quality?: Record<string, number>;
   /** How many stock groups this vehicle was loaded off. */
   lines: number;
   goods_total: number;
   transport_charge: number;
   total: number;
+  loading_mode?: LoadingMode | null;
+  loading_cost?: number;
+  /**
+   * False on a load with no labour recorded against it at all. A real thing -
+   * the customer's own crew loading their own vehicle - and also what a form
+   * tabbed through looks like, so it is flagged rather than assumed either way.
+   */
+  labour_recorded?: boolean;
   remarks?: string | null;
   created_at?: string | null;
 }
@@ -434,12 +708,33 @@ export interface DispatchDoc {
   remarks?: string | null;
   created_by?: string | null;
   created_at?: string | null;
+  /** Bagged sacks on the document, and moulded pieces, counted apart. */
   sacks: number;
+  pieces?: number;
+  kg?: number;
   goods_total: number;
   total: number;
   lines: DispatchLine[];
   /** On a customer's history: the sacks that went out, split by grade. */
   sacks_by_quality?: Record<string, number>;
+
+  /** What it cost to put this load on a truck. Null when none was recorded. */
+  loading?: LoadingActivity | null;
+  loading_cost?: number;
+  labour_recorded?: boolean;
+  /**
+   * Goods, less what the reclaim cost to make and what it cost to serve:
+   *
+   *   margin = goods - kg x the batch's frozen rupees-per-kg - loading - transport
+   *
+   * Null when any line's batch cost is unknown - a coarse pool has no batch
+   * behind it - because a margin missing a term reads as a thin one and
+   * somebody acts on it.
+   */
+  reclaim_cost?: number | null;
+  margin?: number | null;
+  /** Goods less the costs to serve alone, which is always knowable. */
+  contribution?: number;
 }
 
 /**
@@ -644,6 +939,65 @@ export interface CostRates {
   updatedBy: string | null;
 }
 
+/** One feedstock the grinding line ran on, and what its crumb cost in rubber. */
+export interface CrumbFeedstock {
+  tyre_type: string | null;
+  kg: number;
+  rate: number;
+  cost: number;
+}
+
+/** What one machine on the grinding line contributed to the crumb it made. */
+export interface CrumbMachine {
+  machineId: string;
+  machine: string;
+  runs: number;
+  crumbKg: number;
+  kwh: number;
+  crewHours: number;
+  pickingHours: number;
+  cost: number;
+}
+
+/**
+ * What a kg of the plant's own crumb cost to make, and what the autoclaves ate
+ * of it. Worked out from the grinding line's runs rather than typed in:
+ *
+ *   perKg = materialPerKg (the rubber, at the feedstock's crumb rate)
+ *         + worksPerKg    (electricity + the crews + the picking gang, over the
+ *                          crumb the line weighed)
+ *
+ * Picking is inside `worksPerKg`, not beside it - which is the point. A heavier
+ * picking shift raises the crumb rate, which raises what the autoclave charge
+ * cost, which raises the cost of the reclaim, with nothing to remember. See
+ * server/src/services/crumb.service.js.
+ */
+export interface CrumbCosting {
+  runs: number;
+  crumbKg: number;
+  feedstock: CrumbFeedstock[];
+  materialCost: number;
+  materialPerKg: number | null;
+  kwh: number;
+  kwhRate: number;
+  energyCost: number;
+  labourRate: number;
+  crewHours: number;
+  crewCost: number;
+  /** Stated on its own so it can be seen - and already inside `worksCost`. */
+  pickingHours: number;
+  pickingCost: number;
+  pickingPerKg: number | null;
+  worksCost: number;
+  worksPerKg: number | null;
+  perKg: number | null;
+  machines: CrumbMachine[];
+  /** False where there is no crumb weighed, or no rates to price it at. */
+  priced: boolean;
+  /** The charge the autoclaves took in the window, costed at `perKg`. */
+  autoclave: { loads: number; chargeKg: number; crumbCost: number | null };
+}
+
 export interface CostingReport {
   window: { from: string | null; to: string | null };
   autoclaveLoads: number;
@@ -656,4 +1010,5 @@ export interface CostingReport {
   batchCost: number;
   outputKg: number;
   costPerKg: number;
+  crumb: CrumbCosting;
 }

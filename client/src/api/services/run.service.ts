@@ -63,6 +63,13 @@ export interface StopRunPayload {
   /** What came off a press: the pieces moulded, and the flash trimmed away. */
   pieces?: number | null;
   flashKg?: number | null;
+  /**
+   * The picking gang on a cracker shift - how many were put on pulling scrap
+   * tyres out of the yard, and roughly how long they were at it. Only the
+   * cracker's sheet asks, and the server ignores it from anything else.
+   */
+  pickingLabourers?: number | null;
+  pickingHours?: number | null;
 }
 
 /**
@@ -94,6 +101,9 @@ export interface UpdateRunPayload {
   cyclicMin?: number | null;
   pieces?: number | null;
   flashKg?: number | null;
+  /** The picking gang on a cracker shift, as the supervisor remembers it. */
+  pickingLabourers?: number | null;
+  pickingHours?: number | null;
 }
 
 /** What a deleted run was carrying, so the screen can name what it removed. */
@@ -107,10 +117,22 @@ export interface RemovedRun {
   weight_kg?: number | null;
 }
 
+/**
+ * What came off a finished run and into the yard.
+ *
+ * Two benches, one route. A weighed run is bagged into 50 kg sacks and reports
+ * the sub-sack remainder it carries into the next batch of the same grade; a
+ * press run is boxed by the piece and has neither a weight to divide nor
+ * anything to carry forward. The run decides which applies - a press cannot be
+ * packed in sacks and a refiner cannot be packed in pieces - and the API refuses
+ * the wrong one rather than ignoring it.
+ */
 export interface PackRunPayload {
-  sacks: number;
+  sacks?: number;
   leftoutIn?: number | null;
   leftoutOut?: number | null;
+  /** Boxed pieces off a press run. */
+  pieces?: number;
 }
 
 export const runService = {
@@ -122,7 +144,7 @@ export const runService = {
   listWeighed: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.weighed, params),
   /** Weighed runs that still have full sacks to bag. */
   listPendingPack: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.pendingPack, params),
-  /** Packed sacks not yet dispatched - the Dispatch tab's stock list. */
+  /** Packed sacks not yet dispatched - the Stock tab's stock list. */
   listPacked: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.packed, params),
   byShift: (params?: ListQuery) => requestPaged<Run>(endpoints.runs.shift, params),
 

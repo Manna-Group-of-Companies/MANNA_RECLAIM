@@ -23,10 +23,10 @@ const tabs: Tab[] = [
   { to: userPaths.batches, label: 'Batches', icon: 'batches' },
   { to: userPaths.weigh, label: 'Weigh', icon: 'weigh', badge: 'weigh' },
   { to: userPaths.packing, label: 'Packing', icon: 'packing', badge: 'packing' },
-  // The yard, and where a vehicle is loaded from. A manager and a supervisor
-  // both dispatch off this tab but are reading different responses from the
-  // API - a summary and the full ledger - rather than the same one drawn two
-  // ways. See StockPage.
+  // What is packed and ready to go. A manager and a supervisor read different
+  // responses from the API here - the full table and a summary - rather than
+  // the same one drawn two ways, and only the manager can issue a dispatch off
+  // it. See StockPage.
   { to: userPaths.stock, label: 'Stock', icon: 'dispatch' },
   { to: userPaths.quality, label: 'Quality', icon: 'quality', badge: 'quality', roles: LAB_ROLES },
   { to: userPaths.history, label: 'History', icon: 'history' },

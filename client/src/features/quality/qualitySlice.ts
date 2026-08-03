@@ -6,6 +6,7 @@ import {
 } from '@/api/services/quality.service';
 import { batchService } from '@/api/services/batch.service';
 import { toRequestError } from '@/api/axiosClient';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { batchQc } from './qc';
 import type { Batch, QualityGradeSummary, QualityTest } from '@/types/models';
 
@@ -92,6 +93,18 @@ export const recordTest = createAsyncThunk(
     try {
       const test = await qualityService.record(payload);
       void dispatch(fetchPendingQuality());
+      /*
+       * Filing a verdict moves the yard as well as the lab's own record.
+       * Passing a batch releases its stock group, and a passing sample lifts a
+       * pool left at pending - so a Stock view open beside this one is stale
+       * the moment this returns, showing "awaiting the lab" for stock the lab
+       * has just cleared.
+       *
+       * Bumped here rather than in the screen because the write is what makes
+       * it stale, and both the batch sheet and the pool sample sheet go through
+       * this thunk. Any page watching refreshTick re-reads itself.
+       */
+      void dispatch(requestRefresh());
       return test;
     } catch (err) {
       return rejectWithValue(fail(err));

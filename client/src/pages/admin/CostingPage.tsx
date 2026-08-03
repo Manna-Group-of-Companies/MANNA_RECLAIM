@@ -83,6 +83,14 @@ export function CostingPage() {
   const unlocked = useAppSelector((s) => s.ui.costingUnlocked);
   const [days, setDays] = useState(30);
 
+  /**
+   * The grinding line, costed off its own runs rather than off a rate anybody
+   * typed: what a kg of the plant's crumb cost to make, picking gang included.
+   * It prices the charge going into the autoclaves - the first line of the
+   * table below - and shows its working in its own panel further down.
+   */
+  const crumb = costing?.crumb ?? null;
+
   useEffect(() => {
     // Nothing is fetched while locked, so the figures are not sitting in the
     // page waiting to be read out of the network tab.
@@ -103,11 +111,52 @@ export function CostingPage() {
     const firewoodKg = costing.firewoodKg ?? 0;
     const monthShare = days / 30;
 
+    /*
+     * The crumb the autoclaves ate, at what it cost the plant to make it.
+     *
+     * This is the front of the works: scrap tyres picked out of the yard by
+     * hand, cracked, ground to crumb, charged into a vessel. The rate is not
+     * typed in - it is the grinding line's own runs divided by the crumb they
+     * weighed, so the rubber, the power, the crews and the picking gang are all
+     * inside it. Put a man more on picking and this line moves on its own.
+     *
+     * The line's works cost then comes back out of the conversion line below.
+     * Conversion is the whole plant's electricity and labour off the shift
+     * snapshots, the grinding line included, and charging the same crew twice -
+     * once inside the crumb and once beside it - would be the easiest possible
+     * way to make this whole page wrong.
+     *
+     * If that subtraction ever goes past zero the two figures disagree about
+     * what the grinding line spent - the snapshots are the database's, the crumb
+     * is worked out here - and the line says so rather than quietly showing the
+     * floor it was clamped to.
+     */
+    const crumbCost = crumb?.autoclave?.crumbCost ?? 0;
+    const worksInCrumb = crumb?.worksCost ?? 0;
+    const netConversion = costing.conversionCost - worksInCrumb;
+    const conversionLessGrinding = Math.max(0, netConversion);
+
     const rows = [
       {
+        label: 'Crumb into the autoclaves',
+        amount: crumbCost,
+        working: crumb?.priced
+          ? `${num(crumb.autoclave.chargeKg, 0)} kg charged × ${rupees(crumb.perKg ?? 0)}/kg — rubber ${rupees(
+              crumb.materialPerKg ?? 0,
+            )} + the grinding line's own ${rupees(crumb.worksPerKg ?? 0)} (power, crews, picking)`
+          : 'no crumb weighed in this window, or no grinding-line rates saved — see the Rates tab',
+      },
+      {
         label: 'Conversion (electricity + labour)',
-        amount: costing.conversionCost,
-        working: `from the shift costing snapshots · electricity ${rupees(costing.electricityCost)} + labour ${rupees(costing.labourCost)}`,
+        amount: conversionLessGrinding,
+        working:
+          netConversion < 0
+            ? `the shift snapshots report ${rupees(costing.conversionCost)}, less than the ${rupees(
+                worksInCrumb,
+              )} the grinding line alone spent — the two disagree, so nothing is charged here`
+            : `from the shift costing snapshots · electricity ${rupees(costing.electricityCost)} + labour ${rupees(
+                costing.labourCost,
+              )}${worksInCrumb ? `, less ${rupees(worksInCrumb)} already inside the crumb above` : ''}`,
       },
       {
         label: 'Firewood',
@@ -119,11 +168,22 @@ export function CostingPage() {
         amount: sacks * (rate('packLabourPerSack') + rate('packMaterialPerSack')),
         working: `${num(sacks, 0)} sacks × (${rupees(rate('packLabourPerSack'))} labour + ${rupees(rate('packMaterialPerSack'))} material) at ${SACK_KG} kg/sack`,
       },
-      {
-        label: 'Loading',
-        amount: outKg * rate('loadingPerKg'),
-        working: `${num(outKg, 0)} kg × ${rupees(rate('loadingPerKg'))}/kg`,
-      },
+      /*
+       * Loading is deliberately absent from this list.
+       *
+       * It used to be here, as the window's output times a per-kg rate, and it
+       * was wrong twice over. It charged a cost to serve against production,
+       * and it repriced every past window the moment somebody edited the rate.
+       *
+       * The rupees-per-kg a batch carries is frozen when the batch consumes its
+       * crumb. Loading happens afterwards, to goods that already exist, so it
+       * joins at dispatch as a cost to serve beside transport - see the margin
+       * on the customer's record, and loading.service.js on the server.
+       *
+       * Picking is the mirror case, and it is the crumb line at the top of this
+       * list: upstream of everything, so it flows into rupees-per-kg crumb and
+       * from there into the reclaim, rather than sitting out here as a bucket.
+       */
       {
         label: 'Overheads (apportioned)',
         amount:
@@ -134,7 +194,7 @@ export function CostingPage() {
     ];
 
     return rows.map((r) => ({ ...r, perKg: outKg ? r.amount / outKg : null }));
-  }, [costing, production, costRates, days]);
+  }, [costing, crumb, production, costRates, days]);
 
   const totals = useMemo(() => {
     const outKg = costing?.outputKg || production?.outKg || 0;
@@ -243,6 +303,102 @@ export function CostingPage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          {/* ---- where the crumb rate came from ----
+              The crumb line above is the biggest single thing on this page and
+              the only one that is not a rate somebody typed, so it shows its
+              working. Picking is on its own row not because it is a bucket -
+              it is inside the works figure below it - but because it is the one
+              cost here nobody could see before, and a manager watching the
+              yard needs to be able to point at it. */}
+          <div className="grouphead">What a kg of crumb cost</div>
+          <div className="panel mt-0">
+            {crumb == null || !crumb.priced ? (
+              <div className="sub">
+                {crumb == null || crumb.crumbKg <= 0
+                  ? 'No crumb was weighed off the grinding line in this window, so there is no rate to work out.'
+                  : 'The grinding line has no rates against it yet — fill in picking labour and grinding electricity on the Rates tab.'}
+              </div>
+            ) : (
+              <>
+                <div className="roRow">
+                  <span className="k">Crumb made</span>
+                  <span className="v">
+                    {num(crumb.crumbKg, 0)} kg
+                    <span className="muted"> · {crumb.runs} runs on the grinding line</span>
+                  </span>
+                </div>
+                <div className="roRow">
+                  <span className="k">Rubber</span>
+                  <span className="v">
+                    {rupees(crumb.materialCost)}
+                    <span className="muted">
+                      {' · '}
+                      {crumb.feedstock.length
+                        ? crumb.feedstock
+                            .map(
+                              (f) =>
+                                `${num(f.kg, 0)} kg ${f.tyre_type ?? 'unstated'} at ${rupees(f.rate)}`,
+                            )
+                            .join(' + ')
+                        : 'no feedstock recorded'}
+                    </span>
+                  </span>
+                </div>
+                <div className="roRow">
+                  <span className="k">Electricity</span>
+                  <span className="v">
+                    {rupees(crumb.energyCost)}
+                    <span className="muted">
+                      {' · '}
+                      {num(crumb.kwh, 0)} kWh at {rupees(crumb.kwhRate)}/kWh
+                    </span>
+                  </span>
+                </div>
+                <div className="roRow">
+                  <span className="k">Cracker &amp; grinder crews</span>
+                  <span className="v">
+                    {rupees(crumb.crewCost)}
+                    <span className="muted">
+                      {' · '}
+                      {num(crumb.crewHours, 0)} labourer-hours at {rupees(crumb.labourRate)}
+                    </span>
+                  </span>
+                </div>
+                <div className="roRow">
+                  <span className="k">Picking (scrap yard)</span>
+                  <span className="v">
+                    {rupees(crumb.pickingCost)}
+                    <span className="muted">
+                      {' · '}
+                      {crumb.pickingHours > 0
+                        ? `${num(crumb.pickingHours, 0)} labourer-hours at ${rupees(crumb.labourRate)}`
+                        : 'none recorded in this window'}
+                    </span>
+                  </span>
+                </div>
+                <div className="roRow">
+                  <span className="k">
+                    <b>Crumb rate</b>
+                  </span>
+                  <span className="v">
+                    <b>{rupees(crumb.perKg ?? 0)}/kg</b>
+                    <span className="muted">
+                      {' · '}
+                      rubber {rupees(crumb.materialPerKg ?? 0)} + works {rupees(crumb.worksPerKg ?? 0)}
+                      {crumb.pickingPerKg ? `, of which picking ${rupees(crumb.pickingPerKg)}` : ''}
+                    </span>
+                  </span>
+                </div>
+                <div className="sub mt-2">
+                  Picking is inside the works figure, not beside it. More hands on the yard, or the
+                  same gang there longer, lifts the crumb rate — which lifts what the autoclave
+                  charge cost, which lifts the cost of the reclaim. Nothing has to be added anywhere
+                  for that to happen.
+                </div>
+              </>
+            )}
           </div>
 
           <div className="grouphead">Against what went out</div>

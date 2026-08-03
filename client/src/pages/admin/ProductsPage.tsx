@@ -34,6 +34,19 @@ interface Draft {
   code: string;
   quality: string;
   packSizeKg: string;
+  /**
+   * How a moulded product is boxed, and what one piece weighs.
+   *
+   * `packSizeKg` above is the other thing - what a sack of a reclaim grade
+   * weighs. A moulded product is not sold by weight at all: it is sold by the
+   * piece, boxed some number at a time, and the yard keys its stock on the
+   * product and that pack. Left blank the presses still run and the yard shows
+   * the pieces as boxed loose - which is what gets somebody to come and fill
+   * this in - and moulded stock reports no weight rather than a guessed one.
+   */
+  packSize: string;
+  packLabel: string;
+  pieceKg: string;
   machineId: string;
   rawMaterialCost: string;
   firewoodCost: string;
@@ -53,6 +66,9 @@ const blank: Draft = {
   code: '',
   quality: '',
   packSizeKg: '',
+  packSize: '',
+  packLabel: '',
+  pieceKg: '',
   machineId: '',
   rawMaterialCost: '',
   firewoodCost: '',
@@ -74,6 +90,9 @@ const draftOf = (p: Product): Draft => ({
   code: p.code ?? '',
   quality: p.quality ?? '',
   packSizeKg: text(p.pack_size_kg),
+  packSize: text(p.pack_size),
+  packLabel: p.pack_label ?? '',
+  pieceKg: text(p.piece_kg),
   machineId: p.machine_id ?? '',
   rawMaterialCost: text(p.raw_material_cost),
   firewoodCost: text(p.firewood_cost),
@@ -145,6 +164,9 @@ export function ProductsPage() {
       code: draft.code.trim().toUpperCase() || null,
       quality: draft.quality || null,
       packSizeKg: asNumber(draft.packSizeKg),
+      packSize: asNumber(draft.packSize),
+      packLabel: draft.packLabel.trim() || null,
+      pieceKg: asNumber(draft.pieceKg),
       machineId: draft.machineId || null,
       rawMaterialCost: asNumber(draft.rawMaterialCost),
       firewoodCost: asNumber(draft.firewoodCost),
@@ -256,7 +278,14 @@ export function ProductsPage() {
                       {!product.active && <span className="badge none ml-1.5">retired</span>}
                     </td>
                     <td>{product.quality ?? <span className="muted">—</span>}</td>
-                    <td className="text-right">{show(product.pack_size_kg, 'kg')}</td>
+                    {/* A moulded product ships by the piece and a reclaim grade
+                        by the sack, so whichever pack it actually has is the
+                        one shown rather than a column of "not set". */}
+                    <td className="text-right">
+                      {product.pack_size != null
+                        ? `${product.pack_size} pcs`
+                        : show(product.pack_size_kg, 'kg')}
+                    </td>
                     <td>{product.machine_id ?? <span className="muted">—</span>}</td>
                     <td className="text-right">
                       {cost == null ? <span className="muted">not costed</span> : `Rs ${cost}`}
@@ -331,6 +360,34 @@ export function ProductsPage() {
               </select>
             </div>
             {field('p-pack', 'Pack size', 'kg', 'packSizeKg', 'What one sack of this holds.')}
+
+            {/*
+              The moulded half. Filled in for anything a press makes and left
+              blank for anything it does not - a reclaim grade has no pieces to
+              count, so these three simply do not apply to it.
+            */}
+            {field(
+              'p-packsize',
+              'Pieces per pack',
+              null,
+              'packSize',
+              'How many pieces go in one box. The yard keys moulded stock on the product and this, so LOOP boxed fifty at a time is LOOP-50. Blank means the pieces are counted loose and the Stock page says so.',
+            )}
+            {field(
+              'p-packlabel',
+              'Pack called',
+              null,
+              'packLabel',
+              'What the floor calls the box — “bag of 50”. Cosmetic; the count above is what the yard files on.',
+              false,
+            )}
+            {field(
+              'p-piecekg',
+              'One piece weighs',
+              'kg',
+              'pieceKg',
+              'What the yard puts a weight against moulded stock with, and what a moulded load is costed by on the weighbridge. Blank and it reports no weight rather than a guessed one.',
+            )}
             <div className="field">
               <label htmlFor="p-machine">Machine</label>
               <select

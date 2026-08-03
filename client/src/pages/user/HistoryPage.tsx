@@ -26,7 +26,14 @@ import {
   text,
   type Draft,
 } from '@/features/history/runDraft';
-import { DISPATCH_ROLES, QUALITIES, SHIFTS, TYRES, type TyreType } from '@/config/constants';
+import {
+  DISPATCH_ROLES,
+  QUALITIES,
+  SHIFTS,
+  TYRES,
+  counted,
+  type TyreType,
+} from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
 import { clock24, dayMonth } from '@/utils/date';
 import { hours, kwhOf, num, rupees } from '@/utils/format';
@@ -203,6 +210,7 @@ function RunSheet({
 
     const math = runMath(run, draft);
     const { isAuto, isPress, isTod, elecPair, hourPair, elecDelta, hourDelta } = math;
+    const { isCracker, pickingLabourHours } = math;
     // Shiftwise: the lines whose output is measured by the shift rather than by
     // the batch, so there is no batch or grade against the run to correct.
     const isShiftwise = run.line === 'grind' || run.line === 'coarse';
@@ -381,6 +389,25 @@ function RunSheet({
             press is bagged - there is no packing path from it. */}
         {!isPress && number('outWeight', 'Output weight', '(kg) — blank = none')}
         {!isPress && number('packedSacks', 'Packed sacks')}
+
+        {/* The yard gang that fed the cracker. What went in at the machine was an
+            estimate at the end of a shift, so it is correctable - and correcting
+            it re-prices the crumb that window made, because the costing works
+            the figure out from the runs rather than storing a total. */}
+        {isCracker && (
+          <>
+            <SheetLabel>Picking — scrap yard</SheetLabel>
+            <FieldRow className="mb-3.5">
+              {number('pickingLabourers', 'Labourers')}
+              {number('pickingHours', 'Time worked', '(hrs)', 'hrs')}
+            </FieldRow>
+            <div className={`diffout${pickingLabourHours != null ? ' show' : ''}`}>
+              {pickingLabourHours != null
+                ? `Picking: ${draft.pickingLabourers} × ${draft.pickingHours} h = ${pickingLabourHours} labourer-hours — costed into ₹/kg crumb.`
+                : 'Both halves or neither — labourers on their own cost nothing.'}
+            </div>
+          </>
+        )}
         <TextAreaField
           label="Remarks"
           rows={2}
@@ -426,6 +453,12 @@ function RunSheet({
         )}
         {(run.leftout_in != null || run.leftout_out != null) && (
           <Det k="Carried in / out" v={`${run.leftout_in ?? 0} → ${run.leftout_out ?? 0} kg`} />
+        )}
+        {run.picking_labour_hours != null && (
+          <Det
+            k="Picking"
+            v={`${run.picking_labourers} × ${run.picking_hours} h = ${run.picking_labour_hours} labourer-hours`}
+          />
         )}
         {run.non_production ? <Det k="Non-production" v="Yes" /> : null}
         <Det k="Status" v={run.status === 'running' ? 'Running' : 'Logged'} />
@@ -518,29 +551,65 @@ function RecentDispatches() {
     <section className="panel mb-3">
       <SheetLabel className="!mt-0">Recently dispatched</SheetLabel>
       <div className="scroll-x">
-        <table className="hist min-w-[420px]">
+        <table className="hist min-w-[560px]">
           <thead>
             <tr>
               <th>Went to</th>
+              <th>What</th>
               <th>When</th>
-              <th className="text-right">Sacks</th>
+              <th className="text-right">Quantity</th>
               <th className="text-right">Value</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  <b>{show(d.customer)}</b>
-                  {d.lines > 1 && (
-                    <div className="muted text-[10px]">{d.lines} stock groups</div>
-                  )}
-                </td>
-                <td>{d.dispatch_date ? dayMonth(d.dispatch_date) : <span className="muted">—</span>}</td>
-                <td className="tnum">{d.sacks}</td>
-                <td className="tnum">{rupees(d.total)}</td>
-              </tr>
-            ))}
+            {rows.map((d) => {
+              const byQuality = Object.entries(d.sacks_by_quality ?? {});
+              return (
+                <tr key={d.id}>
+                  <td>
+                    <b>{show(d.customer)}</b>
+                    {d.lines > 1 && (
+                      <div className="muted text-[10px]">{d.lines} stock groups</div>
+                    )}
+                  </td>
+                  {/*
+                    What actually left, by grade. A load is one row and usually
+                    more than one product, so a sack count on its own says how
+                    much went without saying what - and "did that go through" is
+                    nearly always a question about one grade of it.
+                  */}
+                  <td>
+                    {byQuality.length ? (
+                      <span className="flex flex-wrap items-center gap-1">
+                        {byQuality.map(([quality, sacks]) => (
+                          <span key={quality} className="inline-flex items-center gap-1">
+                            <QualityChip quality={quality} />
+                            <span className="muted text-[10px]">×{sacks}</span>
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {d.dispatch_date ? dayMonth(d.dispatch_date) : <span className="muted">—</span>}
+                  </td>
+                  {/* Sacks and pieces counted apart - a document can carry both
+                      now, and adding them would be arithmetic on two different
+                      quantities. */}
+                  <td className="tnum">
+                    {[
+                      d.sacks ? counted(d.sacks, 'sacks') : null,
+                      d.pieces ? counted(d.pieces, 'pieces') : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || <span className="muted">—</span>}
+                  </td>
+                  <td className="tnum">{rupees(d.total)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

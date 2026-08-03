@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { stockService } from '@/api/services/stock.service';
+import { toRequestError } from '@/api/axiosClient';
 import {
   attachReport,
   fetchPendingQuality,
@@ -22,12 +24,22 @@ import {
   TextField,
   ViewHead,
 } from '@/components/ui';
-import { QC_PARAM_SUGGEST, QC_REPORT_MAX_BYTES, SUPERVISORS } from '@/config/constants';
+import { QC_PARAM_SUGGEST, QC_REPORT_MAX_BYTES, SUPERVISORS, counted } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
+import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
 import { currentShift, dayLong, dayMonth, lastNDays, todayISO } from '@/utils/date';
 import { cn } from '@/utils/cn';
-import type { Batch, Quality, QualityParam, QualityTest, Verdict } from '@/types/models';
+import type {
+  Batch,
+  MouldedStock,
+  PoolSlot,
+  Quality,
+  QualityParam,
+  QualityTest,
+  StockPool,
+  Verdict,
+} from '@/types/models';
 
 /**
  * The lab's tab. A batch is tested grade by grade - each one gets its own
@@ -38,19 +50,67 @@ import type { Batch, Quality, QualityParam, QualityTest, Verdict } from '@/types
  * whoever is loading the vehicle has to make the call knowingly.
  */
 
-/** The test being written up, until it is filed. */
+/**
+ * The test being written up, until it is filed.
+ *
+ * One draft covers both kinds, because the readings, the verdict, the tester
+ * and the report are the same act whichever is being written. What differs is
+ * what it is filed against: a batch and one of its grades, or a coarse pool and
+ * one of its three sample points. `pool` is set on exactly one of the two, and
+ * is what decides which.
+ */
 interface Draft {
-  batch: Batch;
-  grade: Quality;
+  batch: Batch | null;
+  /** Set when this is a coarse sample rather than a batch's grade. */
+  pool: { pool: StockPool; slot: PoolSlot } | null;
+  /**
+   * Set when this is a verdict on what a press moulded.
+   *
+   * The third kind, and it is filed against a product rather than a grade -
+   * the bench tests loops, not a grade of rubber. `grade` therefore carries the
+   * product's id on a moulded draft, which is exactly what the column holds on
+   * the test row and what the stock group is keyed on.
+   */
+  moulded: MouldedStock | null;
+  /**
+   * The batch of compound the press was running, typed at the bench off the
+   * sample's own label.
+   *
+   * Asked for rather than derived, because a moulded stock group is keyed on the
+   * product and the pack it is boxed in and spans however many batches were
+   * moulded into it - so there is no single batch on the row to read back. The
+   * verdict still records which one was tested, which is what a re-test is filed
+   * against and what makes the record mean anything later.
+   */
+  batchNo: string;
+  grade: Quality | 'Coarse' | string;
   params: QualityParam[];
   verdict: Verdict;
   testedBy: string;
+  /**
+   * The day a pool sample was taken. Not decoration - the server works out
+   * which of the three slots the sample lands in from this date and nothing
+   * else, so it is bounded to the slot's own range in the sheet. A sample
+   * logged late would otherwise file itself into whichever slot today is in.
+   */
+  sampledOn: string;
   notes: string;
   /** A report already on file - kept unless a new file replaces it. */
   attachmentUrl: string;
   attachmentName: string;
   file: { name: string; type: string; dataUrl: string } | null;
 }
+
+/** `2026-08-04` -> `04 Aug`, for a slot's date range. */
+const slotRange = (slot: PoolSlot) => `${dayMonth(slot.from)} – ${dayMonth(slot.to)}`;
+
+/** "2 of 3 sampled", and whether anything came back a hold. */
+const poolHint = (pool: StockPool) => {
+  if (pool.any_hold) return `${pool.samples_taken} of ${pool.samples_total} sampled · a hold on record`;
+  if (pool.samples_taken === pool.samples_total) return 'All three samples passed';
+  if (!pool.samples_taken) return 'Not sampled yet';
+  return `${pool.samples_taken} of ${pool.samples_total} sampled`;
+};
 
 const emptyEntry = { name: '', value: '', unit: '' };
 
@@ -79,10 +139,46 @@ const batchHint = (qc: BatchQc) => {
   return 'All grades passed';
 };
 
+/**
+ * Where a batch stands, as one word, for the filter above the list.
+ *
+ * Three states that partition the list rather than overlap it - every batch is
+ * in exactly one, so the counts on the chips add up to the total and a bench
+ * can read the row as "what is left to do". A hold outranks an untested grade
+ * because a hold is the thing somebody has to act on; the same precedence
+ * batchQcChip() already uses on the card, so the filter and the chip it
+ * filtered by cannot disagree.
+ */
+type QcState = 'awaiting' | 'hold' | 'passed';
+
+const stateOf = (qc: BatchQc): QcState => (qc.anyHold ? 'hold' : qc.allDone ? 'passed' : 'awaiting');
+
+/** Awaiting first - the bench's work queue is the reason to open this tab. */
+const QC_STATES: QcState[] = ['awaiting', 'hold', 'passed'];
+
+const STATE_LABEL: Record<QcState, string> = {
+  awaiting: 'Awaiting',
+  hold: 'On hold',
+  passed: 'Passed',
+};
+
+/**
+ * The tint each state wears. These are the app's status colours as `.pill.ok` /
+ * `.warn` / `.down` wear them everywhere else, reached through the same three
+ * modifiers the Stock view's verdict filter uses - so this is the same control,
+ * not a second one that resembles it.
+ */
+const STATE_CLASS: Record<QcState, string> = {
+  awaiting: 'qc-pending',
+  hold: 'qc-fail',
+  passed: 'qc-pass',
+};
+
 export function QualityPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
   const { batches, pending, tests, summary, loading } = useAppSelector((s) => s.quality);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   // Whoever is signed in on this device is the default tester.
   const supervisor = useAppSelector((s) => s.auth.user?.name ?? '');
 
@@ -91,11 +187,61 @@ export function QualityPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [entry, setEntry] = useState(emptyEntry);
   const [saving, setSaving] = useState(false);
+  /** Which state the list is narrowed to. Empty is all of them. */
+  const [state, setState] = useState<QcState | ''>('');
 
+  /** The coarse pools and their sample slots - the other half of the bench's work. */
+  const [pools, setPools] = useState<StockPool[]>([]);
+  /**
+   * What the presses have made, by product and pack.
+   *
+   * The bench's third list. It is here because a moulded group is reachable
+   * from nowhere else: a batch is found through the batch card and a pool
+   * through the list above, and a group keyed on a product and a pack is on
+   * neither. Boxed pieces open `pending` and cannot be dispatched until the lab
+   * answers, so without this the presses' output has no way out of the yard.
+   */
+  const [moulded, setMoulded] = useState<MouldedStock[]>([]);
+
+  const loadPools = useCallback(async () => {
+    /*
+     * Settled rather than awaited together: the two lists are separate halves
+     * of the bench's work and either is worth having on its own, so one failing
+     * must not take the other down with it - nor the batch list, which is the
+     * whole reason this is caught here at all.
+     */
+    const [pooled, pressed] = await Promise.allSettled([
+      stockService.pools({ limit: 12 }),
+      stockService.moulded({ limit: 40 }),
+    ]);
+    if (pooled.status === 'fulfilled') setPools(pooled.value.rows);
+    if (pressed.status === 'fulfilled') setMoulded(pressed.value.rows);
+
+    const failed = [pooled, pressed].find((result) => result.status === 'rejected');
+    if (failed?.status === 'rejected') notify(toRequestError(failed.reason).message, 'err');
+  }, [notify]);
+
+  /*
+   * Filing a verdict bumps refreshTick - see recordTest - so the pools re-read
+   * themselves without save() having to remember to. That matters here because
+   * which slot a sample landed in is the server's answer, worked out from the
+   * date rather than sent, so the only way to know is to ask again.
+   */
   useEffect(() => {
     void dispatch(fetchPendingQuality());
     void dispatch(fetchQualitySummary(lastNDays(30)));
-  }, [dispatch]);
+    void loadPools();
+  }, [dispatch, loadPools, refreshTick]);
+
+  /*
+   * The pools, on a timer and whenever the bench comes back to the screen.
+   *
+   * A pool appears here because somebody packed coarse on another device, and
+   * the ten-day period it belongs to opens without anybody at the bench doing
+   * anything - so a lab tablet left open would otherwise never learn that there
+   * is a new period to sample.
+   */
+  useRefreshOnFocus(loadPools, { intervalMs: 30_000 });
 
   /** Newest batch first, each with where its grades stand. */
   const cards = useMemo(
@@ -106,6 +252,34 @@ export function QualityPage() {
     [batches, tests],
   );
 
+  /* How many batches are in each state, for the counts on the chips. Offering a
+     state with nothing under it is a dead tap on a tablet, so a chip is only
+     drawn for a state the bench actually has work in. */
+  const stateCounts = useMemo(() => {
+    const tally = {} as Record<QcState, number>;
+    for (const card of cards) {
+      const key = stateOf(card.qc);
+      tally[key] = (tally[key] ?? 0) + 1;
+    }
+    return tally;
+  }, [cards]);
+
+  /*
+   * Filtered here rather than refetched. This is a couple of dozen batches at
+   * most and the whole set is already in the store - a round trip per tap would
+   * be slower than the bench can read.
+   */
+  const visible = useMemo(
+    () => (state ? cards.filter((card) => stateOf(card.qc) === state) : cards),
+    [cards, state],
+  );
+
+  /* Filing the last hold empties a filter that is still switched on, which
+     shows a blank screen with no clue why. It falls back to all instead. */
+  useEffect(() => {
+    if (state && !stateCounts[state]) setState('');
+  }, [state, stateCounts]);
+
   const openGrades = target ? (cards.find((c) => c.batch.id === target.id)?.qc ?? null) : null;
 
   const openGrade = (batch: Batch, status: GradeStatus) => {
@@ -113,14 +287,77 @@ export function QualityPage() {
     setEntry(emptyEntry);
     setDraft({
       batch,
+      pool: null,
+      moulded: null,
+      batchNo: '',
       grade: status.grade,
       // A re-test starts from what was measured last time rather than blank.
       params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
       verdict: prev?.verdict ?? 'pass',
       testedBy: prev?.tested_by ?? prev?.tester ?? (supervisor || SUPERVISORS[0] || ''),
+      sampledOn: '',
       notes: '',
       attachmentUrl: prev?.attachment_url ?? '',
       attachmentName: prev?.attachment_name ?? '',
+      file: null,
+    });
+  };
+
+  /** One of a pool's three sample points, empty or being re-sampled. */
+  const openSlot = (pool: StockPool, slot: PoolSlot) => {
+    const prev = slot.test;
+    const today = todayISO();
+    setEntry(emptyEntry);
+    setDraft({
+      batch: null,
+      pool: { pool, slot },
+      moulded: null,
+      batchNo: '',
+      grade: 'Coarse',
+      params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
+      verdict: prev?.verdict ?? 'pass',
+      testedBy: prev?.tested_by ?? (supervisor || SUPERVISORS[0] || ''),
+      /*
+       * Today when today is inside this slot, and the nearest day of it
+       * otherwise. Logging the first sample on the ninth is normal - the bench
+       * writes up a sheet from earlier in the period - and dating it today
+       * would file it as the third sample instead, leaving the first empty
+       * forever.
+       */
+      sampledOn:
+        prev?.sampled_on ??
+        (today < slot.from ? slot.from : today > slot.to ? slot.to : today),
+      notes: '',
+      attachmentUrl: prev?.attachment_url ?? '',
+      attachmentName: prev?.attachment_name ?? '',
+      file: null,
+    });
+  };
+
+  /**
+   * A verdict on what a press moulded.
+   *
+   * `grade` carries the product rather than a grade of rubber, because that is
+   * what the bench actually tested and what the stock group is keyed on. The
+   * batch of compound is typed in: a moulded group spans however many batches
+   * were boxed into it, so there is nothing on the row to read one back from,
+   * and the sample on the bench is labelled with its own.
+   */
+  const openMoulded = (row: MouldedStock) => {
+    setEntry(emptyEntry);
+    setDraft({
+      batch: null,
+      pool: null,
+      moulded: row,
+      batchNo: '',
+      grade: row.product_id ?? row.quality ?? '',
+      params: [],
+      verdict: 'pass',
+      testedBy: supervisor || SUPERVISORS[0] || '',
+      sampledOn: '',
+      notes: '',
+      attachmentUrl: '',
+      attachmentName: '',
       file: null,
     });
   };
@@ -160,28 +397,73 @@ export function QualityPage() {
       notify('Add at least one test parameter for this grade', 'warn');
       return;
     }
+    /*
+     * A moulded verdict has to name the batch the press was moulding. The
+     * server refuses one without it, and the reason is that it is the only
+     * thing tying the verdict to a lot - the stock group it releases is keyed
+     * on the product and the pack, so a verdict with no batch on it is a record
+     * that cannot afterwards be checked against anything.
+     */
+    if (draft.moulded && !draft.batchNo.trim()) {
+      notify('Enter the batch the press was moulding', 'warn');
+      return;
+    }
 
     setSaving(true);
+    const common = {
+      grade: draft.grade,
+      verdict: draft.verdict,
+      params: draft.params,
+      testedBy: draft.testedBy.trim() || supervisor || SUPERVISORS[0],
+      shift: currentShift(),
+      remarks: notes || null,
+      // A new file replaces the old report; without one the old still stands.
+      attachmentUrl: draft.file ? null : draft.attachmentUrl || null,
+      attachmentName: draft.file ? null : draft.attachmentName || null,
+    };
+
+    /*
+     * A pool sample is filed against the pool's stored label and the day it was
+     * taken - the server derives its slot from that date, so the display label
+     * would not do here even though it is the one on the screen.
+     */
     const filed = await dispatch(
-      recordTest({
-        batchNo: draft.batch.ref,
-        machineId: draft.batch.machine_id,
-        grade: draft.grade,
-        verdict: draft.verdict,
-        params: draft.params,
-        testedBy: draft.testedBy.trim() || supervisor || SUPERVISORS[0],
-        shiftDate: todayISO(),
-        shift: currentShift(),
-        remarks: notes || null,
-        // A new file replaces the old report; without one the old still stands.
-        attachmentUrl: draft.file ? null : draft.attachmentUrl || null,
-        attachmentName: draft.file ? null : draft.attachmentName || null,
-      }),
+      recordTest(
+        draft.pool
+          ? {
+              ...common,
+              kind: 'pool',
+              batchNo: draft.pool.pool.label,
+              shiftDate: draft.sampledOn,
+            }
+          : draft.moulded
+            ? {
+                ...common,
+                kind: 'product',
+                // The batch of compound, off the sample's own label. `grade` on
+                // `common` is already the product, which is what the verdict
+                // releases.
+                batchNo: draft.batchNo.trim(),
+                shiftDate: todayISO(),
+              }
+            : {
+                ...common,
+                kind: 'batch',
+                batchNo: draft.batch?.ref,
+                machineId: draft.batch?.machine_id,
+                shiftDate: todayISO(),
+              },
+      ),
     );
 
     if (!recordTest.fulfilled.match(filed)) {
       setSaving(false);
-      notify(`Could not file the verdict for ${draft.grade}`, 'err');
+      notify(
+        draft.pool
+          ? `Could not file sample ${draft.pool.slot.slot} for ${draft.pool.pool.display_label}`
+          : `Could not file the verdict for ${draft.grade}`,
+        'err',
+      );
       return;
     }
 
@@ -196,20 +478,76 @@ export function QualityPage() {
     setSaving(false);
 
     const verdict = draft.verdict === 'hold' ? 'held' : 'passed';
+    const what = draft.pool
+      ? `${draft.pool.pool.display_label} · sample ${draft.pool.slot.slot}`
+      : draft.moulded
+        ? `${draft.moulded.display_label} · ${draft.batchNo.trim()}`
+        : `${draft.batch?.ref} · ${draft.grade}`;
+
+    /*
+     * What the verdict actually moved in the yard.
+     *
+     * A verdict releases stock that already exists; it does not create any. So
+     * passing a grade nobody has bagged yet is correct and moves nothing - and
+     * from the bench that is indistinguishable from the app having failed. It
+     * says which happened rather than leaving the difference to be guessed.
+     */
+    const released = filed.payload.stock_released;
+    const moved = released
+      ? ` · ${counted(released.available_qty ?? released.available_sacks, released.unit ?? 'sacks')} released`
+      : draft.verdict === 'pass' && !draft.pool
+        ? draft.moulded
+          ? ' · nothing boxed yet — box it on the Packing tab'
+          : ' · nothing in the yard yet — bag it on the Packing tab'
+        : '';
+
     notify(
       reportFailed
-        ? `${draft.batch.ref} · ${draft.grade} ${verdict} — the report did not upload`
-        : `${draft.batch.ref} · ${draft.grade} ${verdict}`,
-      reportFailed || draft.verdict === 'hold' ? 'warn' : 'ok',
+        ? `${what} ${verdict} — the report did not upload`
+        : `${what} ${verdict}${moved}`,
+      reportFailed || draft.verdict === 'hold' || (draft.verdict === 'pass' && !released && !draft.pool)
+        ? 'warn'
+        : 'ok',
     );
-    setDraft(null); // back to the batch's grades
+    setDraft(null); // back to the batch's grades, or to the pools
   };
 
   if (loading && !batches.length && !tests.length) return <PageLoader label="Loading quality" />;
 
+  /**
+   * One filter chip. Same shape the Stock view's bars are built from.
+   *
+   * Named `filterChip` rather than `chip` because the card loop below binds a
+   * `chip` of its own off batchQcChip() - two different things, and one of them
+   * shadowing the other reads as a bug every time somebody comes back to it.
+   */
+  const filterChip = (
+    label: string,
+    count: number,
+    on: boolean,
+    modifier: string,
+    onClick: () => void,
+  ) => (
+    <button
+      type="button"
+      className={cn('gradebtn', modifier, on && 'on')}
+      aria-pressed={on}
+      onClick={onClick}
+    >
+      {label} <span className="n">{count}</span>
+    </button>
+  );
+
   return (
     <>
-      <ViewHead title="Quality" meta={`${pending.length} awaiting test`} />
+      <ViewHead
+        title="Quality"
+        meta={
+          state
+            ? `${visible.length} of ${cards.length} batches · ${STATE_LABEL[state].toLowerCase()}`
+            : `${pending.length} awaiting test`
+        }
+      />
 
       {summary.length > 0 && (
         <div className="panel mb-3">
@@ -232,59 +570,246 @@ export function QualityPage() {
         </div>
       )}
 
+      {/*
+        Coarse, which is not tested the way a batch is.
+
+        There is no lot to certify - the line runs for a shift, the sacks pool
+        by ten-day period - so the period is sampled three times instead. The
+        slots are dated stretches rather than a running list, because a sample
+        nobody took is then an empty box on the screen rather than an absence
+        nobody can see.
+
+        Absence is not refusal, and refusal is refusal. A pool nobody has
+        sampled sells - coarse is bulk output sold on the line running to
+        specification, and waiting for a certificate per pool is what used to
+        strand every sack. A pool the lab has held does not sell: holding a
+        sample stops the period, which is what the samples are for.
+      */}
+      {pools.length > 0 && (
+        <>
+          <SheetLabel className="mx-0.5 mb-2 mt-1">
+            Coarse pools{' '}
+            <span className="muted normal-case tracking-normal">
+              — three samples across each ten-day period
+            </span>
+          </SheetLabel>
+          <div className="stack mb-3">
+            {pools.map((pool) => (
+              <article key={pool.id} className={cn('bcard', pool.any_hold && 'hold')}>
+                <div className="bhead">
+                  <div className="l">
+                    <BatchRef className="text-base">{pool.display_label}</BatchRef>
+                    <QualityChip quality="Coarse" />
+                  </div>
+                  <span
+                    className={cn('qchip', pool.any_hold && 'hold')}
+                    style={
+                      pool.any_hold
+                        ? undefined
+                        : pool.samples_taken === pool.samples_total
+                          ? { background: 'var(--ok)', color: 'var(--on-fill)' }
+                          : { background: 'var(--pause)', color: 'var(--on-fill)' }
+                    }
+                  >
+                    {pool.samples_taken}/{pool.samples_total}
+                  </span>
+                </div>
+
+                <div className="qslots">
+                  {pool.slots.map((slot) => {
+                    const test = slot.test;
+                    return (
+                      <button
+                        key={slot.slot}
+                        type="button"
+                        className={cn(
+                          'qslot',
+                          test && (test.verdict === 'hold' ? 'hold' : 'pass'),
+                        )}
+                        onClick={() => openSlot(pool, slot)}
+                      >
+                        <b>Sample {slot.slot}</b>
+                        <small>{slotRange(slot)}</small>
+                        <span className="v">
+                          {test ? (test.verdict === 'hold' ? 'HOLD' : 'Passed') : 'Not taken'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="bhint mt-2">
+                  {pool.available_sacks} sacks in the yard · {poolHint(pool)}
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/*
+        What the presses have made.
+
+        The bench's third list, and the only way it can reach moulded goods at
+        all: a group here is keyed on its product and the pack it is boxed in,
+        so it is on neither the batch card nor the pool list above. Boxed pieces
+        open pending and cannot leave the yard until this is answered.
+
+        Unlike coarse there is a lot to certify - a press runs a batch of
+        compound - so the rule is the batch rule rather than the pool rule:
+        nothing is released until the bench says so. Everything is listed
+        whatever its verdict, because a pack on hold is the one somebody has to
+        do something about and a passed one is what says the work is done.
+      */}
+      {moulded.length > 0 && (
+        <>
+          <SheetLabel className="mx-0.5 mb-2 mt-1">
+            Moulded goods{' '}
+            <span className="muted normal-case tracking-normal">
+              — pass / hold per product and pack
+            </span>
+          </SheetLabel>
+          <div className="stack mb-3">
+            {moulded.map((row) => (
+              <article
+                key={row.id}
+                className={cn('bcard', row.qc_status === 'fail' && 'hold')}
+              >
+                <div className="bhead">
+                  <div className="l">
+                    <BatchRef className="text-base">{row.display_label}</BatchRef>
+                    <QualityChip quality={row.product_id ?? '—'} />
+                  </div>
+                  <span
+                    className={cn('qchip', row.qc_status === 'fail' && 'hold')}
+                    style={
+                      row.qc_status === 'fail'
+                        ? undefined
+                        : row.qc_status === 'pass'
+                          ? { background: 'var(--ok)', color: 'var(--on-fill)' }
+                          : { background: 'var(--pause)', color: 'var(--on-fill)' }
+                    }
+                  >
+                    {row.qc_status === 'pass'
+                      ? 'Passed'
+                      : row.qc_status === 'fail'
+                        ? 'HOLD'
+                        : 'Not tested'}
+                  </span>
+                </div>
+
+                <div className="bhint mt-2">
+                  {[
+                    `${counted(row.available_qty, row.unit)} in the yard`,
+                    row.pack_size ? `${row.pack_size} to a pack` : 'boxed loose',
+                    row.last_packed_on ? `packed ${dayMonth(row.last_packed_on)}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => openMoulded(row)}
+                >
+                  {row.qc_status === 'pending' ? 'Record a result ▸' : 'Re-test ▸'}
+                </Button>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+
       {!cards.length ? (
-        <EmptyState
-          icon={icons.quality}
-          title="Nothing to test yet"
-          hint="Once a special batch is loaded it shows up here for you to log results, grade by grade."
-        />
+        pools.length || moulded.length ? null : (
+          <EmptyState
+            icon={icons.quality}
+            title="Nothing to test yet"
+            hint="Once a special batch is loaded it shows up here for you to log results, grade by grade. A press run appears once its pieces are boxed."
+          />
+        )
       ) : (
         <>
           <SheetLabel className="mx-0.5 mb-2 mt-1">
             Special batches <span className="muted normal-case tracking-normal">— pass / hold per grade</span>
           </SheetLabel>
-          <div className="stack">
-            {cards.map(({ batch, qc }) => {
-              const chip = batchQcChip(qc);
-              const charged = chargedText(batch);
-              return (
-                <button
-                  key={batch.id}
-                  type="button"
-                  className="bcard w-full text-left"
-                  onClick={() => setTarget(batch)}
-                >
-                  <div className="bhead">
-                    <div className="l">
-                      <BatchRef className="text-base">{batch.ref}</BatchRef>
-                      {batch.formulation && <FormChip>{batch.formulation}</FormChip>}
-                    </div>
-                    <span
-                      className={cn('qchip', chip.tone === 'hold' && 'hold', chip.tone === 'none' && 'shift')}
-                      style={chipStyle(chip.tone)}
-                    >
-                      {chip.label}
-                    </span>
-                  </div>
 
-                  <div className="bgrade">
-                    {qc.grades.map((g) => (
+          {/* One state in the list is not something to filter by - every chip
+              would say the same thing and the row would only cost height. */}
+          {Object.keys(stateCounts).length > 1 && (
+            <div className="gradebar" role="group" aria-label="Filter batches by test state">
+              {filterChip('All', cards.length, !state, 'all-grades', () => setState(''))}
+              {QC_STATES.filter((key) => stateCounts[key]).map((key) =>
+                filterChip(
+                  STATE_LABEL[key],
+                  stateCounts[key] ?? 0,
+                  state === key,
+                  STATE_CLASS[key],
+                  () => setState(key),
+                ),
+              )}
+            </div>
+          )}
+
+          {/* Only reachable with a filter on - unfiltered, a non-empty list of
+              batches is a non-empty list of cards. */}
+          {state && !visible.length ? (
+            <p className="empty">No batches are {STATE_LABEL[state].toLowerCase()}.</p>
+          ) : (
+            <div className="stack">
+              {visible.map(({ batch, qc }) => {
+                const chip = batchQcChip(qc);
+                const charged = chargedText(batch);
+                return (
+                  <button
+                    key={batch.id}
+                    type="button"
+                    className="bcard w-full text-left"
+                    onClick={() => setTarget(batch)}
+                  >
+                    <div className="bhead">
+                      <div className="l">
+                        <BatchRef className="text-base">{batch.ref}</BatchRef>
+                        {batch.formulation && <FormChip>{batch.formulation}</FormChip>}
+                      </div>
                       <span
-                        key={g.grade}
-                        className={cn('gradetag', g.verdict === 'hold' ? 'hold' : g.verdict && 'pass')}
+                        className={cn(
+                          'qchip',
+                          chip.tone === 'hold' && 'hold',
+                          chip.tone === 'none' && 'shift',
+                        )}
+                        style={chipStyle(chip.tone)}
                       >
-                        <i className="gd" />
-                        {g.grade}
+                        {chip.label}
                       </span>
-                    ))}
-                  </div>
+                    </div>
 
-                  {charged && <div className="bhint mt-2">{charged}</div>}
-                  <div className="bhint mt-0.5">{batchHint(qc)} · tap to log per-grade results</div>
-                </button>
-              );
-            })}
-          </div>
+                    <div className="bgrade">
+                      {qc.grades.map((g) => (
+                        <span
+                          key={g.grade}
+                          className={cn(
+                            'gradetag',
+                            g.verdict === 'hold' ? 'hold' : g.verdict && 'pass',
+                          )}
+                        >
+                          <i className="gd" />
+                          {g.grade}
+                        </span>
+                      ))}
+                    </div>
+
+                    {charged && <div className="bhint mt-2">{charged}</div>}
+                    <div className="bhint mt-0.5">
+                      {batchHint(qc)} · tap to log per-grade results
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -385,12 +910,24 @@ export function QualityPage() {
       {/* One grade of that batch: its readings, its verdict, its report. */}
       <BottomSheet
         open={Boolean(draft)}
-        title={draft ? `Batch ${draft.batch.ref} · ${draft.grade}` : ''}
+        title={
+          draft
+            ? draft.pool
+              ? `${draft.pool.pool.display_label} · sample ${draft.pool.slot.slot}`
+              : draft.moulded
+                ? `${draft.moulded.display_label} · moulded`
+                : `Batch ${draft.batch?.ref} · ${draft.grade}`
+            : ''
+        }
         subtitle={
           draft
-            ? [draft.batch.formulation, 'Log this grade’s test parameters, then mark Pass or Hold.']
-                .filter(Boolean)
-                .join(' · ')
+            ? draft.pool
+              ? `Coarse · ${slotRange(draft.pool.slot)} · A sample records what the line was running to. It does not hold the pool.`
+              : draft.moulded
+                ? `${draft.grade} · A verdict here releases or stops every pack of this product — it is not held to one batch.`
+                : [draft.batch?.formulation, 'Log this grade’s test parameters, then mark Pass or Hold.']
+                    .filter(Boolean)
+                    .join(' · ')
             : undefined
         }
         led="var(--led-brand)"
@@ -413,6 +950,24 @@ export function QualityPage() {
                 <option key={name} value={name} />
               ))}
             </datalist>
+
+            {/*
+              Which batch of compound was moulded. Typed rather than picked,
+              because a moulded stock group is keyed on the product and its pack
+              and spans however many batches were boxed into it - there is no
+              single batch on the row to offer. The sample on the bench carries
+              its own, which is where this comes from.
+            */}
+            {draft.moulded && (
+              <TextField
+                label="Batch moulded"
+                note="off the sample’s label — what a re-test is filed against"
+                value={draft.batchNo}
+                onChange={(e) =>
+                  setDraft((d) => (d ? { ...d, batchNo: e.target.value.toUpperCase() } : d))
+                }
+              />
+            )}
 
             <SheetLabel>
               Test readings <span className="muted normal-case tracking-normal">— for this grade</span>
@@ -495,6 +1050,23 @@ export function QualityPage() {
                 value={draft.testedBy}
                 onChange={(e) => setDraft({ ...draft, testedBy: e.target.value })}
               />
+              {/*
+                The day the sample was taken, bounded to this slot. The server
+                works out which of the three slots a sample belongs to from
+                this date and nothing else, so a date outside the range would
+                file it against a different sample point - or none at all.
+              */}
+              {draft.pool && (
+                <TextField
+                  label="Sampled on"
+                  type="date"
+                  note={slotRange(draft.pool.slot)}
+                  min={draft.pool.slot.from}
+                  max={draft.pool.slot.to}
+                  value={draft.sampledOn}
+                  onChange={(e) => setDraft({ ...draft, sampledOn: e.target.value })}
+                />
+              )}
             </FieldRow>
 
             <TextAreaField
@@ -560,8 +1132,9 @@ export function QualityPage() {
             </label>
 
             <div className="hint mt-2">
-              A hold does not stop a dispatch — it flags the batch so whoever loads it decides
-              deliberately.
+              {draft.pool
+                ? 'A hold stops the whole period — the pool cannot be dispatched until a later sample passes. An unsampled pool still sells.'
+                : 'A hold does not stop a dispatch — it flags the batch so whoever loads it decides deliberately.'}
             </div>
           </>
         )}

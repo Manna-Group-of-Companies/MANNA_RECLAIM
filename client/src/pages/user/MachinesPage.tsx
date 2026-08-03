@@ -54,6 +54,7 @@ import {
   autoclaveFormsFor,
   autoclaveWorkers,
   defaultWorkers,
+  isCracker,
   opensBatch,
   type AutoclaveForm,
   type TyreType,
@@ -161,6 +162,17 @@ const blankPress = { product: '', cyclicMin: '', cavities: '' };
 /** The press stop sheet: what came out of the mould, and the flash trimmed off. */
 const blankPressStop = { pieces: '', flash: '' };
 
+/**
+ * The picking half of the cracker's stop sheet: how many hands were put on
+ * pulling scrap tyres out of the yard, and roughly how long they were at it.
+ *
+ * Asked at the cracker because picking is what feeds the cracker. Asked in
+ * approximate terms because that is the only honest way to ask: the gang is not
+ * clocked in, and the supervisor's "four of them, about three hours" recorded
+ * beats an exact figure nobody has.
+ */
+const blankPicking = { labourers: '', hours: '' };
+
 /** Why Soorya's readings are not kWh, on both of its sheets. */
 const TOD_NOTE = (
   <>
@@ -221,6 +233,8 @@ export function MachinesPage() {
   /** Press only: what it is moulding, and what it is set up to mould it at. */
   const [press, setPress] = useState(blankPress);
   const [pressStop, setPressStop] = useState(blankPressStop);
+  /** Cracker only: the yard gang that picked the scrap tyres it was fed. */
+  const [picking, setPicking] = useState(blankPicking);
   const [downTime, setDownTime] = useState('');
   const [repair, setRepair] = useState(blankRepair);
   const [temps, setTemps] = useState<Record<string, string>>({});
@@ -328,6 +342,14 @@ export function MachinesPage() {
   // put on the special line for a batch is not a shiftwise run.
   const stopShiftwise = stopping?.line ? lineIsShiftwise(stopping.line) : isShiftwise(stopKind);
   const stopIsTod = stopping?.machine_id === TOD_MACHINE_ID;
+  /**
+   * The cracker, and only the cracker, is asked about picking - it is the gang
+   * that pulls scrap tyres out of the yard and feeds it. What they cost goes
+   * into the crumb the grinding line makes, and from there into what the
+   * autoclave charge cost, so it reaches the reclaim without being a line
+   * anybody has to add.
+   */
+  const stopIsCracker = Boolean(stopping) && isCracker(stopping?.machine_id);
   // A machine that weighs at the sheet asks for the figure here; one weighed
   // shiftwise is told where the figure gets entered instead.
   const stopWeighs = stopMachine ? Boolean(stopMachine.weigh) && !stopShiftwise : Boolean(stopping?.needs_weigh);
@@ -393,6 +415,28 @@ export function MachinesPage() {
         : 'Output weight: must be greater than zero (leave it blank to weigh later).',
     );
   }
+
+  // ---- the picking gang that fed the cracker ----
+  const pickLabourers = asNumber(picking.labourers);
+  const pickHours = asNumber(picking.hours);
+  if (stopIsCracker) {
+    if (pickLabourers != null && (pickLabourers < 0 || !Number.isInteger(pickLabourers))) {
+      stopIssues.push('Picking: a whole number of labourers.');
+    }
+    if (pickHours != null && (pickHours < 0 || pickHours > 24)) {
+      stopIssues.push('Picking: hours have to be between nothing and a day.');
+    }
+    // Half an answer costs nothing at all once it is multiplied out, which reads
+    // exactly like a shift that did no picking - so it is caught here instead.
+    if ((pickLabourers ?? 0) > 0 !== (pickHours ?? 0) > 0) {
+      stopIssues.push('Picking: enter both the labourers and the hours, or neither.');
+    }
+  }
+  /** Labourer-hours of picking - what the crumb costing actually spends. */
+  const pickLabourHours =
+    (pickLabourers ?? 0) > 0 && (pickHours ?? 0) > 0
+      ? round2((pickLabourers as number) * (pickHours as number))
+      : null;
 
   // ---- what came off a press, and what the compound in it cost ----
   const piecesValue = asNumber(pressStop.pieces);
@@ -714,6 +758,10 @@ export function MachinesPage() {
           // press with no flash trimmed off it says zero rather than nothing.
           pieces: stopIsPress ? piecesValue : null,
           flashKg: stopIsPress ? flashValue ?? 0 : null,
+          // The yard gang that fed the cracker. Sent only from the cracker's own
+          // sheet, and the server ignores it from anywhere else.
+          pickingLabourers: stopIsCracker ? pickLabourers : null,
+          pickingHours: stopIsCracker ? pickHours : null,
         }),
       ),
       stopIsAutoclave
@@ -739,6 +787,7 @@ export function MachinesPage() {
       setStop(blankStop);
       setUnload(blankUnload);
       setPressStop(blankPressStop);
+      setPicking(blankPicking);
       // Logging a run moves the batch on: unloading takes it out of the vessel
       // and releases it to the refiners, and an R4 pass marks the grade it
       // yielded. Both happen server-side, so the list is re-read rather than
@@ -966,6 +1015,15 @@ export function MachinesPage() {
                     setStop({
                       ...blankStop,
                       workers: r.workers != null ? String(r.workers) : usual != null ? String(usual) : '',
+                    });
+                    // The picking gang, as the shift already has it. A cracker
+                    // stopped for a blockage and started again is the same
+                    // shift's record, so the second sheet opens on what the
+                    // first one entered rather than asking the gang to be
+                    // counted twice.
+                    setPicking({
+                      labourers: r.picking_labourers != null ? String(r.picking_labourers) : '',
+                      hours: r.picking_hours != null ? String(r.picking_hours) : '',
                     });
                     // A load burns a known amount of firewood, so the figure is
                     // there to correct rather than to type.
@@ -1803,6 +1861,57 @@ export function MachinesPage() {
                   value={stop.hourDiff}
                   onChange={(e) => setStop({ ...stop, hourDiff: e.target.value })}
                 />
+              </>
+            )}
+
+            {/* ---- picking ----
+                The gang that pulls scrap tyres out of the yard and feeds the
+                cracker. It is the first labour spent on a kg of reclaim, and it
+                was spent nowhere until this field existed: no box asked, so no
+                figure carried it, so a shift that put four extra hands on the
+                yard looked exactly as cheap as one that put none.
+
+                Asked in approximate terms because that is the only honest way to
+                ask - the gang is not clocked in. What it costs goes into the
+                crumb the grinding line makes and from there into the autoclave
+                charge, so it reaches the reclaim on its own. */}
+            {stopIsCracker && (
+              <>
+                <SheetLabel className="mt-4">Picking — scrap yard</SheetLabel>
+                <FieldRow>
+                  <TextField
+                    label="Labourers"
+                    note="— on picking"
+                    type="number"
+                    inputMode="numeric"
+                    suffix="nos"
+                    placeholder="0"
+                    value={picking.labourers}
+                    onChange={(e) => setPicking({ ...picking, labourers: e.target.value })}
+                  />
+                  <TextField
+                    label="Time worked"
+                    note="— roughly"
+                    type="number"
+                    inputMode="decimal"
+                    suffix="hrs"
+                    placeholder="0"
+                    value={picking.hours}
+                    onChange={(e) => setPicking({ ...picking, hours: e.target.value })}
+                  />
+                </FieldRow>
+                {pickLabourHours != null ? (
+                  <div className="diffout show">
+                    Picking: {pickLabourers} × {pickHours} h = <b>{pickLabourHours}</b> labourer-hours
+                    — costed into ₹/kg crumb, and from there into the reclaim.
+                  </div>
+                ) : (
+                  <div className="hint">
+                    An estimate is fine — how many were on the yard, and about how long. It goes into
+                    what a kg of crumb costs, so leaving it blank prices this shift's picking at
+                    nothing.
+                  </div>
+                )}
               </>
             )}
 

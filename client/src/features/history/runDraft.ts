@@ -1,3 +1,4 @@
+import { CRACKER_IDS } from '@/config/constants';
 import type { UpdateRunPayload } from '@/api/services/run.service';
 import type { Run } from '@/types/models';
 
@@ -47,6 +48,13 @@ export const draftOf = (run: Run) => ({
   flashKg: text(run.flash_kg),
   cavities: text(run.cavities),
   cyclicMin: text(run.cyclic_min),
+  // The picking gang on a cracker shift. Correctable because what the machine
+  // recorded was a supervisor's estimate at the end of a long shift, and an
+  // estimate is exactly the sort of thing remembered better the next morning.
+  // Correcting it re-prices the crumb that window made - there is no stored
+  // total behind it to go stale.
+  pickingLabourers: text(run.picking_labourers),
+  pickingHours: text(run.picking_hours),
 });
 
 export type Draft = ReturnType<typeof draftOf>;
@@ -62,6 +70,10 @@ export interface RunMath {
   isAuto: boolean;
   /** A moulding press: no meters, no hours - pieces, weight and flash. */
   isPress: boolean;
+  /** The cracker: the only machine that records the yard's picking gang. */
+  isCracker: boolean;
+  /** Labourer-hours of picking - what the crumb costing actually spends. */
+  pickingLabourHours: number | null;
   /** Compound on the weight plus the flash, and that over the pieces made. */
   material: number | null;
   perPiece: number | null;
@@ -102,6 +114,17 @@ export function runMath(run: Run, draft: Draft): RunMath {
   const pieces = asNumber(draft.pieces);
   const perPiece = material != null && pieces != null && pieces > 0 ? round2(material / pieces) : null;
 
+  // The picking gang that fed the cracker, and what the crumb costing spends on
+  // it. Both halves or neither: half an answer multiplied out is zero, which
+  // reads exactly like a shift that did no picking.
+  const isCracker = CRACKER_IDS.includes(run.machine_id);
+  const pickLabourers = asNumber(draft.pickingLabourers);
+  const pickHours = asNumber(draft.pickingHours);
+  const pickingLabourHours =
+    (pickLabourers ?? 0) > 0 && (pickHours ?? 0) > 0
+      ? round2((pickLabourers as number) * (pickHours as number))
+      : null;
+
   const issues: string[] = [];
   if (elecDelta != null && elecDelta < 0) {
     issues.push('The electricity meter reads lower at the end than at the start.');
@@ -112,11 +135,16 @@ export function runMath(run: Run, draft: Draft): RunMath {
   if (isPress && pieces != null && pieces <= 0) {
     issues.push('A press run that made no pieces has nothing to cost.');
   }
+  if (isCracker && (pickLabourers ?? 0) > 0 !== (pickHours ?? 0) > 0) {
+    issues.push('Picking needs both the labourers and the hours, or neither.');
+  }
 
   return {
     isTod,
     isAuto: run.kind === 'autoclave',
     isPress,
+    isCracker,
+    pickingLabourHours,
     material,
     perPiece,
     elecStart,

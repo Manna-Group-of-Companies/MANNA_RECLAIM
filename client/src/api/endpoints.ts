@@ -37,7 +37,7 @@ export const endpoints = {
     pendingWeigh: '/runs/pending-weigh',
     weighed: '/runs/weighed',
     pendingPack: '/runs/pending-pack',
-    /** Packed sacks still in the yard, for the Dispatch tab. */
+    /** Packed sacks still in the yard, for the Stock tab. */
     packed: '/runs/packed',
     shift: '/runs/shift',
     byId: (id: string) => `/runs/${id}`,
@@ -65,6 +65,19 @@ export const endpoints = {
   stock: {
     root: '/stock',
     summary: '/stock/summary',
+    /**
+     * The coarse pools and their three sample points. The lab tests the period
+     * rather than a lot, so it has to see which periods exist and which slots
+     * are still empty.
+     */
+    pools: '/stock/pools',
+    /**
+     * What the presses have made, by product and pack. The lab's other stock
+     * route: a moulded group is keyed on its product and the pack it is boxed
+     * in, so it is on neither the batch card nor the pool list, and boxed
+     * pieces would sit at `pending` with no bench able to reach them.
+     */
+    moulded: '/stock/moulded',
     byId: (id: string) => `/stock/${id}`,
     qc: (id: string) => `/stock/${id}/qc`,
   },
@@ -85,6 +98,13 @@ export const endpoints = {
     priceList: '/rates/price-list',
     quote: '/rates/quote',
     costRates: '/rates/cost-rates',
+    /**
+     * The two figures a loading job is costed by, for the dispatch form's
+     * running total. Its own route rather than the whole cost model above,
+     * which stays the back office's - the yard raises dispatch notes, and that
+     * is no reason to hand it the overheads and the interest rate.
+     */
+    loadingRates: '/rates/loading-rates',
   },
   maintenance: {
     root: '/maintenance',

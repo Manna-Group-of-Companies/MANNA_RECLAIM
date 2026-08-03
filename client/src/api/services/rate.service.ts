@@ -33,6 +33,21 @@ export const rateService = {
     return res.data.data;
   },
 
+  /**
+   * The contract rate per kg and the daily-labour rate per hour - what the
+   * dispatch form's loading total is worked out from.
+   *
+   * Separate from costRates() above because that one is the whole cost model
+   * and is the back office's; this is two numbers and is readable by whoever
+   * may raise a dispatch, which now includes the yard. Both are read again on
+   * the server and snapshotted onto the entry, so what a screen showed cannot
+   * become what a job was costed at.
+   */
+  async loadingRates(): Promise<CostRates> {
+    const res = await axiosClient.get<ApiEnvelope<CostRates>>(endpoints.rates.loadingRates);
+    return res.data.data;
+  },
+
   async saveCostRates(data: Record<string, number | null>): Promise<CostRates> {
     const res = await axiosClient.put<ApiEnvelope<CostRates>>(endpoints.rates.costRates, { data });
     return res.data.data;
