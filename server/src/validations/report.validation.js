@@ -20,3 +20,24 @@ export const efficiencyNoteSchema = z.object({
 export const costRatesSchema = z.object({
   data: z.record(z.union([z.coerce.number(), z.literal(''), z.null()])),
 });
+
+/**
+ * A labour rate coming into force on a date.
+ *
+ * Either half prices it: rupees an hour outright, or the day wage over the
+ * shift it covers. Asking for both would be asking the plant to agree with
+ * itself about a division it does not do - so one is required and the other is
+ * worked out. See rate.service's perHourOf().
+ */
+export const labourRateSchema = z
+  .object({
+    effectiveFrom: isoDate,
+    perHour: z.coerce.number().min(0).max(10_000).optional().nullable(),
+    dailyWage: z.coerce.number().min(0).max(100_000).optional().nullable(),
+    shiftHours: z.coerce.number().positive().max(24).optional().nullable(),
+    note: z.string().max(200).optional().nullable(),
+  })
+  .refine((r) => (r.perHour ?? 0) > 0 || (r.dailyWage ?? 0) > 0, {
+    message: 'Give the rate per hour, or the day wage it works out from',
+    path: ['perHour'],
+  });

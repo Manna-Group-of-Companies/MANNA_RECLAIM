@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { crud } from './base.service.js';
-import { TABLES, PRICE_LIST, COST_RATE_KEYS } from '../config/constants.js';
+import { TABLES, PRICE_LIST, COST_RATE_KEYS, DEFAULT_SHIFT_HOURS } from '../config/constants.js';
 
 /**
  * Two different things were both called "rates" in the prototype:
@@ -17,6 +18,63 @@ const rates = crud(TABLES.customerRates, { defaultSort: 'customer' });
 const priceRows = crud(TABLES.priceList, { defaultSort: 'grade' });
 const plantRates = crud(TABLES.rates, { defaultSort: 'id' });
 const costRates = crud(TABLES.costRates, { defaultSort: 'id' });
+const labourRates = crud(TABLES.labourRates, { defaultSort: 'effective_from' });
+
+/**
+ * What an hour of a labourer's time cost, on a given day.
+ *
+ * The plant hires by the day, so a rate may be entered either way round: a
+ * per-hour figure, or a day wage over the shift it covers. Both end up here as
+ * rupees per hour, because that is what every costing in the plant multiplies
+ * by - the picking gang, the cracker crew, the grinders.
+ */
+export const perHourOf = (row) => {
+  if (row == null) return null;
+  const direct = Number(row.per_hour ?? row.perHour);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const wage = Number(row.daily_wage ?? row.dailyWage);
+  const hours = Number(row.shift_hours ?? row.shiftHours ?? DEFAULT_SHIFT_HOURS);
+  if (Number.isFinite(wage) && wage > 0 && Number.isFinite(hours) && hours > 0) {
+    return Math.round((wage / hours) * 10000) / 10000;
+  }
+  return null;
+};
+
+/**
+ * The labour rate in force on a date, out of the dated rows in hand.
+ *
+ * The newest row that had already come into force on the day the work was done
+ * - so a rate raised this morning leaves last month exactly where it was, and a
+ * run corrected in History re-prices at the rate of its own day rather than at
+ * today's. That is the whole reason these rows carry a date.
+ *
+ * `fallback` is the undated `pickingLabourPerHour` off the Rates tab. It answers
+ * for a plant that has never entered a dated rate, and for runs older than the
+ * earliest one - and the costing says which of the two it used, because a figure
+ * priced off a fallback is a figure somebody should come back to.
+ *
+ * Pure and exported: the arithmetic behind a rupee is worth being able to assert
+ * on without a database in the way.
+ */
+export function labourRateAt(date, history = [], fallback = 0) {
+  const day = String(date ?? '').slice(0, 10);
+  let best = null;
+  for (const row of history) {
+    const from = String(row?.effective_from ?? '').slice(0, 10);
+    if (!from) continue;
+    // A run with no date on it cannot be placed in the history at all, so it
+    // takes the newest rate rather than the oldest - the plant's rates only
+    // ever move forward, and pricing an undated run at a rate from years ago
+    // would understate it every time.
+    if (day && from > day) continue;
+    if (!best || from > String(best.effective_from).slice(0, 10)) best = row;
+  }
+  const rate = perHourOf(best);
+  if (rate != null) {
+    return { rate, source: 'dated', effectiveFrom: String(best.effective_from).slice(0, 10) };
+  }
+  return { rate: Number(fallback) || 0, source: 'fallback', effectiveFrom: null };
+}
 
 /**
  * The cost inputs live as one row, id 'current', with every figure inside a
@@ -97,6 +155,43 @@ export const rateService = {
       { id: COST_RATES_ID, data: clean, updated_at: new Date().toISOString(), updated_by: updatedBy },
     ]);
     return rateService.costRates();
+  },
+
+  /**
+   * Every labour rate the plant has set, newest first.
+   *
+   * A project whose database has not had migration 0004 run against it has no
+   * table to read, and that is not an error worth failing a costing over: it
+   * answers empty and the costing falls back to the undated rate on the Rates
+   * tab, which is exactly where it was before this existed.
+   */
+  async labourRates() {
+    const rows = await labourRates.all({}, { sort: 'effective_from' }).catch(() => []);
+    return [...rows]
+      .map((row) => ({ ...row, per_hour: perHourOf(row) }))
+      .sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)));
+  },
+
+  /**
+   * Sets the rate in force from a date. Upserted on the date rather than
+   * appended, so a manager who mistyped a rate this morning corrects it instead
+   * of stacking a second one behind it and wondering which one is being used.
+   */
+  async saveLabourRate(payload = {}, createdBy = null) {
+    const effectiveFrom = String(payload.effectiveFrom ?? '').slice(0, 10);
+    const perHour = perHourOf(payload);
+    const row = {
+      id: randomUUID(),
+      effective_from: effectiveFrom,
+      per_hour: perHour,
+      daily_wage: payload.dailyWage ?? null,
+      shift_hours: payload.dailyWage != null ? payload.shiftHours ?? DEFAULT_SHIFT_HOURS : null,
+      note: payload.note ?? null,
+      created_at: new Date().toISOString(),
+      created_by: createdBy,
+    };
+    await labourRates.upsertMany([row], 'effective_from');
+    return rateService.labourRates();
   },
 
   async upsertRate(payload) {

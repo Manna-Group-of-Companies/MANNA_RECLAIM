@@ -2,6 +2,7 @@ import { crud, op } from './base.service.js';
 import { TABLES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { displayLabel } from '../utils/stockPeriod.js';
+import { loadingService, splitByKg } from './loading.service.js';
 
 /**
  * Who the plant sells to, and what has gone out to them.
@@ -69,11 +70,16 @@ export const customerService = {
 
   /**
    * What has gone out to this customer, newest first, each document with the
-   * lines it was made of.
+   * lines it was made of and what it cost to serve.
    *
-   * The lines are fetched for the whole page in one read rather than per
-   * dispatch - a customer with a year of business behind them would otherwise
-   * cost one request per document to open their record.
+   * This is the only door to a past dispatch. There is no standalone dispatch
+   * history screen, by design: the question anyone actually asks is "what has
+   * this customer bought", so it is answered off the customer rather than off a
+   * ledger that would have to be filtered back down to one every time.
+   *
+   * The lines and the loading entries are each fetched for the whole page in
+   * one read rather than per dispatch - a customer with a year of business
+   * behind them would otherwise cost two requests per document to open.
    */
   async dispatchHistory(id, query = {}) {
     const customer = await customerService.findById(id);
@@ -82,7 +88,10 @@ export const customerService = {
       { customer_id: id },
     );
     const ids = result.rows.map((row) => row.id);
-    const lineRows = ids.length ? await lines.all({ dispatch_id: ids }, { sort: 'created_at', ascending: true }) : [];
+    const [lineRows, loadingByDispatch] = await Promise.all([
+      ids.length ? lines.all({ dispatch_id: ids }, { sort: 'created_at', ascending: true }) : [],
+      loadingService.byDispatch(ids),
+    ]);
 
     // Which group each line drew from, by name rather than by id - a coarse line
     // reads AUG-H2, and the id says nothing to anyone.
@@ -109,6 +118,7 @@ export const customerService = {
       const own = byDispatch[row.id] ?? [];
       const goods = round2(own.reduce((sum, line) => sum + line.line_total, 0));
       const transport = round2(num(row.transport_charge));
+      const loading = loadingByDispatch.get(row.id) ?? null;
       // The sacks that went out, split by grade - what the customer's record is
       // read across rather than one total that hides which grade moved.
       const byQuality = own.reduce((acc, line) => {
@@ -116,6 +126,13 @@ export const customerService = {
         acc[key] = (acc[key] ?? 0) + line.sacks;
         return acc;
       }, {});
+
+      // One loading job covers the whole truck, so the cost comes back apart by
+      // kg before any single quality's contribution can be read off it.
+      const shares = splitByKg(loading?.loading_cost ?? 0, own);
+      const priced = own.map((line, index) => ({ ...line, loading_share: shares[index] ?? 0 }));
+      const loadingCost = round2(num(loading?.loading_cost));
+
       return {
         id: row.id,
         dispatch_date: row.dispatch_date ?? null,
@@ -127,7 +144,17 @@ export const customerService = {
         sacks_by_quality: byQuality,
         goods_total: goods,
         total: round2(goods + transport),
-        lines: own,
+        /**
+         * What it cost to put this load on a truck, beside the transport rather
+         * than inside the goods. Both are costs to serve; neither is in the
+         * rupees-per-kg the reclaim itself carries.
+         */
+        loading,
+        loading_cost: loadingCost,
+        labour_recorded: Boolean(loading?.has_labour),
+        /** Goods less what serving them cost. The reclaim's own cost is on the detail. */
+        contribution: round2(goods - loadingCost - (row.transport_provided ? transport : 0)),
+        lines: priced,
       };
     });
 

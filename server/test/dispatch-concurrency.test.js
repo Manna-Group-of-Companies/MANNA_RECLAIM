@@ -144,12 +144,18 @@ function postDispatchFunction() {
   };
 }
 
+/**
+ * The price is on the header, one figure per quality, and the server puts it
+ * onto the lines - so a body names the stock and the sacks, and quotes Coarse
+ * once however many pools it is drawing from.
+ */
 const dispatchBody = (sacks) => ({
   customer_id: CUSTOMER_ID,
   dispatch_date: '2026-08-15',
   transport_provided: false,
   transport_charge: 0,
-  lines: [{ stock_group_id: POOL.id, sacks, unit_price: 36 }],
+  lines: [{ stock_group_id: POOL.id, sacks }],
+  prices: { Coarse: 36 },
 });
 
 test('two overlapping dispatches on one pool: one posts, one is refused with 409', async (t) => {
@@ -208,10 +214,11 @@ test('a refused line rolls back the lines that already succeeded', async (t) => 
       dispatch_date: '2026-08-15',
       lines: [
         // This one fits...
-        { stock_group_id: other.id, sacks: 5, unit_price: 36 },
+        { stock_group_id: other.id, sacks: 5 },
         // ...and this one does not, which must undo the first.
-        { stock_group_id: POOL.id, sacks: 99, unit_price: 36 },
+        { stock_group_id: POOL.id, sacks: 99 },
       ],
+      prices: { Coarse: 36 },
     },
   });
 
@@ -241,7 +248,17 @@ test('a group that has not passed QC is refused, naming the group', async (t) =>
   assert.equal(held.dispatched_sacks, 0);
 });
 
-test('a line without a price above zero never reaches the database', async (t) => {
+/**
+ * Nothing goes out unpriced.
+ *
+ * The rule is per quality rather than per line: the manager quotes a figure for
+ * Coarse and every sack of Coarse on the document goes at it. So the ways to
+ * get this wrong are a price that is not a price, and a quality on the document
+ * that was never given one - and neither may reach the database, because
+ * post_dispatch() writing a header and then refusing a line is a delivery note
+ * for goods that never left.
+ */
+test('a quality left unpriced never reaches the database', async (t) => {
   const api = await startApi({
     tables: { stock_groups: [{ ...POOL }], dispatches: [], dispatch_lines: [] },
     functions: {
@@ -252,21 +269,92 @@ test('a line without a price above zero never reaches the database', async (t) =
   });
   t.after(() => api.stop());
 
-  for (const unit_price of [0, -5, null, undefined]) {
-    const res = await api.call('/dispatches', {
+  const post = (prices) =>
+    api.call('/dispatches', {
       method: 'POST',
       body: {
         customer_id: CUSTOMER_ID,
         dispatch_date: '2026-08-15',
-        lines: [{ stock_group_id: POOL.id, sacks: 2, unit_price }],
+        lines: [{ stock_group_id: POOL.id, sacks: 2 }],
+        prices,
       },
     });
-    assert.equal(res.status, 422, `unit_price ${unit_price} must be refused before the write`);
+
+  for (const price of [0, -5, null, 'free']) {
+    const res = await post({ Coarse: price });
+    assert.equal(res.status, 422, `a price of ${price} must be refused before the write`);
   }
+
+  // An empty price list, and one that prices a grade the document does not
+  // carry while leaving the one it does carry out. The second is the realistic
+  // mistake - the manager priced the wrong row - and it is the one a per-line
+  // schema check would miss entirely, because every line is well-formed.
+  assert.equal((await post({})).status, 422, 'a document with no prices at all is refused');
+
+  const wrongGrade = await post({ Fine: 43 });
+  assert.equal(wrongGrade.status, 422, 'a quality on the document with no price is refused');
+  const body = await wrongGrade.json();
+  assert.match(body.message, /Coarse/, 'and the refusal names the quality that was missed');
 
   const noLines = await api.call('/dispatches', {
     method: 'POST',
-    body: { customer_id: CUSTOMER_ID, dispatch_date: '2026-08-15', lines: [] },
+    body: {
+      customer_id: CUSTOMER_ID,
+      dispatch_date: '2026-08-15',
+      lines: [],
+      prices: { Coarse: 36 },
+    },
   });
   assert.equal(noLines.status, 422);
+
+  assert.equal(api.tables.dispatches.length, 0, 'nothing may have been written by any of them');
+  assert.equal(api.tables.dispatch_lines.length, 0);
+});
+
+/**
+ * One price per quality, however many lines carry it.
+ *
+ * Two pallets of Coarse off two different pools go out at the same rate,
+ * because that is what the customer was quoted. A per-line price makes two
+ * figures for one agreement possible, which nobody ever intends and nobody
+ * notices until the invoice.
+ */
+test('one quoted price lands on every line of that quality', async (t) => {
+  const other = {
+    ...POOL,
+    id: '66666666-6666-4666-8666-666666666666',
+    label: '2026-08-H1',
+    packed_sacks: 20,
+    dispatched_sacks: 0,
+    available_sacks: 20,
+  };
+  const api = await startApi({
+    tables: { stock_groups: [{ ...other }, { ...POOL }], dispatches: [], dispatch_lines: [] },
+    functions: { post_dispatch: postDispatchFunction() },
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/dispatches', {
+    method: 'POST',
+    body: {
+      customer_id: CUSTOMER_ID,
+      dispatch_date: '2026-08-15',
+      lines: [
+        { stock_group_id: other.id, sacks: 4 },
+        { stock_group_id: POOL.id, sacks: 3 },
+      ],
+      prices: { Coarse: 36 },
+    },
+  });
+  assert.equal(res.status, 201, await res.text());
+
+  const written = api.tables.dispatch_lines;
+  assert.equal(written.length, 2);
+  for (const line of written) {
+    assert.equal(line.unit_price, 36, 'both lines go out at the one quoted figure');
+  }
+
+  // And the grade priced against is the group's own, never the client's word
+  // for it - a line cannot re-label itself into a cheaper bracket.
+  assert.deepEqual([...new Set(written.map((line) => line.quality))], ['Coarse']);
 });

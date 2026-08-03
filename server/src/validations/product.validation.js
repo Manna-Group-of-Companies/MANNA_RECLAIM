@@ -37,6 +37,23 @@ export const createProductSchema = z.object({
   code: z.string().trim().max(40).optional().nullable(),
   quality: z.string().trim().max(40).optional().nullable(),
   packSizeKg: positive,
+
+  /**
+   * How a moulded product is boxed, and what one piece weighs.
+   *
+   * `packSizeKg` above is a different figure - what a sack of a reclaim grade
+   * weighs - because a moulded product is not sold by weight at all: it is sold
+   * by the piece, boxed some number at a time. So `packSize` is a count.
+   *
+   * Both are optional and stay optional. The presses run whether or not the back
+   * office has filled these in, and a product with no pack set boxes as loose
+   * pieces and says so in the yard rather than stranding a shift's moulding for
+   * want of a settings field. `pieceKg` unset means moulded stock reports no
+   * weight, which is honest; a default would be a number nobody measured.
+   */
+  packSize: z.coerce.number().int().positive().max(100_000).optional().nullable(),
+  packLabel: z.string().trim().max(40).optional().nullable(),
+  pieceKg: positive,
   machineId: z.string().trim().max(40).optional().nullable(),
   rawMaterialCost: nonNegative,
   firewoodCost: nonNegative,

@@ -58,6 +58,7 @@ export const qualityService = {
   listForBatch: async (batchRef, query = {}) =>
     decorateList(await base.list({ ...query, order: 'asc' }, { batch_no: String(batchRef) })),
 
+
   async record(payload) {
     const test = await base.create({
       kind: payload.kind ?? 'batch',
@@ -85,23 +86,48 @@ export const qualityService = {
      * same call rather than being a second thing for the back office to
      * remember - and there is no screen that would remind them.
      *
+     * A coarse sample decides its pool the same way, with one difference that
+     * matters: a pool nobody has sampled still sells, because coarse goes out
+     * on the line running to specification rather than on a certificate per
+     * pool - waiting for the bench is what used to strand every sack. Absence
+     * is not refusal. A hold is, and stops the whole period.
+     *
      * A failure here must not lose the test. The lab is on a tablet at a bench
      * and the row is already filed; the group is a derived status that the next
      * packing or `npm run stock:qc-sync` will put right, so it is logged rather
      * than raised at someone holding a sample.
      */
+    let released = null;
     try {
-      await stockService.applyLabVerdict({
+      released = await stockService.applyLabVerdict({
         kind: test.kind,
         batchNo: test.batch_no,
         quality: test.quality,
         verdict: test.verdict,
+        // Carried onto the stock group beside the status. The test row keeps its
+        // own tester, but the group is what post_dispatch() reads and what the
+        // yard shows, and a release with no name against it cannot afterwards be
+        // told from one nobody made.
+        testedBy: test.tester ?? null,
       });
     } catch (err) {
       logger.warn(`Quality test ${test.id}: the stock group was not released - ${err.message}`);
     }
 
-    return decorate(test);
+    /**
+     * Which stock group this verdict actually moved, or null if it moved none.
+     *
+     * Null is the case worth reporting, and it is not an error. A verdict
+     * releases stock that already exists; it does not create any. Pass a batch
+     * nobody has bagged yet and there is no group to release - correct, and
+     * completely invisible from the bench, which files the test, watches
+     * nothing appear in the yard, and reasonably concludes the app is broken.
+     *
+     * So the answer is handed back and the screen says which happened. The
+     * fault this closes is not a missing write; it is a write that succeeded
+     * and looked like nothing.
+     */
+    return { ...decorate(test), stock_released: released };
   },
 
   /**

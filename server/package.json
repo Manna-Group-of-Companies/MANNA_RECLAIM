@@ -12,6 +12,8 @@
     "db:report": "node scripts/supabase-report.js",
     "db:migrate": "node scripts/apply-sql.js",
     "stock:qc-sync": "node scripts/stock-qc-sync.js",
+    "stock:diagnose": "node scripts/stock-diagnose.js",
+    "stock:release-pools": "node scripts/release-pools.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",
     "seed:products": "node scripts/seed-products.js",

@@ -3,9 +3,10 @@ import { machineService } from './machine.service.js';
 import { productService } from './product.service.js';
 import { dispatchService } from './dispatch.service.js';
 import { stockService } from './stock.service.js';
+import { pickingHoursOf } from './crumb.service.js';
 import { absentSchema } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
-import { TABLES, SACK_KG, COARSE_GRADE } from '../config/constants.js';
+import { TABLES, SACK_KG, COARSE_GRADE, isCracker } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { currentShift, todayISO } from '../utils/shift.js';
 
@@ -90,8 +91,33 @@ export const decorate = (row) => {
     // that has not run supabase/schema.sql - the total is all there is of those.
     weigh_entries: Array.isArray(row.weigh_entries) ? row.weigh_entries : null,
     packed_sacks: row.packed_sacks ?? null,
+    /*
+     * How many of a press run's pieces have been boxed and filed as stock.
+     *
+     * Null rather than zero while nobody has been to the boxing bench, exactly
+     * as `packed_sacks` is: "none boxed yet" and "boxed, and it came to none"
+     * are different states, and the Packing tab lists the first and not the
+     * second.
+     */
+    packed_pieces: row.packed_pieces ?? null,
     leftout_in: row.leftout_in ?? null,
     leftout_out: row.leftout_out ?? null,
+    /*
+     * The picking gang, under the names the screens use.
+     *
+     * The columns are the tablets' - `pickcut_workers` and `pickcut_hours`,
+     * from "pick and cut" - and they were written and then never read by
+     * anything. They are read now: picking is what feeds the cracker, and its
+     * labour is part of what a kg of crumb costs. See crumb.service.js.
+     *
+     * `picking_labour_hours` is the product the costing actually spends, worked
+     * out here so no screen has to multiply two columns and get it slightly
+     * differently. Null rather than zero where the gang was never recorded - a
+     * shift nobody entered picking for is not a shift nobody picked on.
+     */
+    picking_labourers: row.pickcut_workers ?? null,
+    picking_hours: row.pickcut_hours ?? null,
+    picking_labour_hours: round2(pickingHoursOf(row)) || null,
   };
 };
 
@@ -191,6 +217,28 @@ const mergesByShift = (run) =>
   !run.batch_no &&
   Boolean(run.shift_date && run.shift);
 
+/**
+ * The picking figures a stop is filing, or nothing at all.
+ *
+ * Picking belongs to the cracker - it is the gang that pulls scrap tyres out of
+ * the yard and feeds them to it - so nothing else may record any, and a payload
+ * that tries is ignored rather than refused: the run itself is fine, and a crew
+ * standing at a machine should not be arguing with a form about a field their
+ * sheet should never have shown them.
+ *
+ * A field left out keeps what the run already had, which is what makes a second
+ * stop in the same shift able to leave picking alone.
+ */
+function pickingPatch(run, payload = {}) {
+  if (!isCracker(run.machine_id)) return {};
+  const labourers = payload.pickingLabourers ?? run.pickcut_workers;
+  const hours = payload.pickingHours ?? run.pickcut_hours;
+  return {
+    pickcut_workers: labourers == null ? null : Number(labourers),
+    pickcut_hours: hours == null ? null : round2(Number(hours)),
+  };
+}
+
 /** Adds two figures that may each be missing; null only when both are. */
 const addNum = (a, b) =>
   a == null && b == null ? null : round2(Number(a ?? 0) + Number(b ?? 0));
@@ -226,6 +274,14 @@ export function mergePatch(record, run, leg) {
     hours_run: addNum(record.hours_run, leg.hours_run),
     weight_kg: addNum(record.weight_kg, leg.weight_kg),
     workers: maxNum(record.workers, leg.workers),
+    /*
+     * The picking gang, folded the same way the machine's own crew is: the
+     * shift picked with the most hands it ever had on it at once, for as long
+     * as the starts of it add up to. A cracker stopped for a blockage and
+     * started again did not send the gang home and hire a second one.
+     */
+    pickcut_workers: maxNum(record.pickcut_workers, leg.pickcut_workers),
+    pickcut_hours: addNum(record.pickcut_hours, leg.pickcut_hours),
     elec_start: record.elec_start ?? run.elec_start,
     hour_start: record.hour_start ?? run.hour_start,
     elec_end: leg.elec_end ?? record.elec_end,
@@ -284,6 +340,13 @@ const EDITABLE_COLUMNS = {
   cyclicMin: 'cyclic_min',
   pieces: 'pieces',
   flashKg: 'flash_kg',
+  // The picking gang on a cracker shift. What was entered at the machine is a
+  // supervisor's estimate - "four of them, about three hours" - so it is
+  // correctable here like any other figure, and correcting it re-prices the
+  // crumb the window made on the next read. There is no stored total behind it
+  // to go stale; see crumb.service.js.
+  pickingLabourers: 'pickcut_workers',
+  pickingHours: 'pickcut_hours',
 };
 
 /**
@@ -430,11 +493,35 @@ export const runService = {
         const packed = Number(row.packed_sacks || 0) * SACK_KG;
         return row.packed_sacks == null || total - packed >= SACK_KG;
       });
-    return { ...result, rows, total: rows.length };
+
+    /*
+     * And the presses.
+     *
+     * They are read separately because nothing about them fits the filter
+     * above: a press has no quality and is not the coarse line, and what it owes
+     * the yard is a count of pieces rather than a weight to divide into sacks.
+     * One query covering both would be a pair of `or` branches nobody could read
+     * afterwards.
+     *
+     * A press run belongs here while it has moulded more pieces than have been
+     * boxed. Until this existed its pieces reached the yard nowhere at all - the
+     * count sat on the run and the Stock page, which is meant to be every packed
+     * thing in the plant, could not see a shift's moulding.
+     */
+    const pressed = await base.list(
+      { order: 'desc', sort: 'ended_at', limit: 200, ...query },
+      { kind: 'press', pieces: op.gt(0) },
+    );
+    const presses = pressed.rows
+      .map((row) => ({ ...decorate(row), needs_pack: true }))
+      .filter((row) => Number(row.pieces || 0) > Number(row.packed_pieces || 0));
+
+    const all = [...rows, ...presses];
+    return { ...result, rows: all, total: all.length };
   },
 
   /**
-   * The packed sacks still in the yard - what the Dispatch tab loads a vehicle
+   * The packed sacks still in the yard - what the Stock tab loads a vehicle
    * from, rather than having the grade, the batch and the count typed again.
    *
    * The same graded output the Packing tab bags, read from the other end: a run
@@ -623,6 +710,11 @@ export const runService = {
       // Both are charged as material - see pressCost().
       pieces: payload.pieces ?? run.pieces,
       flash_kg: payload.flashKg ?? run.flash_kg,
+      // The picking gang that fed the cracker this shift. Only the cracker is
+      // asked, and only the cracker is believed: picking is what feeds it, and
+      // a figure arriving against a grinder is a sheet sent by something that
+      // has not been told which machine it is stopping.
+      ...pickingPatch(run, payload),
     };
 
     const record = await shiftRecordFor(run);
@@ -763,15 +855,39 @@ export const runService = {
   },
 
   /**
-   * Records the sacks packed off a run (the Packing tab).
+   * Records what came off a run and into the yard (the Packing tab).
+   *
+   * Two benches, one door. A weighed run is bagged into 50 kg sacks and a press
+   * run is boxed by the piece, and the run says which - a press cannot be packed
+   * in sacks and a refiner cannot be packed in pieces, so the field that happens
+   * to have arrived is not what decides. Sending the wrong one is refused rather
+   * than ignored: a count entered on the wrong bench is a count somebody
+   * believes was recorded.
+   */
+  async pack(id, body = {}) {
+    const run = await base.findById(id);
+    if (run.kind === 'press') {
+      if (body.sacks != null) {
+        throw ApiError.badRequest('A press run is boxed by the piece, not bagged in sacks');
+      }
+      return runService.packPieces(run, body);
+    }
+    if (body.pieces != null) {
+      throw ApiError.badRequest('Only a press run is boxed by the piece');
+    }
+    return runService.packSacks(run, body);
+  },
+
+  /**
+   * The bagging line: full sacks off a weighed run.
    *
    * `leftout_out` is the sub-sack remainder that goes into the next batch of
    * the same grade. It is rejected rather than clamped when it comes out
    * negative: that means more sacks were claimed than there was material for,
    * and silently absorbing it would lose weight from the ledger.
    */
-  async pack(id, { sacks, leftoutIn, leftoutOut } = {}) {
-    const run = await base.findById(id);
+  async packSacks(run, { sacks, leftoutIn, leftoutOut } = {}) {
+    const id = run.id;
     if (sacks == null || Number.isNaN(Number(sacks))) {
       throw ApiError.badRequest('The number of sacks packed is required');
     }
@@ -821,6 +937,100 @@ export const runService = {
     }
 
     return decorate(saved);
+  },
+
+  /**
+   * The boxing bench: pieces off a press run, filed as moulded stock.
+   *
+   * A press moulds finished goods out of reclaim compound and counts them one at
+   * a time. There is nothing to weigh at the end and nothing to carry into the
+   * next run - a piece is a piece - so this is the whole of it: how many were
+   * boxed, and into which product's stock they go.
+   *
+   * The pack is read off the product rather than sent, for the same reason a
+   * coarse pool's label is worked out from the server's own date: a client that
+   * could name its own pack size could file a hundred loose pieces as two packs
+   * of fifty. A product with no pack size set boxes as loose pieces and says so
+   * on the yard's screen, which is a settings field somebody can go and fill in
+   * - it is not a reason to strand a shift's moulding.
+   *
+   * More boxed than were moulded is refused. The count came off the press and
+   * boxing more than that is a mis-key, not a discovery; absorbing it would put
+   * stock in the yard that the plant never made.
+   */
+  async packPieces(run, { pieces } = {}) {
+    const id = run.id;
+    if (pieces == null || Number.isNaN(Number(pieces))) {
+      throw ApiError.badRequest('The number of pieces boxed is required');
+    }
+    const boxed = Math.trunc(Number(pieces));
+    const moulded = Number(run.pieces || 0);
+    if (boxed > moulded) {
+      throw ApiError.badRequest(`This run moulded ${moulded} pieces`);
+    }
+
+    const before = Number(run.packed_pieces || 0);
+    const saved = await base.update(id, { packed_pieces: boxed });
+
+    /*
+     * Boxed pieces are stock from here on, filed in the same call that records
+     * the boxing - the same rule as bagging, and for the same reason: a yard
+     * ledger reconciled later is a yard ledger that is wrong in between.
+     *
+     * The *change* goes across, not the total, so correcting a count next
+     * morning moves the group by the difference instead of filing the same
+     * pieces twice.
+     *
+     * A failure here must not lose the boxing. The run is already saved and the
+     * group is a derived ledger that boxing again will put right, so it is
+     * logged rather than raised at somebody standing at the bench.
+     */
+    const delta = boxed - before;
+    if (delta) {
+      try {
+        const product = await runService.productOf(run);
+        await stockService.recordPacking({
+          kind: 'product',
+          productId: run.product ?? null,
+          packSize: product?.pack_size ?? null,
+          kgPerUnit: product?.piece_kg ?? null,
+          // The batch of compound the press was moulding, which is what the lab
+          // files its verdict against - so a run boxed after the bench has
+          // already answered opens on that answer rather than on `pending`.
+          batchNo: run.batch_no,
+          quality: run.product ?? null,
+          delta,
+          packedOn: run.shift_date ?? todayISO(),
+        });
+      } catch (err) {
+        logger.warn(`Boxing run ${id}: the stock group was not updated - ${err.message}`);
+      }
+    }
+
+    return decorate(saved);
+  },
+
+  /**
+   * The product a press run was set up for, or null.
+   *
+   * Read at boxing time rather than snapshotted at the run, unlike the curing
+   * settings and the compound rate. Those are what the run was moulded at and
+   * must not move afterwards; the pack is how the goods are boxed *now*, which
+   * is a decision made at the bench and one the back office may legitimately
+   * change between the press stopping and the boxes being filled.
+   *
+   * A product that has since been deleted, or a project with no products table,
+   * answers null - and the pieces are then filed as loose. Stock in the yard is
+   * not contingent on a settings row still being there.
+   */
+  async productOf(run) {
+    const id = String(run?.product ?? '').trim();
+    if (!id) return null;
+    try {
+      return await productService.findById(id);
+    } catch {
+      return null;
+    }
   },
 
   pause: (id, paused = true) =>

@@ -63,6 +63,21 @@ const FIELD_COLUMNS = {
   code: 'code',
   quality: 'quality',
   packSizeKg: 'pack_size_kg',
+  /*
+   * What a moulded product ships in, and what one of it weighs.
+   *
+   * `packSizeKg` above is the other thing entirely - what a sack of a reclaim
+   * grade weighs - and the two are easy to confuse from the names alone. A
+   * moulded product is not sold by weight: it is sold by the piece, boxed some
+   * number at a time, so `packSize` is a count of pieces.
+   *
+   * `pieceKg` is what the yard puts a weight against moulded stock with, and
+   * what the loading gang's kg comes from on a moulded load. Unset, the stock
+   * page reports no weight rather than a fabricated one.
+   */
+  packSize: 'pack_size',
+  packLabel: 'pack_label',
+  pieceKg: 'piece_kg',
   machineId: 'machine_id',
   rawMaterialCost: 'raw_material_cost',
   firewoodCost: 'firewood_cost',

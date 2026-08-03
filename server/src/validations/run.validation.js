@@ -71,6 +71,17 @@ export const stopRunSchema = z.object({
    */
   pieces: z.coerce.number().int().positive().max(1_000_000).optional().nullable(),
   flashKg: z.coerce.number().min(0).optional().nullable(),
+  /**
+   * The picking gang on a cracker run: how many were put on pulling scrap tyres
+   * out of the yard, and roughly how long they were at it. Approximate by
+   * design - the gang is not clocked, the supervisor says "four of them, about
+   * three hours" - so hours take a decimal and neither is required.
+   *
+   * A shift is twelve hours and nobody works more than one at a stretch, so
+   * anything past that is a mis-key rather than a long day.
+   */
+  pickingLabourers: z.coerce.number().int().min(0).max(50).optional().nullable(),
+  pickingHours: z.coerce.number().min(0).max(24).optional().nullable(),
 });
 
 /**
@@ -108,6 +119,11 @@ export const updateRunSchema = z
     cyclicMin: z.coerce.number().min(0).optional().nullable(),
     pieces: z.coerce.number().int().min(0).optional().nullable(),
     flashKg: z.coerce.number().min(0).optional().nullable(),
+    // The picking gang on a cracker run. Correctable because the figure is an
+    // estimate the supervisor gives at the end of a shift, and an estimate is
+    // exactly the kind of thing that gets remembered better the next morning.
+    pickingLabourers: z.coerce.number().int().min(0).max(50).optional().nullable(),
+    pickingHours: z.coerce.number().min(0).max(24).optional().nullable(),
   })
   .refine((patch) => Object.keys(patch).length > 0, { message: 'Nothing to change' });
 
@@ -134,15 +150,32 @@ export const tallyRunSchema = z.object({
 });
 
 /**
- * The Packing tab reports how many full sacks came out of a weighed run. The
- * remainder below one sack is carried into the next batch of the same grade,
- * so the tablet sends it too rather than making the server re-derive it.
+ * The Packing tab reports what came off a finished run and into the yard.
+ *
+ * A weighed run reports full sacks, with the remainder below one sack carried
+ * into the next batch of the same grade - the tablet sends that too rather than
+ * making the server re-derive it. A press run reports boxed pieces instead:
+ * there is nothing to weigh, nothing to carry forward, and a piece is a piece,
+ * so `sacks` and the two leftouts are simply not part of that entry.
+ *
+ * One of the two counts has to be there. Neither is required on its own because
+ * this one route serves both benches, and which figure applies is decided by the
+ * run - a press cannot be packed in sacks and a refiner cannot be packed in
+ * pieces, and run.service refuses either rather than trusting the field that
+ * happened to arrive.
  */
-export const packRunSchema = z.object({
-  sacks: z.coerce.number().int().min(0),
-  leftoutIn: z.coerce.number().min(0).optional().nullable(),
-  leftoutOut: z.coerce.number().min(0).optional().nullable(),
-});
+export const packRunSchema = z
+  .object({
+    sacks: z.coerce.number().int().min(0).optional(),
+    leftoutIn: z.coerce.number().min(0).optional().nullable(),
+    leftoutOut: z.coerce.number().min(0).optional().nullable(),
+    /** Boxed pieces off a press run. Capped where the piece count itself is. */
+    pieces: z.coerce.number().int().min(0).max(1_000_000).optional(),
+  })
+  .refine((body) => body.sacks != null || body.pieces != null, {
+    message: 'Say how many sacks were bagged, or how many pieces were boxed',
+    path: ['sacks'],
+  });
 
 export const pauseRunSchema = z.object({ paused: z.boolean().default(true) });
 

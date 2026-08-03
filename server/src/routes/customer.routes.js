@@ -4,40 +4,44 @@ import { authenticate } from '../middlewares/auth.middleware.js';
 import { adminOnly, authorize } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam, listQuery } from '../validations/common.validation.js';
+import { DISPATCH_ROLES } from '../config/constants.js';
 import {
   customerQuery,
   createCustomerSchema,
   updateCustomerSchema,
 } from '../validations/customer.validation.js';
-import { DISPATCH_ROLES } from '../config/constants.js';
 
 /**
  * Who the plant sells to, and what has gone out to them.
  *
- * Two halves, and the line between them is what a dispatch actually needs.
+ * Split in two, and the line between the halves is "what a dispatch form needs"
+ * against "what the back office owns".
  *
- * A supervisor posts dispatches, and a dispatch names a customer and carries a
- * price per line - so the list of names and the rate each last paid have to be
- * reachable from the yard, or the form cannot be filled in. Those two are open
- * to DISPATCH_ROLES.
+ * The yard raises its own dispatch notes now - see DISPATCH_ROLES - and a
+ * dispatch names the customer it goes to, so whoever posts one has to be able
+ * to read the list and the last price that customer paid. Those two reads are
+ * therefore open to a dispatcher. This is a real widening: the list is
+ * commercial information and it is now on the shop floor, which the plant has
+ * decided is the price of the yard raising its own paperwork.
  *
- * Everything else stays with the back office. What a customer has bought over
- * time is the commercial record rather than a thing needed to load a vehicle,
- * and editing the customer file is not the gate's work either. Both guards are
- * on the route rather than on what a screen chooses to draw - a field left out
- * of a render is still one devtools tab away.
+ * Everything else stays the office's. Reading a customer in order to send them
+ * goods is not the same as being able to add one, rename one, or read back
+ * everything they have ever bought - that last is the customer's whole trading
+ * history, which is a different question from "who is this lorry going to".
+ *
+ * The gate is on the route rather than on what a screen chooses to draw: a
+ * field left out of a render is still one devtools tab away.
  */
 const router = Router();
 
 router.use(authenticate);
 
+/** The two reads a dispatch form cannot be filled in without. */
 const forDispatch = authorize(...DISPATCH_ROLES);
 
-// -- what loading a vehicle needs ------------------------------------------
 router.get('/', forDispatch, validate({ query: customerQuery }), customers.list);
 router.get('/:id/last-prices', forDispatch, validate({ params: idParam }), customers.lastPrices);
 
-// -- the back office's own ------------------------------------------------
 router.post('/', adminOnly, validate({ body: createCustomerSchema }), customers.create);
 router.get('/:id', adminOnly, validate({ params: idParam }), customers.getOne);
 router.patch(
@@ -47,6 +51,13 @@ router.patch(
   customers.update,
 );
 
+/**
+ * What this customer has bought, newest first - their whole trading history,
+ * priced. The back office's, and it stays there even though the yard can now
+ * dispatch to them: "who is this lorry going to" and "what has this account
+ * bought from us all year, and at what" are different questions, and only the
+ * first is needed to load a vehicle.
+ */
 router.get(
   '/:id/dispatches',
   adminOnly,

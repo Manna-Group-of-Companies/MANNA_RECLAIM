@@ -34,7 +34,7 @@ export const pendingPack = asyncHandler(async (req, res) =>
   paginated(res, await runService.listPendingPack(req.query)),
 );
 
-/** Packed sacks still in the yard - what the Dispatch tab loads from. */
+/** Packed sacks still in the yard - what the Stock tab loads from. */
 export const packed = asyncHandler(async (req, res) =>
   paginated(res, await runService.listPacked(req.query)),
 );

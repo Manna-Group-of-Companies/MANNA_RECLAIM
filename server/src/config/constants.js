@@ -19,15 +19,34 @@ export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
 export const QUALITY_WRITE_ROLES = [ROLES.LAB, ...ADMIN_ROLES];
 
 /**
- * Who may load a vehicle.
+ * Who may issue a dispatch.
  *
- * A dispatch is the step straight after the lab passes a batch, and it happens
- * at the yard rather than in the office - so the supervisor standing at the
- * gate posts it. That is a deliberate widening of what the shop floor may see:
- * post_dispatch() refuses a line without a unit price, so anyone who can post
- * one can necessarily see the customer it is going to and the rate it is going
- * at. The rest of the commercial record stays shut - what a customer has bought
- * before, and what any of it earned, is still ADMIN_ROLES only.
+ * The yard and the back office. The vehicle is loaded at the yard, and the
+ * supervisor standing at it is the person who knows what actually went on it -
+ * so that is where the document is now raised.
+ *
+ * This has moved twice and it is worth being plain about what the second move
+ * costs, because it is not a detail. A dispatch cannot be posted without naming
+ * the customer it goes to and the price it goes at. So anyone who can post one
+ * can read the customer list and the rate against each grade, and there is no
+ * arrangement in which a supervisor fills this form in and does not see them.
+ * The list was previously shut for exactly that reason. It is open again
+ * because the plant has decided the yard raising its own paperwork is worth
+ * more than keeping the list off the floor - a commercial judgement, not a
+ * technical one, and the only honest way to give the yard a working form.
+ *
+ * What did NOT move with it:
+ *   - GET /stock, the packed-against-dispatched ledger the back office
+ *     reconciles with. The yard reads /stock/summary, which carries what is
+ *     there and what the lab said and nothing about what has been sold. See
+ *     stock.service's two serializers.
+ *   - PATCH /stock/:id/qc. Releasing goods for sale stays the office's.
+ *   - Editing the rate card, the cost inputs and the customer records
+ *     themselves. Reading a customer to dispatch to is not the same as being
+ *     able to add, rename or reprice one.
+ *
+ * worker and lab are still refused everywhere here. See stock-access.test.js
+ * for the assertions that hold this shape in place.
  */
 export const DISPATCH_ROLES = [ROLES.SUPERVISOR, ...ADMIN_ROLES];
 
@@ -61,8 +80,65 @@ export const DISPATCH_GRADES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Coars
  */
 export const QC_STATUSES = ['pass', 'fail', 'pending'];
 
+/**
+ * The three things a stock group can be, which is the three ways this plant
+ * makes something it can sell.
+ *
+ *   batch    one grade off one special-line batch, certified as a lot.
+ *   pool     the coarse line's ten-day period. Not batch-identified - the line
+ *            runs for a shift, not for a batch.
+ *   product  what a moulding press made, keyed on the product and the pack it
+ *            is boxed in. Counted in pieces rather than sacks.
+ */
+export const STOCK_KINDS = ['batch', 'pool', 'product'];
+
+/**
+ * What a stock count counts.
+ *
+ * Reclaim and coarse are bagged, so they are sacks. A press moulds finished
+ * goods and counts them one at a time, so they are pieces. The column holding
+ * the number is `packed_sacks` either way - see the note in schema.sql - and
+ * this is what says what the number means. Every serializer, every screen and
+ * every dispatch line reads it rather than assuming.
+ */
+export const STOCK_UNITS = ['sacks', 'pieces'];
+
+/** Singular and plural, for a screen that has to name what it is counting. */
+export const UNIT_NOUN = {
+  sacks: { one: 'sack', many: 'sacks' },
+  pieces: { one: 'piece', many: 'pieces' },
+};
+
 /** The coarse line is not batch-identified, so its sacks are pooled by period. */
 export const COARSE_GRADE = 'Coarse';
+
+/**
+ * How the crew that loaded a vehicle was paid.
+ *
+ *   contract  a per-kg rate to the loading gang. What reclaim normally goes on.
+ *   manhour   manpower allotted x time worked, at the daily-labour rate. The
+ *             only method available for moulded goods, which have no per-kg
+ *             contract behind them.
+ *   mixed     both on the one job - a contract load that also had day labour
+ *             on it.
+ *
+ * `mixed` is not a third form to fill in. It is what a contract load becomes
+ * the moment anyone is entered against the man-hour fields, and the coercion is
+ * in loadingEntry() below rather than in the screen: the rule is that daily
+ * labour is accounted for wherever it worked, and a rule that depends on a
+ * manager remembering to change a dropdown is not a rule.
+ */
+export const LOADING_MODES = ['contract', 'manhour', 'mixed'];
+
+/**
+ * What was loaded, as far as the costing is concerned. Moulded goods come off
+ * the presses and have no per-kg loading contract, so they are costed by
+ * man-hours and nothing else - see forcedLoadingMode().
+ */
+export const LOADING_MATERIALS = ['reclaim', 'moulded'];
+
+/** Moulded goods have no per-kg contract, so man-hours are the only method. */
+export const forcedLoadingMode = (material) => (material === 'moulded' ? 'manhour' : null);
 
 export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'];
 
@@ -81,10 +157,26 @@ export const MACHINE_TYPES = [
 /**
  * The moulding presses. They mould finished goods out of reclaim compound rather
  * than making reclaim, so almost none of the plant's usual rules reach them: no
- * meters, no run hours, no energy, no bearings, nothing to weigh afterwards and
- * no packing path. What they record is a count of pieces against a product.
+ * meters, no run hours, no energy, no bearings and nothing to weigh afterwards.
+ * What they record is a count of pieces against a product.
+ *
+ * They do now have a packing path. A press run's pieces used to stop at the run
+ * and reach the yard nowhere, so the Stock page - which is meant to be every
+ * packed thing in the plant - could not see a shift's moulding at all. Boxing
+ * them files a `product` stock group the same way bagging files a batch one.
  */
 export const PRESS_IDS = ['PRS_P3', 'PRS_P5'];
+
+/**
+ * How many pieces are in a pack when the product does not say.
+ *
+ * Deliberately null rather than a number. A pack size guessed on the product's
+ * behalf would put a pack count on the yard's screen that nobody set and nobody
+ * could tell from one that was - so an unset product is boxed as loose pieces
+ * and the screen says the pack is not set, which is a thing the back office can
+ * then go and fix.
+ */
+export const DEFAULT_PACK_SIZE = null;
 
 /** Standard list rate per kg. A customer rate card entry overrides these. */
 export const PRICE_LIST = { Special: 48, SuperFine: 47, Fine: 43, Medium: 41, Coarse: 36 };
@@ -128,6 +220,14 @@ export const TABLES = {
   /** The priced rows of a dispatch: which group, how many sacks, at what price. */
   dispatchLines: 'dispatch_lines',
 
+  /**
+   * One loading job - one truck - and what it cost to load. Tied to the
+   * dispatch rather than to a line, because a job covers whatever qualities
+   * went onto that vehicle; the cost is split back across the lines by kg at
+   * read time. See services/loading.service.js.
+   */
+  loadingActivities: 'loading_activities',
+
   // The prototype kept batches, leftouts and the seq counter inside one
   // "plant" blob rather than as their own table, so batch reads go through it -
   // there is no `batches` table in the project, by design.
@@ -138,6 +238,12 @@ export const TABLES = {
   priceList: 'price_list',
   materialRates: 'material_rates',
   costRates: 'cost_rates',
+  /**
+   * The labour rate with the date it came into force - one row per change, so a
+   * run is costed at the rate of the day it was worked and a closed month stays
+   * closed. See rate.service's labourRateAt().
+   */
+  labourRates: 'labour_rates',
   conversions: 'conversions',
   formulations: 'formulations',
   machineTargets: 'machine_targets',
@@ -174,6 +280,20 @@ export const WEIGHED_KINDS = ['grind', 'coarse', 'refiner'];
 /** The refiner passes a special-line grade goes through, and the grinders. */
 export const REFINER_IDS = ['PR2', 'R1', 'R3', 'R4'];
 export const GRINDER_IDS = ['CRK', 'GRD_K', 'GRD_S', 'GRD_O'];
+
+/**
+ * The cracker. It is one of the grinding line's machines - GRINDER_IDS has it -
+ * and it is singled out here for one reason: picking.
+ *
+ * Picking is the gang that pulls scrap tyres out of the yard and feeds them to
+ * the cracker. It is the cracker's own labour and nothing else's, so it is the
+ * cracker's stop sheet that asks how many were on it and for how long. Kept as
+ * a list rather than as `id === 'CRK'` because a second cracker is a machine the
+ * plant could buy, and a hard-coded id is how that purchase becomes a bug.
+ */
+export const CRACKER_IDS = ['CRK'];
+
+export const isCracker = (machineId) => CRACKER_IDS.includes(machineId);
 
 /**
  * The refiner line split into the stages a batch's grade is tracked through -
@@ -214,6 +334,62 @@ export const COST_RATE_KEYS = [
   'waterPerL', 'packLabourPerSack', 'packMaterialPerSack', 'loadingPerKg', 'transDriverPerKg',
   'transVehiclePerKm', 'transFuelPerKm', 'firewoodPerKg', 'refinerKwhRate', 'ohFinancialPerMonth',
   'ohManufacturingPerMonth', 'ohDepreciationPerMonth', 'interestPctPerAnnum',
+  // Day labour on a loading job, per labourer per hour. `loadingPerKg` above is
+  // the other half - the gang's contract rate - and the two are read together
+  // by loadingEntry() and copied onto the entry, never re-read afterwards.
+  'loadingLabourPerHour',
+  /**
+   * The two figures the grinding line is costed on - see crumb.service.js.
+   *
+   * `pickingLabourPerHour` prices the gang that picks scrap tyres for the
+   * cracker, and the crews on the cracker and the grinders themselves. A
+   * labourer-hour is a labourer-hour, so one rate answers for all three rather
+   * than three rates that would drift apart.
+   *
+   * `grinderKwhRate` is the grinding line's electricity. It is its own key
+   * because `refinerKwhRate` above is the refiners' - the two lines are metered
+   * separately and can sit on different tariffs - and it falls back to the
+   * refiner rate on a plant that has only ever filled one of them in.
+   */
+  'pickingLabourPerHour',
+  'grinderKwhRate',
 ];
+
+/**
+ * The labour rate the grinding line is costed at, kept with the date it came
+ * into force rather than as one figure edited in place.
+ *
+ * `pickingLabourPerHour` above is the same number without a date on it, and it
+ * stays as the fallback for a plant that has never entered a dated one and for
+ * runs older than the earliest row. What it cannot do is leave a closed month
+ * closed: raise it today and every hour ever picked re-prices. A dated row can,
+ * which is why the costing reads this first - see rate.service's labourRateAt().
+ *
+ * A row may give `perHour` directly or give `dailyWage` over `shiftHours` and
+ * let the per-hour figure be worked out. The plant hires by the day; asking a
+ * yard supervisor to divide it in their head is asking for a typo.
+ */
+export const LABOUR_RATE_KEYS = ['perHour', 'dailyWage', 'shiftHours', 'effectiveFrom', 'note'];
+
+/** A shift is twelve hours, which is what a day wage is assumed to cover. */
+export const DEFAULT_SHIFT_HOURS = SHIFT_MINUTES / 60;
+
+/**
+ * What a kg of the crumb the grinding line makes costs in rubber, by the
+ * feedstock it was made from. The works half - power, the crews and the picking
+ * gang - is not here: it is worked out from the line's own runs rather than
+ * typed in, which is the whole point of crumb.service.js.
+ */
+export const CRUMB_RATE_KEYS = {
+  truck: 'crumbTruckPerKg',
+  bike: 'crumbBikePerKg',
+  drc: 'crumbDrcPerKg',
+};
+
+/** The two figures a loading entry snapshots off the settings, and their keys. */
+export const LOADING_RATE_KEYS = {
+  contractPerKg: 'loadingPerKg',
+  labourPerHour: 'loadingLabourPerHour',
+};
 
 export default { ROLES, SHIFTS, QUALITIES, DISPATCH_GRADES, MACHINE_KINDS, PRICE_LIST, TABLES, VIEWS };

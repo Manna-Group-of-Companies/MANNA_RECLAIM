@@ -1,25 +1,48 @@
 import { Router } from 'express';
 import * as rates from '../controllers/rate.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { adminOnly } from '../middlewares/role.middleware.js';
+import { adminOnly, authorize } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
+import { DISPATCH_ROLES } from '../config/constants.js';
 import { bulkListQuery } from '../validations/common.validation.js';
 import { rateSchema, customerSchema } from '../validations/dispatch.validation.js';
-import { costRatesSchema } from '../validations/report.validation.js';
+import { costRatesSchema, labourRateSchema } from '../validations/report.validation.js';
 
 const router = Router();
 
 router.use(authenticate);
 
-// The floor needs the selling side to price a dispatch note: the customer list,
-// the price list and a quote per grade. It does not need what the plant's own
-// costs are.
-// Both are read whole - the Dispatch screen prices every line off the rate card,
-// so a page of it is no use. See bulkListQuery.
-router.get('/customers', validate({ query: bulkListQuery }), rates.listCustomers);
-router.get('/price-list', rates.priceList);
-router.get('/quote', rates.quote);
-router.get('/', validate({ query: bulkListQuery }), rates.listRates);
+/**
+ * The selling side: the customer list, the rate card, the standard price list
+ * and a quote for one customer and grade.
+ *
+ * These four carried no role gate at all - only the `authenticate` above - and
+ * that was a hole rather than a policy. `/customers` here answers off the
+ * customers table with `select: '*'`, so it is the whole record including phone
+ * and address, and `/` is customer_rates, which is what every customer has
+ * negotiated for every grade. Any signed-in account could read both, including
+ * a worker and a lab account, which quietly made the wall on /customers
+ * meaningless: the list was one route away the whole time.
+ *
+ * The comment that used to sit here said "the floor needs the selling side to
+ * price a dispatch note". That was true when the floor dispatched, stopped
+ * being true when the form moved to the office, and was never narrowed to match
+ * either time - so the gate is now written down rather than assumed.
+ *
+ * Gated on who may raise a dispatch, which is the yard and the office. That
+ * widens nothing in practice - the only screen that reads any of these is the
+ * admin Rates page - and it shuts worker and lab out of the customer list and
+ * the rate card, which is a tightening on today.
+ *
+ * All read whole: the dispatch form prices every line off the card, so a page
+ * of it is no use. See bulkListQuery.
+ */
+const forDispatch = authorize(...DISPATCH_ROLES);
+
+router.get('/customers', forDispatch, validate({ query: bulkListQuery }), rates.listCustomers);
+router.get('/price-list', forDispatch, rates.priceList);
+router.get('/quote', forDispatch, rates.quote);
+router.get('/', forDispatch, validate({ query: bulkListQuery }), rates.listRates);
 
 /**
  * Cost inputs - labour, firewood, power, overheads, the interest rate.
@@ -31,6 +54,32 @@ router.get('/', validate({ query: bulkListQuery }), rates.listRates);
  * Costing and Rates pages fetch this.
  */
 router.get('/cost-rates', adminOnly, rates.costRates);
+
+/**
+ * The two figures a loading job is costed by, for the dispatch form's running
+ * total. Open to whoever may raise a dispatch, which is now the yard as well.
+ *
+ * Its own route rather than widening `/cost-rates` above, because that carries
+ * the whole cost model - the overheads, the interest rate, what a kg of crumb
+ * costs to make - and the yard needing to see what a lorry costs to load is no
+ * reason to hand over any of that. Two numbers, and they are the two the form
+ * already puts on screen.
+ */
+router.get('/loading-rates', forDispatch, rates.loadingRates);
+
+/**
+ * The labour rate with the date it came into force. Behind the same door as the
+ * cost rates and for the same reason: it is what the picking gang, the cracker
+ * crew and the grinders are costed at, so whoever can move it moves the plant's
+ * cost per kg.
+ */
+router.get('/labour-rates', adminOnly, rates.labourRates);
+router.post(
+  '/labour-rates',
+  adminOnly,
+  validate({ body: labourRateSchema }),
+  rates.saveLabourRate,
+);
 
 // the rate card is edited from the admin side only
 router.post('/customers', adminOnly, validate({ body: customerSchema }), rates.createCustomer);

@@ -1,6 +1,7 @@
 import { crud } from './base.service.js';
 import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD } from '../config/constants.js';
 import { rateService } from './rate.service.js';
+import { crumbCost, autoclaveCharge } from './crumb.service.js';
 import { fromRow as dispatchFromRow } from './dispatch.service.js';
 
 /**
@@ -195,15 +196,21 @@ export const reportService = {
    * Conversion cost from the shift/batch costing snapshots, plus revenue.
    * Dispatch rows price through the rate card; where the plant has not
    * recorded any dispatches, the batches' own `sale_value` stands in.
+   *
+   * `crumb` is the front of the plant, worked out from the runs rather than off
+   * a snapshot: what the grinding line spent making a kg of crumb, picking gang
+   * included, and what the autoclave charges in this window therefore cost in
+   * crumb. See crumb.service.js - the Costing tab reads both.
    */
   async costing({ from, to } = {}) {
     const window = inWindow(from, to);
-    const [costingRows, batchRows, coarseRows, dispatchRows, runRows] = await Promise.all([
+    const [costingRows, batchRows, coarseRows, dispatchRows, runRows, costRates] = await Promise.all([
       shiftCosting.all(),
       specialBatches.all(),
       coarseShifts.all(),
       dispatches.all(),
       runs.all(),
+      rateService.costRates(),
     ]);
 
     const shifts = costingRows.filter(window);
@@ -232,6 +239,12 @@ export const reportService = {
     // windows where the autoclave crews left the field blank.
     const loggedFirewood = sum(runsInWindow, 'firewood_kg');
 
+    // The grinding line, costed off its own runs: a kg of crumb, and the charge
+    // the autoclaves ate. The Costing tab shows this as the material going into
+    // the vessels, and takes the works half back out of the conversion line
+    // below so the same electricity and the same crew are not charged twice.
+    const crumb = crumbCost(runsInWindow, costRates?.data ?? {});
+
     return {
       window: { from: from ?? null, to: to ?? null },
       autoclaveLoads: batches.length,
@@ -244,6 +257,7 @@ export const reportService = {
       batchCost: round(batchCost),
       outputKg: round(outputKg),
       costPerKg: outputKg ? round(batchCost / outputKg) : 0,
+      crumb: { ...crumb, autoclave: autoclaveCharge(runsInWindow, crumb.perKg) },
     };
   },
 };

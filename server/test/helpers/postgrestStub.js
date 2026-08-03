@@ -110,6 +110,26 @@ export async function startPostgrest({ tables = {}, functions = {} } = {}) {
 
     if (req.method === 'POST') {
       const incoming = Array.isArray(body) ? body : [body];
+
+      /*
+       * `?on_conflict=col` is an upsert, and has to behave like one: the server
+       * saves the cost rates as a single row keyed on `id`, so a stub that only
+       * ever appended would leave two rows claiming to be the current figures
+       * and hand back whichever was written first. A rate that could not be
+       * revised would then look exactly like a rate that had been snapshotted.
+       */
+      const conflict = url.searchParams.get('on_conflict');
+      if (conflict) {
+        const keys = conflict.split(',').map((column) => column.trim());
+        const same = (a, b) => keys.every((column) => String(a[column]) === String(b[column]));
+        for (const row of incoming) {
+          const existing = rows.find((candidate) => same(candidate, row));
+          if (existing) Object.assign(existing, row);
+          else rows.push(row);
+        }
+        return json(res, 201, incoming);
+      }
+
       rows.push(...incoming);
       return json(res, 201, incoming);
     }
