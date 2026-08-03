@@ -91,6 +91,16 @@ insert into public.products (id, name, active, sort_order)
 values ('LOOP', 'Loop', true, 1), ('SLEVE', 'Sleve', true, 2)
 on conflict (id) do nothing;
 
+-- How a moulded product is boxed, and what one piece weighs - see
+-- migrations/0005. The yard keys what a press made on the product and this pack,
+-- so a project repaired by this file gets the columns the Stock page reads.
+-- Both are left null: an unset pack boxes as loose pieces and says so on screen,
+-- which is a thing the back office can go and fix, and a piece weight nobody has
+-- measured reports no weight rather than a fabricated one.
+alter table public.products add column if not exists pack_size  integer;
+alter table public.products add column if not exists pack_label text;
+alter table public.products add column if not exists piece_kg   numeric;
+
 insert into public.machines
   (id, name, short, kind, group_name, sub, accent, out_weight, needs_quality, weigh, tyre, enabled, sort_order)
 values
@@ -143,6 +153,71 @@ alter table public.cost_rates add column if not exists updated_by text;
 alter table public.users drop constraint if exists users_role_check;
 alter table public.users add constraint users_role_check
   check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin'));
+
+-- What it cost to load a truck. A whole table rather than a column, so it is
+-- here in full: the API verifies it at boot and a project without it reports
+-- the loading half of every dispatch as missing.
+--
+-- This is the table only. post_dispatch() has to be replaced as well, to take
+-- the loading entry inside the same transaction as the document - that part is
+-- in supabase/migrations/0002_loading_activity.sql, and running that file
+-- covers both. Until it is run, dispatches post as before and record no
+-- loading, which the dispatch list flags rather than hides.
+create table if not exists public.loading_activities (
+  id                    uuid primary key default gen_random_uuid(),
+  dispatch_id           text not null references public.dispatches (id) on delete cascade,
+  loading_mode          text not null check (loading_mode in ('contract', 'manhour', 'mixed')),
+  material_kind         text not null default 'reclaim' check (material_kind in ('reclaim', 'moulded')),
+  kg_loaded             numeric not null default 0 check (kg_loaded >= 0),
+  contract_rate_per_kg  numeric not null default 0 check (contract_rate_per_kg >= 0),
+  manhour_labourers     integer not null default 0 check (manhour_labourers >= 0),
+  manhour_hours         numeric not null default 0 check (manhour_hours >= 0),
+  daily_labour_rate     numeric not null default 0 check (daily_labour_rate >= 0),
+  contract_cost         numeric generated always as (kg_loaded * contract_rate_per_kg) stored,
+  manhour_cost          numeric generated always as (manhour_labourers * manhour_hours * daily_labour_rate) stored,
+  loading_cost          numeric generated always as (
+                          (kg_loaded * contract_rate_per_kg)
+                          + (manhour_labourers * manhour_hours * daily_labour_rate)
+                        ) stored,
+  vehicle_no            text,
+  remarks               text,
+  created_by            text,
+  created_at            timestamptz not null default now(),
+  -- Day labour is accounted wherever it worked, contract loads included, so a
+  -- row claiming both `contract` and labourers is refused at the table.
+  constraint loading_activities_contract_has_no_daily_labour
+    check (loading_mode <> 'contract' or manhour_labourers = 0),
+  constraint loading_activities_manhour_has_labour
+    check (loading_mode <> 'manhour' or manhour_labourers > 0),
+  constraint loading_activities_mixed_has_both
+    check (loading_mode <> 'mixed' or (manhour_labourers > 0 and kg_loaded > 0)),
+  -- Moulded goods have no per-kg contract, so man-hours are the only method.
+  constraint loading_activities_moulded_is_manhour
+    check (material_kind <> 'moulded' or loading_mode = 'manhour')
+);
+
+create unique index if not exists loading_activities_dispatch_id_key
+  on public.loading_activities (dispatch_id);
+
+alter table public.loading_activities enable row level security;
+revoke all on public.loading_activities from anon, authenticated;
+drop policy if exists loading_activities_service on public.loading_activities;
+create policy loading_activities_service on public.loading_activities
+  for all to service_role using (true) with check (true);
+
+-- Release the coarse pools that were stranded at `pending`.
+--
+-- Nothing in the app could ever pass one: the lab tests a batch and a grade,
+-- and coarse has neither, so a pool never reached the Quality tab and no screen
+-- called PATCH /stock/:id/qc - while post_dispatch() refuses anything that is
+-- not `pass`. Every coarse sack ever packed was unsellable through the app.
+-- Coarse is now released as it is packed; this is the same release applied once
+-- to the pools that predate it. A pool deliberately held stays held, and no
+-- batch group is touched.
+update public.stock_groups
+   set qc_status = 'pass'
+ where kind = 'pool'
+   and qc_status = 'pending';
 
 -- PostgREST caches the table shapes; this makes it pick the new columns up
 -- straight away instead of on its next reload.
