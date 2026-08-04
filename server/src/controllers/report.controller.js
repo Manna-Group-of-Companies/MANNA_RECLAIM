@@ -2,6 +2,36 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ok, created } from '../utils/ApiResponse.js';
 import { reportService } from '../services/report.service.js';
 import { efficiencyService } from '../services/efficiency.service.js';
+import { machineLogService } from '../services/machineLog.service.js';
+
+/**
+ * The byte-order mark Excel needs to read a CSV as UTF-8.
+ *
+ * Without it Excel reads the file as the system codepage and mangles anything
+ * that is not ASCII - a supervisor's name, a remark written in Malayalam. Every
+ * other reader ignores it. Built from its code point rather than written as the
+ * character, which is invisible in a diff and in an editor.
+ */
+const BOM = String.fromCharCode(0xfeff);
+
+/**
+ * The machine log as a file, rather than as JSON in an envelope.
+ *
+ * The only route in this API that does not answer through ApiResponse, and
+ * deliberately: what is being asked for is a spreadsheet, and wrapping it in
+ * `{ data: "..." }` would leave the browser to unwrap and re-serialise something
+ * the server has already got right. The Content-Disposition is what makes it
+ * land in Downloads under a name that says which window it covers.
+ */
+export const machineLog = asyncHandler(async (req, res) => {
+  const csv = await machineLogService.csv(req.query);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${machineLogService.filename(req.query)}"`,
+  );
+  return res.send(BOM + csv);
+});
 
 /** Which days, shifts and machines the run history covers. */
 export const filters = asyncHandler(async (_req, res) => ok(res, await reportService.runFilters()));

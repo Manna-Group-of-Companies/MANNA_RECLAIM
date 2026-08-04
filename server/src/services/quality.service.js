@@ -104,11 +104,20 @@ export const qualityService = {
         batchNo: test.batch_no,
         quality: test.quality,
         verdict: test.verdict,
-        // Carried onto the stock group beside the status. The test row keeps its
-        // own tester, but the group is what post_dispatch() reads and what the
-        // yard shows, and a release with no name against it cannot afterwards be
-        // told from one nobody made.
-        testedBy: test.tester ?? null,
+        /*
+         * The account, not the tester's name.
+         *
+         * `stock_groups.qc_by` is a foreign key to `users`, and the tester is
+         * free text - a person at the bench, often not the account the tablet is
+         * signed in as. Writing the name there is refused by Postgres, and
+         * because that refusal comes out of the same statement that sets
+         * `qc_status`, it did not merely lose the signature: it lost the
+         * release. Every verdict the lab filed left the yard exactly as it was.
+         *
+         * The name is not lost by this. It stays on the test row, which is what
+         * the Stock card reads to show who tested the lot - see labTestsFor().
+         */
+        testedBy: payload.testedByUserId ?? null,
       });
     } catch (err) {
       logger.warn(`Quality test ${test.id}: the stock group was not released - ${err.message}`);
@@ -128,6 +137,49 @@ export const qualityService = {
      * and looked like nothing.
      */
     return { ...decorate(test), stock_released: released };
+  },
+
+  /**
+   * Takes a test off the record, and takes its verdict off the goods with it.
+   *
+   * A test row is not the only copy of what it said. Filing one writes the
+   * verdict onto the stock group as well - that is what release() is - because
+   * post_dispatch() reads `qc_status` and cannot read a test. Deleting only the
+   * row therefore used to leave the pallet standing on a pass with nothing
+   * behind it: the yard said "QC passed", the Quality tab showed no such test,
+   * and the goods loaded.
+   *
+   * So the group is put back where the tests that remain leave it - the one
+   * before this, or the state it would have opened in if this was the only one.
+   * See stockService.refreshVerdictFor().
+   *
+   * That is allowed to fail without failing the delete. The test is already
+   * gone and the group is a derived status that `npm run stock:qc-sync` puts
+   * right, so it is logged rather than raised at whoever pressed delete - the
+   * same rule record() runs on in the other direction.
+   */
+  async remove(id) {
+    const test = await base.findById(id);
+    await base.remove(id);
+
+    let groups = [];
+    try {
+      groups = await stockService.refreshVerdictFor(test);
+    } catch (err) {
+      logger.warn(`Quality test ${id}: the stock group was not put back - ${err.message}`);
+    }
+
+    return {
+      id,
+      batch_no: test.batch_no ?? null,
+      quality: test.quality ?? null,
+      /** Which groups the delete moved, so the screen can say what changed. */
+      stock_groups: groups.map((group) => ({
+        id: group.id,
+        label: group.display_label ?? group.label,
+        qc_status: group.qc_status,
+      })),
+    };
   },
 
   /**

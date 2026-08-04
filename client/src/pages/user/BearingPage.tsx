@@ -42,6 +42,8 @@ export function BearingPage() {
 
   const [target, setTarget] = useState<BearingDue | null>(null);
   const [temps, setTemps] = useState<Record<string, string>>({});
+  /** When the temperatures were read off the machine. Blank means just now. */
+  const [tempTime, setTempTime] = useState('');
 
   useEffect(() => {
     void dispatch(fetchMachines());
@@ -70,6 +72,7 @@ export function BearingPage() {
   const open = (row: BearingDue) => {
     setTarget(row);
     setTemps({});
+    setTempTime('');
   };
 
   const save = async () => {
@@ -85,6 +88,16 @@ export function BearingPage() {
       notify('Temperatures must be above zero', 'warn');
       return;
     }
+    // A blank time means "just read"; a time is read as today's clock, rolled
+    // back a day if that would put the reading in the future.
+    let ts: string | undefined;
+    if (tempTime) {
+      const at = new Date(`${todayISO()}T${tempTime}`);
+      if (!Number.isNaN(at.getTime())) {
+        if (at.getTime() > Date.now()) at.setDate(at.getDate() - 1);
+        ts = at.toISOString();
+      }
+    }
     const result = await dispatch(
       logBearings({
         machineId: target.machineId,
@@ -94,6 +107,7 @@ export function BearingPage() {
         supervisor: supervisor || null,
         shiftDate: todayISO(),
         shift: currentShift(),
+        ts,
       }),
     );
     const okay = result.meta.requestStatus === 'fulfilled';
@@ -209,6 +223,13 @@ export function BearingPage() {
                 />
               );
             })}
+            <TextField
+              label="Reading time"
+              note="— leave blank for now"
+              type="time"
+              value={tempTime}
+              onChange={(e) => setTempTime(e.target.value)}
+            />
             <SupervisorPick fieldClassName="mt-3" note="— signs these temperatures" />
           </>
         )}

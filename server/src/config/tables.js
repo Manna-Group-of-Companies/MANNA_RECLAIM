@@ -52,6 +52,10 @@ export const registry = {
     // called, and what one piece weighs. `pack_size_kg` above is the other
     // thing: what a sack of a reclaim grade weighs. See migrations/0005.
     'pack_size', 'pack_label', 'piece_kg',
+    // Whether the item is moulded at all. Cavities and a cycle time are facts
+    // about a mould, so a sleeve that is cut rather than moulded is asked for
+    // neither - see migrations/0006.
+    'moulded',
   ]),
 
   // ---- production ----
@@ -76,6 +80,12 @@ export const registry = {
     // `packed_sacks` on a bagged run, and what makes re-packing a press run send
     // the *change* to the yard rather than the whole count again.
     'packed_pieces',
+    // A sleeve or loop run. `pieces_expected` is what the cycle and the mould
+    // said the run should have made, kept beside the count off the bench so the
+    // two can be compared afterwards rather than only while somebody is standing
+    // there; `labour_rate` is the rate in force on the day it was worked, so a
+    // rate raised next month prices the next shift and not this one.
+    'pieces_expected', 'labour_rate',
   ]),
 
   [TABLES.shifts]: table('id', ['id', 'shift_date', 'shift', 'supervisor', 'updated_at']),

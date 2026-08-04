@@ -1,0 +1,26 @@
+-- =============================================================================
+-- MANNA RECLAIM - the sleeve and loop benches come off the floor
+--
+-- The Machines page carried a "Sleeve & Loop" section with a card each. They are
+-- not to be worked from that screen, so the section goes.
+--
+-- This is `enabled = false`, the same lever the two idle autoclaves sit behind,
+-- and deliberately not a delete:
+--
+--   * runs, lots, lab verdicts and stock groups already recorded against SLEEVE
+--     and LOOP point at these rows. Deleting them would either break those
+--     references or take the history with them, and a bench standing idle is not
+--     a reason to lose what it made.
+--   * the shop-floor list is `enabled = true` only (machineService.listByGroup),
+--     so this is all it takes for the section to disappear.
+--   * the admin Machines screen still lists them, reading "off", with the toggle
+--     that turns them back on the day the benches are worked again.
+--
+-- Everything else about sleeve and loop is untouched: the kinds, the lot
+-- numbering from 0006/0007, the yard's lot groups and the lab's per-lot verdict
+-- all stay exactly as they are.
+--
+-- Idempotent. supabase/schema.sql carries the same block.
+-- =============================================================================
+
+update public.machines set enabled = false where id in ('SLEEVE', 'LOOP');

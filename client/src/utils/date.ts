@@ -51,6 +51,12 @@ export const dayMonth = (iso?: string | null) =>
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/** 1-12 off a plain 'YYYY-MM-DD', or 0 when there is no month to read. */
+const monthOf = (day?: string | null) => {
+  const month = parseInt(String(day ?? '').slice(5, 7), 10);
+  return month >= 1 && month <= 12 ? month : 0;
+};
+
 /**
  * "7 Jul 2026" from a plain 'YYYY-MM-DD'. Parsed by hand rather than through
  * Date, because `new Date('2026-07-07')` is read as UTC midnight and shows as
@@ -69,6 +75,32 @@ export const monthLong = (month?: string | null) => {
   const [y, m] = String(month).split('-');
   if (!y || !m) return String(month);
   return `${MONTHS[parseInt(m, 10) - 1]} ${y}`;
+};
+
+/**
+ * The letter a coarse batch number is prefixed with: the month it was charged
+ * in, A for January through L for December.
+ *
+ * The coarse line is not batch-identified the way the special line is - its
+ * numbers are a running series the crew keeps by hand - so the letter is what
+ * says which month a number belongs to, and `C-2893` read off a sack means the
+ * 2893rd coarse charge, cooked in March.
+ *
+ * Taken off a plain 'YYYY-MM-DD' by hand rather than through Date, for the same
+ * reason dayLong() is: `new Date('2026-03-01')` is UTC midnight and reads as
+ * February to anyone west of Greenwich, which would put the charge in the wrong
+ * month's series. A blank or unparseable day gives back '' rather than a guess -
+ * a wrong letter is worse than none, because the crew would leave it standing.
+ */
+export const monthLetter = (day?: string | null) => {
+  const month = monthOf(day);
+  return month ? String.fromCharCode(64 + month) : '';
+};
+
+/** "Mar" for the month of a 'YYYY-MM-DD', so a letter can be shown spelt out. */
+export const monthShort = (day?: string | null) => {
+  const month = monthOf(day);
+  return month ? (MONTHS[month - 1] as string) : '';
 };
 
 export const lastNDays = (n: number) => {

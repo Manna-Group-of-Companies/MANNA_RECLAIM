@@ -16,9 +16,11 @@ import type {
   QcStatus,
   StockGroup,
   StockKind,
+  StockLabTest,
   StockPool,
   StockSummaryRow,
   StockUnit,
+  Verdict,
 } from '@/types/models';
 
 /**
@@ -67,14 +69,14 @@ import type {
  * grade, because a dispatch cannot be filled in otherwise. It is a real
  * widening and it was chosen rather than stumbled into.
  *
- * Two things did not move with it, and both are still gated here:
+ * One thing did not move with it, and it is still gated here: the
+ * packed-against-dispatched ledger. A supervisor's cards come from
+ * /stock/summary, which says what is there and what the lab said and nothing
+ * about what has been sold off it. The route refuses them /stock outright, so
+ * this is not a matter of the screen being careful.
  *
- *   - the packed-against-dispatched ledger. A supervisor's cards come from
- *     /stock/summary, which says what is there and what the lab said and
- *     nothing about what has been sold off it. The route refuses them /stock
- *     outright, so this is not a matter of the screen being careful.
- *   - the QC verdict. Releasing goods for sale is the office's, so Hold and
- *     Release are drawn for a manager only.
+ * The QC verdict is not settable from this screen at all. It is the lab's, and
+ * it arrives here by polling and by refreshTick when a test is filed.
  *
  * A control that cannot be used is drawn dead rather than hidden - for stock
  * the lab has stopped, and for an account that may not dispatch at all. A
@@ -109,6 +111,11 @@ const KIND_NOUN: Record<StockKind, string> = {
   batch: 'batch',
   pool: 'coarse pool',
   product: 'moulded',
+  // A sleeve or loop shift. Named "lot" rather than "moulded" beside a press's
+  // groups, because the difference between the two is exactly what somebody
+  // reading this column needs: one row is a shift the lab can answer on, the
+  // other is every pack of a product pooled together.
+  lot: 'lot',
 };
 
 /**
@@ -151,7 +158,25 @@ const dispatchBlock = (card: { qc: QcStatus; available: number }, mayDispatch: b
  */
 interface YardCard {
   id: string;
+  /**
+   * The group's label as the yard stores it - a key, and what the server names
+   * when it refuses a dispatch. Not what the card prints; see `ref`.
+   */
   label: string;
+  /**
+   * What the card prints in its reference slot: the batch number where the goods
+   * carry one, and the label where they do not. See refOf().
+   */
+  ref: string;
+  /**
+   * The chip beside it: the grade on reclaim and coarse, the product on moulded
+   * goods.
+   *
+   * One field for both because the card is asking one question - what is this? -
+   * and the answer differs by kind rather than by there being two questions. It
+   * is also what the grade filter and the tallies key on, which is why a moulded
+   * card's product belongs in it rather than beside it.
+   */
   grade: string | null;
   kindLabel: StockKind;
   unit: StockUnit;
@@ -166,12 +191,32 @@ interface YardCard {
   ledger: string | null;
   signed: string | null;
   /**
+   * The lab test the verdict was made on, where the server found one.
+   *
+   * Null on the supervisor's card, and null on the back office's for a group
+   * nobody has tested - which is a real state, not a gap. See `test` in the
+   * rendering below for what each of the two nulls is allowed to say.
+   */
+  test: StockLabTest | null;
+  /**
    * How far through its three samples a coarse pool is, and whether any of
    * them came back a hold. Null on a batch or a moulded group, which are
    * certified as a lot rather than sampled across a period.
    */
   samples: { taken: number; total: number; anyHold: boolean } | null;
 }
+
+/**
+ * A lab verdict as a stock status - the same mapping the server makes, because
+ * the card has to be able to notice when the two disagree.
+ *
+ * The yard has no third state between passed and blocked, so a hold reads as a
+ * fail here exactly as it does in stock.service.js. Anything else answers null
+ * and compares equal to nothing, which is what keeps an unrecognised verdict
+ * from being drawn as an override.
+ */
+const verdictStatus = (verdict?: Verdict | null): QcStatus | null =>
+  verdict === 'pass' ? 'pass' : verdict === 'hold' ? 'fail' : null;
 
 const samplesOf = (pool?: StockPool): YardCard['samples'] =>
   pool ? { taken: pool.samples_taken, total: pool.samples_total, anyHold: pool.any_hold } : null;
@@ -209,9 +254,29 @@ const kindLine = (row: {
     .filter(Boolean)
     .join(' · ');
 
+/**
+ * What the card is called: the batch number where the goods carry one, and the
+ * group's label where they do not.
+ *
+ * A lot reads `03/Aug/26-day` with `Sleve` on the chip, and a batch group reads
+ * `B1041` with `Fine` on the chip - the number in the reference slot and what
+ * was made beside it, which is the shape every other reference in this app has.
+ * A coarse pool and a press's product group are not batch-identified and keep
+ * their label, `AUG-H1` and `LOOP-50`, which are already the name of the goods
+ * rather than a key that happens to be readable.
+ *
+ * The lot is the one that could not be done any other way. Its label is
+ * `<product>-<shift>` and the two benches working one shift produce two of them,
+ * so a card showing the label alone would read as one string carrying two facts
+ * - which is exactly the arrangement the batch number was taken apart to end.
+ */
+const refOf = (row: { batch_no?: string | null; display_label?: string; label?: string }) =>
+  row.batch_no || row.display_label || row.label || '';
+
 const fromGroup = (row: StockGroup, pool?: StockPool): YardCard => ({
   id: row.id,
   label: row.display_label,
+  ref: refOf(row),
   grade: row.quality,
   kindLabel: row.kind,
   unit: row.unit,
@@ -225,6 +290,7 @@ const fromGroup = (row: StockGroup, pool?: StockPool): YardCard => ({
   kind: kindLine(row),
   ledger: `${counted(row.packed_qty, row.unit)} packed · ${row.dispatched_qty} dispatched`,
   signed: signature(row),
+  test: row.lab_test ?? null,
   samples: samplesOf(pool),
 });
 
@@ -249,7 +315,10 @@ function signature(row: StockGroup): string | null {
 
 const fromSummary = (row: StockSummaryRow, pool?: StockPool): YardCard => ({
   id: row.id,
+  // Already display form on this side - the server sends it through
+  // displayLabel() - so the same two fields come off one.
   label: row.label,
+  ref: refOf(row),
   grade: row.quality,
   kindLabel: row.kind,
   unit: row.unit,
@@ -263,8 +332,65 @@ const fromSummary = (row: StockSummaryRow, pool?: StockPool): YardCard => ({
   kind: kindLine(row),
   ledger: null,
   signed: null,
+  /*
+   * Absent on this side rather than blanked. /stock/summary does not carry it -
+   * the readings arrive with the tester's name on them, and who tested a lot is
+   * the same kind of record as who released it, which the floor's row has never
+   * carried. The verdict itself is the operative fact for loading a lorry and
+   * that is on both rows.
+   */
+  test: null,
   samples: samplesOf(pool),
 });
+
+/** "tested 2 Aug · R. Kumar", or whichever half of it was recorded. */
+const testedLine = (test: StockLabTest) =>
+  [test.tested_at ? `tested ${dayMonth(test.tested_at.slice(0, 10))}` : null, test.tested_by]
+    .filter(Boolean)
+    .join(' · ') || 'tested — date not recorded';
+
+/**
+ * When the card's verdict and the test under it do not say the same thing, and
+ * what that means.
+ *
+ * Three ways it happens and they are three different situations, so they are
+ * three different sentences. Two are the back office overriding the bench, which
+ * is legitimate and is what PATCH /stock/:id/qc exists for - but a card that
+ * showed the reading without saying it had been overruled would be worse than
+ * one that showed no reading at all, because it would look like the lab had
+ * cleared goods it stopped.
+ *
+ * The third is neither: a verdict the yard has not picked up. That is a group
+ * whose test was filed while applyLabVerdict() could not reach it, and it is
+ * fixed by packing into the group again or by `npm run stock:qc-sync` - so it
+ * says so rather than reading as somebody's decision.
+ */
+const overrideNote = (card: YardCard): string | null => {
+  const said = verdictStatus(card.test?.verdict);
+  if (!said || said === card.qc) return null;
+  if (card.qc === 'pending') return 'the yard has not picked this verdict up yet — run the QC sync';
+  return said === 'fail'
+    ? 'the lab held this — it has been released by hand since'
+    : 'the lab passed this — it has been held by hand since';
+};
+
+/**
+ * Whether to say out loud that a verdict has no test behind it.
+ *
+ * Only where the silence is misleading. A `pending` group has obviously not been
+ * tested and the band above the cards has just said so, and a coarse pool that
+ * nobody has sampled is the ordinary case rather than the odd one - coarse sells
+ * on the line running to specification, and the card already says "0 of 3
+ * sampled". What is left is a group standing on a pass or a fail with nothing
+ * measured under it, which is a real thing to know before loading it.
+ *
+ * The card says that flatly rather than blaming anyone for it. It is nearly
+ * always the back office releasing a group the bench cannot reach - and the
+ * signature line has already said so in that case - but a test that was filed
+ * and later deleted lands here too, and "set by hand" would be a guess.
+ */
+const unbacked = (card: YardCard) =>
+  !card.test && card.qc !== 'pending' && card.kindLabel !== 'pool';
 
 /** "2 of 3 sampled", and whether the lab flagged any of them. */
 const sampleHint = (samples: NonNullable<YardCard['samples']>) => {
@@ -327,9 +453,8 @@ export function StockPage() {
    * Two different questions, and they are no longer the same one.
    *
    * `isManager` is the back office - it decides which yard read this account
-   * gets (the full ledger or the floor's summary) and whether the QC verdict
-   * can be changed from here. `mayDispatch` is who can raise a document, which
-   * is now the yard as well.
+   * gets, the full ledger or the floor's summary. `mayDispatch` is who can
+   * raise a document, which is now the yard as well.
    */
   const isManager = Boolean(role && ADMIN_ROLES.includes(role));
   const mayDispatch = Boolean(role && DISPATCH_ROLES.includes(role));
@@ -345,9 +470,6 @@ export function StockPage() {
   const [dispatching, setDispatching] = useState(false);
   /** The group the sheet should open on, when it was opened from a card. */
   const [dispatchFrom, setDispatchFrom] = useState<string | null>(null);
-
-  /** The group whose verdict is being changed by hand, while it is in flight. */
-  const [settingQc, setSettingQc] = useState<string | null>(null);
 
   const openDispatch = useCallback(
     (stockGroupId: string | null) => {
@@ -399,6 +521,11 @@ export function StockPage() {
    * sample lifts a pool off pending - so the yard is stale the instant the lab
    * saves, and would otherwise go on reading "QC pending" for stock that has
    * just been cleared.
+   *
+   * A delete in History bumps it for the same reason in the other direction.
+   * Removing a run takes its packing back out of the group and takes the group
+   * with it where the run was the only thing in it, so a tab left open on this
+   * screen would go on drawing a card for stock that no longer exists.
    */
   useEffect(() => {
     void load();
@@ -415,46 +542,6 @@ export function StockPage() {
    * long enough that a tablet propped open all shift is not a load.
    */
   useRefreshOnFocus(load, { intervalMs: 30_000 });
-
-  /**
-   * The back office setting a verdict by hand.
-   *
-   * The lab is the authority on whether goods may be sold, and this does not
-   * take that away - filing a test still overrides whatever is set here, because
-   * a re-test exists to change the answer. What this is for is the cases the
-   * bench cannot reach:
-   *
-   *   - a pool the plant has decided to hold, which no test can address because
-   *     coarse is not batch-identified and never appears on the Quality tab;
-   *   - failed stock that has since been reworked, or a pack the office has
-   *     satisfied itself about;
-   *   - anything the lab has not got to and the office is willing to sign for.
-   *
-   * Until this existed the column could only be reached with a hand-made
-   * request, which meant a group the lab could not test was stuck at `pending`
-   * for good with post_dispatch() refusing to load it - and that is not a
-   * theoretical failure, it is what happened to every coarse sack the plant
-   * packed before the pools were released.
-   *
-   * It is signed. `qc_source` records that it was set here rather than filed at
-   * the bench, and the card says so, because the two are not the same event and
-   * somebody will eventually be asking which this was.
-   */
-  const applyVerdict = useCallback(
-    async (id: string, status: QcStatus) => {
-      setSettingQc(id);
-      try {
-        await stockService.setQcStatus(id, status);
-        notify(status === 'pass' ? 'Released for dispatch' : 'Put on hold');
-        await load();
-      } catch (err) {
-        notify(toRequestError(err).message, 'err');
-      } finally {
-        setSettingQc(null);
-      }
-    },
-    [load, notify],
-  );
 
   const cards = useMemo(
     () =>
@@ -722,6 +809,7 @@ export function StockPage() {
                      */
                     const stockReason = blockedReason(c);
                     const reason = dispatchBlock(c, mayDispatch);
+                    const override = overrideNote(c);
                     const loadable = mayDispatch && c.qc === 'pass' && c.available > 0;
                     return (
                       <article
@@ -730,8 +818,12 @@ export function StockPage() {
                       >
                         <div className="top">
                           <div className="who">
+                            {/* The reference, then what it is. A lot reads
+                                `03/Aug/26-day` with `SLEVE` on the chip - the
+                                shift and the product side by side, because
+                                neither names the goods on its own. */}
                             <div className="row1">
-                              <b>{c.label}</b>
+                              <b>{c.ref}</b>
                               {c.grade && <QualityChip quality={c.grade} />}
                             </div>
                             {c.kind && <small>{c.kind}</small>}
@@ -765,6 +857,75 @@ export function StockPage() {
                           </div>
                         </div>
 
+                        {/*
+                          The reading the verdict was made on.
+
+                          `qc_status` is a conclusion with nothing under it, and
+                          until this was here the only way to read the sentence
+                          behind it was to leave the yard and open the Quality
+                          tab against the right batch and grade. The measured
+                          values, the report and the name against them travel
+                          with the goods now, on the card the goods are on.
+
+                          Back office only, because the readings arrive with the
+                          tester's name on them - see `test` on fromSummary().
+                        */}
+                        {(c.test || unbacked(c)) && (
+                          <div className="lab">
+                            {c.test ? (
+                              <>
+                                <div className="lab-h">
+                                  <span
+                                    className={cn(
+                                      'gradetag',
+                                      c.test.verdict === 'pass' ? 'pass' : 'hold',
+                                    )}
+                                  >
+                                    <i className="gd" />
+                                    lab {c.test.verdict === 'pass' ? 'pass' : 'hold'}
+                                  </span>
+                                  <span className="muted">{testedLine(c.test)}</span>
+                                </div>
+
+                                {/* The bench and the card disagreeing, said in
+                                    words - see overrideNote(). */}
+                                {override && <div className="lab-warn">{override}</div>}
+
+                                {/* What was actually measured, and the sheet it
+                                    was written on. A test filed with neither is
+                                    still a verdict, so both are optional and
+                                    the row is dropped when there is nothing in
+                                    it rather than drawn empty. */}
+                                {((c.test.params?.length ?? 0) > 0 || c.test.attachment_url) && (
+                                  <div className="lab-b">
+                                    {c.test.params?.map((p) => (
+                                      <span key={p.name}>
+                                        <b>{p.name}</b> {p.value}
+                                        {p.unit ?? ''}
+                                      </span>
+                                    ))}
+                                    {c.test.attachment_url && (
+                                      <a
+                                        href={c.test.attachment_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                      >
+                                        {c.test.attachment_name || 'report'} ↗
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+
+                                {c.test.remarks && <div className="lab-note">{c.test.remarks}</div>}
+                              </>
+                            ) : (
+                              <div className="lab-none">
+                                no lab test on file behind this verdict
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="foot">
                           <div>
                             <Badge tone={QC_TONE[c.qc]}>{QC_LABEL[c.qc]}</Badge>
@@ -783,30 +944,6 @@ export function StockPage() {
                           */}
                           <div className="acts">
                             {/*
-                              The verdict, by hand, and the back office's alone -
-                              it is what releases goods for sale, and the route
-                              behind it refuses anyone else. Offered as the one
-                              move that is not already true, so there is no
-                              button that does nothing.
-                            */}
-                            {isManager && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                disabled={settingQc === c.id}
-                                title={
-                                  c.qc === 'pass'
-                                    ? 'Stop this leaving the yard'
-                                    : 'Release it without waiting for the lab — recorded against your account'
-                                }
-                                onClick={() =>
-                                  void applyVerdict(c.id, c.qc === 'pass' ? 'fail' : 'pass')
-                                }
-                              >
-                                {c.qc === 'pass' ? 'Hold' : 'Release'}
-                              </Button>
-                            )}
-                            {/*
                               On every account, and dead on most of them. The
                               reason is on the tooltip for a pointer and printed
                               under the badge for a thumb - see the note at the
@@ -819,9 +956,11 @@ export function StockPage() {
                               disabled={!loadable}
                               title={reason ?? undefined}
                               aria-label={
+                                /* Both halves for a screen reader, which has no
+                                   chip to read beside the number. */
                                 loadable
-                                  ? `Dispatch ${c.label}`
-                                  : `${c.label} — ${reason ?? 'not available'}`
+                                  ? `Dispatch ${c.ref} ${c.grade ?? ''}`.trim()
+                                  : `${c.ref} ${c.grade ?? ''} — ${reason ?? 'not available'}`.trim()
                               }
                               onClick={() => openDispatch(c.id)}
                             >

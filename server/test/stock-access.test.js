@@ -322,6 +322,10 @@ test('a spent group is listed rather than dropped, on both reads', async (t) => 
  */
 const SUPERVISOR_KEYS = [
   'available_kg', 'available_packs', 'available_qty', 'available_sacks',
+  // The batch number the goods carry. Physical fact about a pallet the
+  // supervisor is standing at, and half of what names a sleeve or loop lot -
+  // the yard's card puts it in the reference slot with the product beside it.
+  'batch_no',
   'first_packed_on', 'id', 'kind', 'label', 'last_packed_on', 'pack_size',
   'qc_status', 'quality', 'unit',
 ];

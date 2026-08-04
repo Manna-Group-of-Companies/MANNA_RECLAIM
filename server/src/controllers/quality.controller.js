@@ -14,8 +14,31 @@ export const list = asyncHandler(async (req, res) =>
   })),
 );
 
+/**
+ * Two different things about who filed this, and they are not interchangeable.
+ *
+ * `testedBy` is the name that goes on the test row - a person at the bench, who
+ * is often not the account the tablet is signed in as, and who is free text
+ * because the shift signs for its own samples. `testedByUserId` is the account,
+ * and it is the only one of the two that may reach `stock_groups.qc_by`: that
+ * column is a foreign key to `users`, so a name written into it is refused by
+ * Postgres and takes the whole release with it.
+ *
+ * That is not hypothetical. It is what was happening to every verdict the lab
+ * filed - the test saved, the foreign key refused the group, the failure was
+ * logged rather than raised, and the yard went on showing stock the lab had
+ * passed as awaiting the lab.
+ */
 export const record = asyncHandler(async (req, res) =>
-  created(res, await qualityService.record({ ...req.body, testedBy: req.body.testedBy ?? req.user?.name }), 'Test recorded'),
+  created(
+    res,
+    await qualityService.record({
+      ...req.body,
+      testedBy: req.body.testedBy ?? req.user?.name,
+      testedByUserId: req.user?.id ?? null,
+    }),
+    'Test recorded',
+  ),
 );
 
 export const attachReport = asyncHandler(async (req, res) =>

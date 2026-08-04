@@ -13,6 +13,8 @@
     "db:migrate": "node scripts/apply-sql.js",
     "stock:qc-sync": "node scripts/stock-qc-sync.js",
     "stock:diagnose": "node scripts/stock-diagnose.js",
+    "stock:cleanup": "node scripts/stock-cleanup.js",
+    "stock:lot-split": "node scripts/lot-key-split.js",
     "stock:release-pools": "node scripts/release-pools.js",
     "seed:users": "node scripts/seed-users.js",
     "seed:machines": "node scripts/seed-machines.js",

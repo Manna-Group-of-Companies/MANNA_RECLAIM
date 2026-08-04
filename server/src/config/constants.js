@@ -89,8 +89,11 @@ export const QC_STATUSES = ['pass', 'fail', 'pending'];
  *            runs for a shift, not for a batch.
  *   product  what a moulding press made, keyed on the product and the pack it
  *            is boxed in. Counted in pieces rather than sacks.
+ *   lot      what a sleeve or loop shift made, keyed on its own batch number.
+ *            Counted in pieces like a `product` group and certified per label
+ *            like a `batch` one, which is why it is neither of them.
  */
-export const STOCK_KINDS = ['batch', 'pool', 'product'];
+export const STOCK_KINDS = ['batch', 'pool', 'product', 'lot'];
 
 /**
  * What a stock count counts.
@@ -140,7 +143,40 @@ export const LOADING_MATERIALS = ['reclaim', 'moulded'];
 /** Moulded goods have no per-kg contract, so man-hours are the only method. */
 export const forcedLoadingMode = (material) => (material === 'moulded' ? 'manhour' : null);
 
-export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'];
+export const MACHINE_KINDS = [
+  'grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press', 'sleeve', 'loop',
+];
+
+/**
+ * The activities that make finished goods a lot at a time - sleeve and loop.
+ *
+ * They sit beside the presses rather than inside them, and the difference is
+ * what they are certified as. A press pools by the product and the pack it is
+ * boxed in, so one verdict moves every loop the plant has ever made; sleeve and
+ * loop are made a shift at a time and answered for a shift at a time, which is
+ * how a batch of reclaim works. That is the whole reason they are their own
+ * kinds: everything else about them - no meters, no hours, pieces against a
+ * product - a press already does.
+ *
+ * A list rather than `kind === 'sleeve' || kind === 'loop'` at each use, because
+ * a third one is a thing the plant could start making, and a hard-coded pair is
+ * how that becomes a bug in five files.
+ */
+export const MOULDING_KINDS = ['sleeve', 'loop'];
+
+export const isMoulding = (kind) => MOULDING_KINDS.includes(String(kind ?? ''));
+
+/**
+ * How far the count off the bench may differ from what the cycle and the mould
+ * say before the run is flagged, as a percentage.
+ *
+ * A flag on any difference at all would fire on nearly every shift - a cycle
+ * time is nominal and a run does not stop on a whole cycle - and a flag that
+ * always fires is one nobody reads. Ten per cent is wide enough to leave an
+ * ordinary shift alone and narrow enough that a mould running short, or a count
+ * entered a digit out, shows up.
+ */
+export const PIECES_VARIANCE_PCT = 10;
 
 /**
  * The finer name a machine is listed under in the back office.
@@ -151,7 +187,7 @@ export const MACHINE_KINDS = ['grind', 'autoclave', 'prerefiner', 'refiner', 'co
  * they are two different machines, and this is the column that says so.
  */
 export const MACHINE_TYPES = [
-  'grinder', 'cracker', 'autoclave', 'prerefiner', 'refiner', 'press', 'other',
+  'grinder', 'cracker', 'autoclave', 'prerefiner', 'refiner', 'press', 'sleeve', 'loop', 'other',
 ];
 
 /**

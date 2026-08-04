@@ -164,7 +164,7 @@ test('boxed pieces wait for the lab - unlike a coarse pool, there is a lot to te
   );
 });
 
-test('a product with no pack size set is boxed loose, and the label says so', async (t) => {
+test('a product with no pack size set is the product on its own', async (t) => {
   const api = await bootWith({
     products: [{ ...PRODUCT, pack_size: null, pack_label: null, piece_kg: null }],
   });
@@ -174,9 +174,10 @@ test('a product with no pack size set is boxed loose, and the label says so', as
 
   // A real state, not an error: the presses run whether or not the back office
   // has filled the field in, and stranding a shift's moulding for want of a
-  // settings row would be the worse failure. The label keeps the two apart so
-  // loose pieces never merge into a pack that was set later.
-  const group = groupOf(api, 'LOOP-LOOSE');
+  // settings row would be the worse failure. The label is what the floor reads
+  // off a pallet, so it names the goods; the screens carry "boxed loose" on the
+  // line beneath, which is where a note about an unfilled field belongs.
+  const group = groupOf(api, 'LOOP');
   assert.ok(group, 'loose pieces get their own group rather than an invented pack');
   assert.equal(group.pack_size, null);
   assert.equal(group.kg_per_unit, 0, 'and no piece weight means no weight, not a guessed one');
@@ -184,6 +185,31 @@ test('a product with no pack size set is boxed loose, and the label says so', as
   const row = await stockService.findById(group.id);
   assert.equal(row.available_packs, null, 'a pack count off an unset field is a number nobody entered');
   assert.equal(row.available_kg, null);
+});
+
+/**
+ * Setting the pack later does not fold the loose pieces into it.
+ *
+ * That is what the `-LOOSE` suffix was guarding, and dropping it changes
+ * nothing: `LOOP` and `LOOP-50` are two labels and `label` is unique, so they
+ * are two rows. A yard that pooled both could not say how many of either it
+ * held.
+ */
+test('loose pieces and a pack set later stay two groups', async (t) => {
+  const api = await bootWith({
+    products: [{ ...PRODUCT, pack_size: null, piece_kg: null }],
+  });
+  t.after(() => api.stop());
+
+  await runService.pack(PRESS_RUN.id, { pieces: 120 });
+  assert.equal(groupOf(api, 'LOOP').packed_sacks, 120);
+
+  // The back office fills the pack in, and the bench boxes the rest.
+  api.tables.products[0].pack_size = 50;
+  await runService.pack(PRESS_RUN.id, { pieces: 4000 });
+
+  assert.equal(groupOf(api, 'LOOP').packed_sacks, 120, 'the loose row is left where it was');
+  assert.equal(groupOf(api, 'LOOP-50').packed_sacks, 3880, 'and the pack gets the change');
 });
 
 test('re-boxing sends the change, not the count again', async (t) => {
@@ -213,6 +239,91 @@ test('boxing more than the press moulded is refused', async (t) => {
     'a count above what came off the press is a mis-key, not a discovery',
   );
   assert.equal(api.tables.stock_groups.length, 0, 'and nothing is filed');
+});
+
+/**
+ * `runs.product` holds the product's id, and holding anything else breaks the
+ * whole path silently.
+ *
+ * It is a key, not a caption. The yard files moulded stock under it,
+ * `stock_groups.product_id` is a foreign key to `products.id`, and the lab's
+ * verdict on what a press moulded is addressed by it. It held the product's
+ * *name* until this was fixed, which read better on a card and matched nothing:
+ * productOf() found no product, so the pack and the piece weight were lost, and
+ * the group was filed against a value the products table had never heard of -
+ * which the foreign key refuses, so nothing reached the yard or the bench at
+ * all. Every failure on that path is caught and logged rather than raised at
+ * the crew, so it looked from the tablet exactly like it had worked.
+ */
+test('a press run is filed against the product id, not the name on the card', async (t) => {
+  const api = await bootWith({
+    machines: [{ id: 'PRS_P3', name: 'Press 3', kind: 'press' }],
+    runs: [],
+  });
+  t.after(() => api.stop());
+
+  const run = await runService.start({
+    machineId: 'PRS_P3',
+    product: 'LOOP',
+    shiftDate: '2026-08-07',
+    shift: 'Day',
+  });
+
+  assert.equal(run.product, 'LOOP', 'the id, which is what the yard and the bench key on');
+  assert.notEqual(run.product, 'Loop', 'and not the name, which is a caption and matches nothing');
+});
+
+/**
+ * Boxing that did not reach the yard says so.
+ *
+ * Filing the stock is deliberately not allowed to fail the request - the run is
+ * saved and the group is a derived ledger that boxing again puts right - but
+ * that was being read as "say nothing", and the bench got a toast reading
+ * "→ Stock · awaiting QC" over a yard holding none of it. A project without
+ * migration 0005 is exactly that case and it ran for days looking like it
+ * worked.
+ */
+test('boxing that never reached the yard is reported, not dressed as a success', async (t) => {
+  const api = await startApi({
+    tables: { stock_groups: [], quality_tests: [], products: [{ ...PRODUCT }], runs: [{ ...PRESS_RUN }] },
+    // No record_packed_stock - a project that has not run 0005 has no way to
+    // hold moulded stock at all.
+    functions: {},
+  });
+  t.after(() => api.stop());
+
+  const saved = await runService.pack(PRESS_RUN.id, { pieces: 4000 });
+
+  assert.equal(saved.packed_pieces, 4000, 'the count is still recorded on the run');
+  assert.equal(saved.stock_filed, false, 'but the bench is told it did not reach the yard');
+  assert.match(saved.stock_note, /did not reach the yard/);
+  assert.equal(api.tables.stock_groups.length, 0);
+});
+
+test('boxing that did reach the yard says so plainly', async (t) => {
+  const api = await bootWith();
+  t.after(() => api.stop());
+
+  const saved = await runService.pack(PRESS_RUN.id, { pieces: 4000 });
+  assert.equal(saved.stock_filed, true);
+  assert.equal(saved.stock_note, null);
+});
+
+test('a run written with the product name still files against the id', async (t) => {
+  // Rows already on the table from before the fix, with pieces on them nobody
+  // has boxed yet. Read as an id the name finds nothing, and the pieces would
+  // box loose under a label the products table does not know.
+  const api = await bootWith({ runs: [{ ...PRESS_RUN, product: 'Loop' }] });
+  t.after(() => api.stop());
+
+  await runService.pack(PRESS_RUN.id, { pieces: 4000 });
+
+  const group = groupOf(api, 'LOOP-50');
+  assert.ok(group, 'the legacy name is resolved back to the product it names');
+  assert.equal(group.product_id, 'LOOP', 'so the group satisfies the foreign key');
+  assert.equal(group.quality, 'LOOP', 'and the lab addresses its verdict by the same id');
+  assert.equal(group.pack_size, 50, 'the pack is found rather than lost');
+  assert.equal(group.kg_per_unit, 0.4);
 });
 
 /**
@@ -250,7 +361,7 @@ test('a press cannot be bagged in sacks, and a bagged run cannot be boxed', asyn
   );
   await assert.rejects(
     () => runService.pack('run-r4-1', { pieces: 10 }),
-    /Only a press run/,
+    /boxed by the piece/,
   );
 
   // And the bagging line still works exactly as it did - one route now serves
@@ -300,9 +411,27 @@ test('a moulded verdict releases that product and signs the row', async (t) => {
 
   const group = groupOf(api, 'LOOP-50');
   assert.equal(group.qc_status, 'pass');
-  assert.equal(group.qc_by, 'anitha', 'who released it is on the row the yard reads');
+  /*
+   * The account that filed the verdict, and not the name on the test.
+   *
+   * This assertion used to read `qc_by === 'anitha'`, and it passed here for the
+   * only reason a wrong assertion ever passes: the stub is not Postgres and has
+   * no foreign keys. `stock_groups.qc_by` references `users`, so against the
+   * real database the name was refused - and because that refusal came out of
+   * the same statement that sets `qc_status`, it did not lose the signature, it
+   * lost the release. Every verdict the lab filed left the yard untouched.
+   *
+   * So the column holds the account, which is what the back office's own path
+   * through PATCH /stock/:id/qc has always written into it. `anitha` is a person
+   * at a bench rather than a login, and she stays on the test row, which is
+   * where the Stock card reads the tester from.
+   */
+  assert.equal(group.qc_by, 'user-lab', 'the account that signed, which is what the column references');
   assert.equal(group.qc_source, 'lab', 'and it is marked as having a test behind it');
   assert.ok(group.qc_at, 'with the moment it happened');
+
+  const test = api.tables.quality_tests.at(-1);
+  assert.equal(test.tester, 'anitha', 'the bench’s own name is kept, on the row that is free text');
 });
 
 test('a hold on a moulded product blocks it rather than releasing it', async (t) => {

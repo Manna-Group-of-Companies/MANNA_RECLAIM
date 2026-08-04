@@ -19,6 +19,7 @@ import {
   PageLoader,
   Pick,
   QualityChip,
+  Readout,
   SheetLabel,
   TextAreaField,
   TextField,
@@ -349,7 +350,18 @@ export function QualityPage() {
       batch: null,
       pool: null,
       moulded: row,
-      batchNo: '',
+      /*
+       * A sleeve or loop lot carries its own number.
+       *
+       * `batch_no` is the shift it was made on - 03/Aug/26-day - and the verdict
+       * is addressed by that and the product together, both of which are on the
+       * row. So it is filled in rather than typed and there is nothing for the
+       * bench to look up. A press's group is the other case entirely: it pools
+       * however many batches of compound were boxed into it, so there is nothing
+       * on the row to read one back from and the sample on the bench is labelled
+       * with its own.
+       */
+      batchNo: row.kind === 'lot' ? (row.batch_no ?? '') : '',
       grade: row.product_id ?? row.quality ?? '',
       params: [],
       verdict: 'pass',
@@ -398,16 +410,13 @@ export function QualityPage() {
       return;
     }
     /*
-     * A moulded verdict has to name the batch the press was moulding. The
-     * server refuses one without it, and the reason is that it is the only
-     * thing tying the verdict to a lot - the stock group it releases is keyed
-     * on the product and the pack, so a verdict with no batch on it is a record
-     * that cannot afterwards be checked against anything.
+     * A moulded verdict used to be blocked here until a batch was typed, and
+     * that was a door with nothing behind it: a press run records no batch
+     * number, so there was nothing the bench could put in the box. The verdict
+     * never filed, the pieces stayed `pending`, and a product that cannot be
+     * passed cannot be dispatched at all. The field stays for the runs that do
+     * carry one - see the note on the input - but it does not gate the verdict.
      */
-    if (draft.moulded && !draft.batchNo.trim()) {
-      notify('Enter the batch the press was moulding', 'warn');
-      return;
-    }
 
     setSaving(true);
     const common = {
@@ -439,10 +448,28 @@ export function QualityPage() {
           : draft.moulded
             ? {
                 ...common,
-                kind: 'product',
-                // The batch of compound, off the sample's own label. `grade` on
-                // `common` is already the product, which is what the verdict
-                // releases.
+                /*
+                 * Which of the two moulded verdicts this is, and it decides what
+                 * the verdict moves.
+                 *
+                 * `lot` is addressed by the batch number and releases that shift
+                 * of sleeve or loop alone. `product` is addressed by the product
+                 * and moves every pack of it in the yard - which is right for a
+                 * press, where the goods are pooled by product and pack in the
+                 * first place, and would be far too blunt for a lot.
+                 */
+                kind: draft.moulded.kind === 'lot' ? 'lot' : 'product',
+                /*
+                 * On a lot: the shift it was made on, which with `grade` on
+                 * `common` - the product - is the key the verdict is addressed
+                 * by. Both halves go, and the server refuses a lot verdict
+                 * missing either: the number is `03/Aug/26-day` and the sleeve
+                 * bench and the loop bench both worked that shift.
+                 *
+                 * On a press's group: the batch of compound off the sample's own
+                 * label, which is provenance - `grade` is already the product,
+                 * and that is what such a verdict releases.
+                 */
                 batchNo: draft.batchNo.trim(),
                 shiftDate: todayISO(),
               }
@@ -481,7 +508,13 @@ export function QualityPage() {
     const what = draft.pool
       ? `${draft.pool.pool.display_label} · sample ${draft.pool.slot.slot}`
       : draft.moulded
-        ? `${draft.moulded.display_label} · ${draft.batchNo.trim()}`
+        ? draft.moulded.kind === 'lot'
+          ? // Both halves of the key, which is what was actually certified.
+            `${draft.batchNo.trim()} · ${draft.grade}`
+          : // The batch is optional on a press verdict, and the usual case is
+            // that there is not one - so the product stands alone rather than
+            // trailing a separator with nothing after it.
+            [draft.moulded.display_label, draft.batchNo.trim()].filter(Boolean).join(' · ')
         : `${draft.batch?.ref} · ${draft.grade}`;
 
     /*
@@ -676,8 +709,13 @@ export function QualityPage() {
                 className={cn('bcard', row.qc_status === 'fail' && 'hold')}
               >
                 <div className="bhead">
+                  {/* The shift a lot was made on, with the product beside it -
+                      the two halves of what this verdict will be addressed by,
+                      shown the way they are keyed. A press's group has no
+                      number and keeps its label, `LOOP-50`, which names the
+                      product and the pack it is boxed in. */}
                   <div className="l">
-                    <BatchRef className="text-base">{row.display_label}</BatchRef>
+                    <BatchRef className="text-base">{row.batch_no || row.display_label}</BatchRef>
                     <QualityChip quality={row.product_id ?? '—'} />
                   </div>
                   <span
@@ -915,7 +953,11 @@ export function QualityPage() {
             ? draft.pool
               ? `${draft.pool.pool.display_label} · sample ${draft.pool.slot.slot}`
               : draft.moulded
-                ? `${draft.moulded.display_label} · moulded`
+                ? draft.moulded.kind === 'lot'
+                  ? // Both halves of the key, in the order they are keyed: the
+                    // shift, then what was made on it.
+                    `${draft.moulded.batch_no ?? draft.moulded.display_label} · ${draft.grade}`
+                  : `${draft.moulded.display_label} · moulded`
                 : `Batch ${draft.batch?.ref} · ${draft.grade}`
             : ''
         }
@@ -924,7 +966,9 @@ export function QualityPage() {
             ? draft.pool
               ? `Coarse · ${slotRange(draft.pool.slot)} · A sample records what the line was running to. It does not hold the pool.`
               : draft.moulded
-                ? `${draft.grade} · A verdict here releases or stops every pack of this product — it is not held to one batch.`
+                ? draft.moulded.kind === 'lot'
+                  ? `${draft.grade} · A verdict here releases or stops this lot alone — the shift that made it.`
+                  : `${draft.grade} · A verdict here releases or stops every pack of this product — it is not held to one batch.`
                 : [draft.batch?.formulation, 'Log this grade’s test parameters, then mark Pass or Hold.']
                     .filter(Boolean)
                     .join(' · ')
@@ -952,21 +996,43 @@ export function QualityPage() {
             </datalist>
 
             {/*
-              Which batch of compound was moulded. Typed rather than picked,
-              because a moulded stock group is keyed on the product and its pack
-              and spans however many batches were boxed into it - there is no
-              single batch on the row to offer. The sample on the bench carries
-              its own, which is where this comes from.
+              Which batch of compound was moulded, where anybody knows. Typed
+              rather than picked, because a moulded stock group is keyed on the
+              product and its pack and spans however many batches were boxed into
+              it - there is no single batch on the row to offer.
+
+              Optional, and usually blank: a press run records no batch number at
+              all. It was required once, which meant a product could never be
+              passed and so could never be dispatched. What releases the stock is
+              the product on the card above; this is a note on the sample.
             */}
-            {draft.moulded && (
-              <TextField
-                label="Batch moulded"
-                note="off the sample’s label — what a re-test is filed against"
-                value={draft.batchNo}
-                onChange={(e) =>
-                  setDraft((d) => (d ? { ...d, batchNo: e.target.value.toUpperCase() } : d))
-                }
+            {/*
+              A sleeve or loop lot is the other case: the verdict is addressed by
+              the shift it was made on and the product together, both of which
+              are on the row, so there is nothing to type and nothing that may be
+              typed. Shown read-only rather than hidden, because what the bench is
+              about to sign against is exactly the thing worth showing - and both
+              halves are named, because `03/Aug/26-day` alone is a shift two
+              benches worked.
+            */}
+            {draft.moulded?.kind === 'lot' ? (
+              <Readout
+                label="Lot"
+                value={`${draft.batchNo || draft.moulded.batch_no || draft.moulded.display_label} · ${draft.grade}`}
+                valueColor="var(--brand)"
+                className="mb-3.5"
               />
+            ) : (
+              draft.moulded && (
+                <TextField
+                  label="Batch moulded"
+                  note="optional — the compound batch, if the sample’s label carries one"
+                  value={draft.batchNo}
+                  onChange={(e) =>
+                    setDraft((d) => (d ? { ...d, batchNo: e.target.value.toUpperCase() } : d))
+                  }
+                />
+              )
             )}
 
             <SheetLabel>

@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchRunFilters } from '@/features/reports/reportsSlice';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { runService } from '@/api/services/run.service';
+import { reportService } from '@/api/services/report.service';
 import { toRequestError } from '@/api/axiosClient';
 import { BoModal } from '@/components/ui';
+import { useToast } from '@/hooks/useToast';
 import {
   buildPayload,
   changedFields,
+  deletedSummary,
   draftOf,
   round2,
   runMath,
@@ -51,6 +55,8 @@ function RunDetail({
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
+  const notify = useToast();
+  const dispatch = useAppDispatch();
 
   // A different run in the modal starts a fresh form.
   const runId = run?.id ?? '';
@@ -96,8 +102,16 @@ function RunDetail({
     setSaving(true);
     setError('');
     try {
-      await runService.remove(run.id);
+      // The row is the smaller half of what a delete moves - the sacks come off
+      // the yard and the samples off the lab's table with it, and the back
+      // office is the side that reconciles the yard, so it is told which.
+      const { message, warn } = deletedSummary(await runService.remove(run.id));
       onDeleted(run.id);
+      // The yard, the costing and the dashboard are all added up from this row.
+      // `onDeleted` only takes it out of the table behind this modal - see the
+      // note on the shop floor's copy of this.
+      dispatch(requestRefresh());
+      notify(message, warn ? 'warn' : 'ok');
       onClose();
     } catch (err) {
       setError(toRequestError(err).message);
@@ -444,6 +458,35 @@ export function AdminHistoryPage() {
     };
   }, [date, machineId, shift, refreshTick]);
 
+  /**
+   * The export, and whether it is in flight.
+   *
+   * A month of runs is not instant, so the button says so rather than sitting
+   * there looking unpressed - the failure mode without it is somebody pressing
+   * it four times and getting four identical files. A failure is shown in the
+   * same place a failed load is: this is the back office, and a download that
+   * silently did nothing is worse than one that says why.
+   */
+  const [exporting, setExporting] = useState(false);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    setError('');
+    try {
+      await reportService.machineLogCsv({
+        // The day picker is a single day, so it is both ends of the window.
+        from: date || undefined,
+        to: date || undefined,
+        machineId: machineId || undefined,
+        shift: shift || undefined,
+      });
+    } catch (err) {
+      setError(toRequestError(err).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const totals = useMemo(() => {
     let kwh = 0;
     let out = 0;
@@ -493,6 +536,25 @@ export function AdminHistoryPage() {
               {c.label}
             </button>
           ))}
+          {/*
+            The machine log as a spreadsheet, over whatever is filtered above.
+
+            Over the filters rather than over the rows on screen, and the
+            difference matters: the table shows the most recent page of a match
+            that may run to thousands, and an export of what happens to be
+            rendered would quietly be a different answer from the one the panel
+            says it is showing. Every logged run matching the day, the machine
+            and the shift goes into the file.
+          */}
+          <button
+            type="button"
+            className="chip"
+            disabled={exporting}
+            onClick={exportCsv}
+            title="Every logged run matching these filters, as a CSV"
+          >
+            {exporting ? 'Preparing…' : '↓ Export CSV'}
+          </button>
         </div>
 
         <div className="kpis">

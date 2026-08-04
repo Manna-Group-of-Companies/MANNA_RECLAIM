@@ -35,6 +35,14 @@ export interface ProductPayload {
   packSize?: number | null;
   packLabel?: string | null;
   pieceKg?: number | null;
+  /**
+   * Whether the item is moulded at all. Cavities and a cycle time are facts
+   * about a mould, so an item that is cut or assembled has neither - and the
+   * sleeve and loop run sheets then ask for neither, and report no expected
+   * piece count. Defaults true on the server: everything on the list today is
+   * something a press moulds.
+   */
+  moulded?: boolean;
   machineId?: string | null;
   rawMaterialCost?: number | null;
   firewoodCost?: number | null;

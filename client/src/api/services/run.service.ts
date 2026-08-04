@@ -115,6 +115,29 @@ export interface RemovedRun {
   shift?: Shift | null;
   batch_no?: string | null;
   weight_kg?: number | null;
+  /**
+   * What went with it. A run is not only its own row: what it packed was
+   * standing in the yard and what the bench tested was on the lab's table, and
+   * a delete takes both. The screen says so rather than leaving the crew to
+   * wonder whether the stock moved - see the History tab.
+   */
+  stock_cleared?: {
+    id: string;
+    label: string;
+    /** Taken back out of that group by this delete. */
+    taken: number;
+    /** What the group holds now. */
+    left?: number | null;
+    /**
+     * The group emptied completely and was deleted with the run - nothing was
+     * ever made and nothing ever left it, so there is no yard row to explain.
+     * A group that has dispatched is kept, and this is false.
+     */
+    removed?: boolean;
+  } | null;
+  /** Packed output no group could be found for - unaccounted for in the yard. */
+  stock_note?: string | null;
+  quality_tests_deleted?: number;
 }
 
 /**

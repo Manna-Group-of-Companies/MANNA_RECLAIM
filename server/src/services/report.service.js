@@ -1,5 +1,5 @@
 import { crud } from './base.service.js';
-import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD } from '../config/constants.js';
+import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD, isMoulding } from '../config/constants.js';
 import { rateService } from './rate.service.js';
 import { crumbCost, autoclaveCharge } from './crumb.service.js';
 import { fromRow as dispatchFromRow } from './dispatch.service.js';
@@ -125,11 +125,14 @@ export const reportService = {
    * finished goods moulded from reclaim the plant has already counted as its
    * output, so adding their kilos in would count the same material twice. Press
    * runs are reported on their own terms - pieces, and what they cost in
-   * material - in History.
+   * material - in History. Sleeve and loop are moulded the same way and off the
+   * same reclaim, so they are left out for the same reason - a kg counted once
+   * at the grinder must not be counted again as a finished loop.
    */
   async production({ from, to } = {}) {
     const rows = (await runs.all()).filter(inWindow(from, to));
-    const outKg = sum(rows.filter((r) => r.kind !== 'press'), 'weight_kg');
+    const moulded = (r) => r.kind === 'press' || isMoulding(r.kind);
+    const outKg = sum(rows.filter((r) => !moulded(r)), 'weight_kg');
     const runHours = rows.reduce((s, r) => s + runHoursOf(r), 0);
     return {
       window: { from: from ?? null, to: to ?? null },

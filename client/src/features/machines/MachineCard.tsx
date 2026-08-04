@@ -2,7 +2,7 @@ import { BatchRef, FormChip, Icon, QualityChip } from '@/components/ui';
 import { elapsed, kg } from '@/utils/format';
 import { clock, dayMonth } from '@/utils/date';
 import { useTicker } from '@/hooks/useTicker';
-import { KIND_ACCENT } from '@/config/constants';
+import { KIND_ACCENT, isMoulding } from '@/config/constants';
 import { cn } from '@/utils/cn';
 import type { BearingDue, MaintenanceLog, Machine, Run } from '@/types/models';
 
@@ -72,11 +72,25 @@ export function MachineCard({
   const tally = run?.weigh_entries ?? [];
   const tallied = tally.length ? round2(tally.reduce((total, n) => total + n, 0)) : 0;
 
-  const lastLine = last
-    ? `last ${last.batch_no ?? last.shift ?? ''}${last.quality ? ` · ${last.quality}` : ''}${
-        last.ended_at ? ` · ${clock(last.ended_at)}` : ''
-      }`
-    : 'no runs yet';
+  /**
+   * What this machine last did, on the idle line - and nothing at all on a
+   * sleeve or loop bench.
+   *
+   * The line leads on the batch number, which is the right thing to lead on
+   * everywhere it is a batch: `last B1041 · Fine · 10:03 am` is a crew reading
+   * which lot came off here. A sleeve or loop number is the shift it was worked,
+   * so the same line renders `last 04/Aug/26-day · 10:03 am` - a date where a
+   * batch belongs, followed by a time, saying when twice and what never. The
+   * bench is one product per shift and the crew standing at it knows what it ran;
+   * the honest version of this line is the empty one.
+   */
+  const lastLine = isMoulding(machine.kind)
+    ? null
+    : last
+      ? `last ${last.batch_no ?? last.shift ?? ''}${last.quality ? ` · ${last.quality}` : ''}${
+          last.ended_at ? ` · ${clock(last.ended_at)}` : ''
+        }`
+      : 'no runs yet';
 
   const openBody = () => {
     if (isDown && down) return onRepair(down);
@@ -151,8 +165,11 @@ export function MachineCard({
             <div className="what">
               {run.batch_no && <BatchRef>{run.batch_no}</BatchRef>}
               {run.formulation && <FormChip>{run.formulation}</FormChip>}
-              {/* A press says what it is moulding, and what it is moulding it at. */}
-              {run.product && <FormChip>{run.product}</FormChip>}
+              {/* A press says what it is moulding, and what it is moulding it at.
+                  A sleeve or loop lot already leads with its batch number above,
+                  which names the product - so repeating it would be the same
+                  word twice on a card the crew reads at a glance. */}
+              {run.product && !isMoulding(run.kind) && <FormChip>{run.product}</FormChip>}
               {run.cure_temp_c != null && <FormChip>{run.cure_temp_c} °C</FormChip>}
               {run.shift_date && !run.batch_no && <FormChip>{dayMonth(run.shift_date)}</FormChip>}
               {run.quality && <QualityChip quality={run.quality} />}
@@ -185,6 +202,11 @@ export function MachineCard({
         </div>
       ) : (
         <button type="button" onClick={() => onStart(machine)} className="mbody w-full bg-transparent p-0">
+          {/* The span is rendered empty rather than dropped when there is no
+              line to show, so the CTA stays where it sits on every other card -
+              `.idleline` spaces its two children apart, and one child would
+              pull Start across to the left on the sleeve and loop benches
+              alone. */}
           <div className="idleline">
             <span>{lastLine}</span>
             <span className="cta" style={{ '--accent': accent } as React.CSSProperties}>

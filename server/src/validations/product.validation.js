@@ -54,6 +54,17 @@ export const createProductSchema = z.object({
   packSize: z.coerce.number().int().positive().max(100_000).optional().nullable(),
   packLabel: z.string().trim().max(40).optional().nullable(),
   pieceKg: positive,
+
+  /**
+   * Whether the item is moulded at all.
+   *
+   * Cavities and a cycle time are facts about a mould. A sleeve that is cut
+   * rather than moulded has neither, and a run sheet that asked for them anyway
+   * would get a guess or get skipped - so the master answers once and the sheet
+   * asks accordingly. Defaults true in the database, because everything on the
+   * list today is something a press moulds.
+   */
+  moulded: z.boolean().optional(),
   machineId: z.string().trim().max(40).optional().nullable(),
   rawMaterialCost: nonNegative,
   firewoodCost: nonNegative,

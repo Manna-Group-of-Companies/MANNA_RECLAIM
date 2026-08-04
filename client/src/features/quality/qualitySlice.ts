@@ -115,9 +115,50 @@ export const recordTest = createAsyncThunk(
 /** The lab's report, uploaded once the verdict it belongs to is on file. */
 export const attachReport = createAsyncThunk(
   'quality/report',
-  async (payload: ReportPayload, { rejectWithValue }) => {
+  async (payload: ReportPayload, { rejectWithValue, dispatch }) => {
     try {
-      return await qualityService.attachReport(payload);
+      const test = await qualityService.attachReport(payload);
+      /*
+       * The yard shows the sheet the verdict was made on, not only the verdict
+       * - the readings, the tester and the report link travel with the goods on
+       * the stock card. So the report landing is a change to what that card
+       * says, and it happens after recordTest has already bumped the tick: the
+       * upload is a second call made once the test is filed, so the refresh it
+       * triggered went out while this file was still going up. Without this the
+       * card carries the verdict with no report against it until the yard's
+       * thirty-second poll comes round.
+       */
+      void dispatch(requestRefresh());
+      return test;
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+/**
+ * Takes a test off the record - the back office's, and the only lab edit that
+ * is not a re-test.
+ *
+ * The bench corrects itself by filing again, because tests are append-only and
+ * the newest verdict standing is the one the yard reads. What that cannot fix
+ * is a test filed against the wrong batch or the wrong grade: it goes on
+ * releasing goods it was never about, and every re-test lands on a different
+ * key. Deleting it is what puts those goods back.
+ *
+ * The refresh is the point as much as the delete. The verdict is kept on the
+ * stock group as well as on the test - a dispatch reads it there - so removing
+ * the row moves the yard, and a Stock view open beside this one would otherwise
+ * go on showing a released pallet with nothing behind it.
+ */
+export const removeTest = createAsyncThunk(
+  'quality/remove',
+  async (id: string, { rejectWithValue, dispatch }) => {
+    try {
+      const removed = await qualityService.remove(id);
+      void dispatch(fetchPendingQuality());
+      void dispatch(requestRefresh());
+      return removed;
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -160,6 +201,17 @@ const qualitySlice = createSlice({
       .addCase(attachReport.fulfilled, (state, action) => {
         const at = state.tests.findIndex((t) => t.id === action.payload.id);
         if (at >= 0) state.tests[at] = action.payload;
+      })
+      /*
+       * Out of the list immediately, so the row does not sit there looking
+       * deleted-but-not. `held` and the per-batch state are left to
+       * fetchPendingQuality(), which the thunk dispatches: which grades are
+       * still awaiting a verdict and which batches are held is worked out from
+       * the whole set of tests, and dropping one row is not something that can
+       * be applied to those answers a field at a time.
+       */
+      .addCase(removeTest.fulfilled, (state, action) => {
+        state.tests = state.tests.filter((t) => t.id !== action.payload.id);
       });
   },
 });

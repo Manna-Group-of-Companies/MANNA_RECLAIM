@@ -1334,6 +1334,79 @@
   }
 
 
+  /* ---------------------------------------------------------------------- *
+   * The lab test under the verdict.
+   *
+   * Inset rather than another line in the `who` column, because it is a quote
+   * from somewhere else - somebody at a bench measured these things and signed
+   * for them - and the rest of the card is the yard's own record of the goods.
+   * The rule down the left is what says so at a glance.
+   *
+   * It sits between the stock and the verdict deliberately: read downwards, the
+   * card now says what is here, what was measured, and therefore what may
+   * leave. The badge is still the operative fact and still the largest thing in
+   * the footer; this is the working behind it, and it is drawn quieter than
+   * everything around it so that it reads as evidence rather than as a second
+   * verdict competing with the badge.
+   * ---------------------------------------------------------------------- */
+  .scard .lab {
+    margin-top: 10px;
+    padding: 7px 0 1px 10px;
+    border-left: 2px solid var(--line2);
+  }
+  .scard .lab-h {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11.5px;
+  }
+  .scard .lab-h .muted {
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  /* The readings themselves. Monospace so a column of them down a list of cards
+     lines up by eye, which is how a run of results is actually read. */
+  .scard .lab-b {
+    margin-top: 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-dim);
+    line-height: 1.6;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+  }
+  .scard .lab-b b {
+    color: var(--ink-faint);
+    font-weight: 600;
+  }
+  .scard .lab-b a {
+    color: var(--elec);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  /* The bench's own words about the lot, which are prose rather than a reading. */
+  .scard .lab-note {
+    margin-top: 5px;
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--ink-faint);
+  }
+  /*
+   * The two states worth raising the voice for: a verdict that disagrees with
+   * the test under it, and one with no test under it at all. Both are cases
+   * where the quiet version would read as the lab having said something it did
+   * not, so neither is drawn in the faint grey the rest of this block uses.
+   */
+  .scard .lab-warn,
+  .scard .lab-none {
+    margin-top: 5px;
+    font-size: 11.5px;
+    color: var(--warn);
+  }
+
   .scard .foot {
     display: flex;
     align-items: center;

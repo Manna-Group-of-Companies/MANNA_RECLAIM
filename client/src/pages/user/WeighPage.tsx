@@ -86,6 +86,7 @@ export function WeighPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
   const { pendingWeigh, weighed, weighedTotal, weighedAll, loading } = useAppSelector((s) => s.runs);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const [target, setTarget] = useState<Run | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [entries, setEntries] = useState<number[]>([]);
@@ -93,10 +94,22 @@ export function WeighPage() {
   /** The figure of record a correction will save; blank on a first weighing. */
   const [total, setTotal] = useState('');
 
+  /*
+   * On mount, and whenever anything asks for a refresh.
+   *
+   * Both lists, because a delete can move either: a run waiting to be weighed
+   * drops off the top list, and one already weighed drops off the record below
+   * it. Read once at mount, this tab went on offering a scale to a run that had
+   * been taken off the record - see the Packing tab, which had the same gap.
+   *
+   * The re-read keeps whichever span the crew is looking at. Refetching the
+   * short list would quietly close a "show all" somebody had opened, and a list
+   * that collapses on its own while being read is worse than a stale one.
+   */
   useEffect(() => {
     void dispatch(fetchPendingWeigh());
-    void dispatch(fetchWeighed({}));
-  }, [dispatch]);
+    void dispatch(fetchWeighed({ all: weighedAll }));
+  }, [dispatch, refreshTick, weighedAll]);
 
   const entriesTotal = sum(entries);
 

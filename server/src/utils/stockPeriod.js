@@ -168,19 +168,58 @@ export const batchLabel = (batchNo, quality) =>
  * different things to sell and to count - a customer orders packs, and a yard
  * that pooled both into one row could not say how many of either it had.
  *
- * A product with no pack size set is `LOOP-LOOSE`. It is a real state and not an
+ * A product with no pack size set is just `LOOP`. It is a real state and not an
  * error: the presses run whether or not the back office has filled the pack in,
  * and stranding a shift's moulding for want of a settings field would be the
- * worse failure. The label says which it is, so the two never merge.
+ * worse failure.
+ *
+ * It used to read `LOOP-LOOSE`. The suffix was there to keep loose pieces from
+ * merging into a pack set later, and the bare product does that just as well -
+ * `LOOP` and `LOOP-50` are still two labels and still two rows. What the suffix
+ * cost was the yard's own screen: `SLEVE-LOOSE` is what the floor reads off a
+ * pallet, and it names a state of the settings table rather than the goods. The
+ * screens already say "boxed loose" on the line beneath, which is where a note
+ * about an unfilled field belongs - see StockPage and QualityPage.
  */
 export const productLabel = (productId, packSize) => {
   const product = String(productId ?? '').trim();
   const size = Number(packSize);
-  return `${product}-${Number.isFinite(size) && size > 0 ? size : 'LOOSE'}`;
+  return Number.isFinite(size) && size > 0 ? `${product}-${size}` : product;
+};
+
+/**
+ * A sleeve or loop lot's label: the product it made, and the shift it made it
+ * on.
+ *
+ *   lotLabel('SLEVE', '03/Aug/26-day')  ->  'SLEVE-03/Aug/26-day'
+ *
+ * Both halves, because neither identifies a lot on its own. The batch number is
+ * the date and the shift and nothing else, so sleeve and loop worked on the same
+ * shift carry the same number - and a label built from the number alone would
+ * put both benches' output in one row, under one lab verdict, which is exactly
+ * the merge that must not happen. The product alone is worse still: that is a
+ * press's grouping, and it pools every shift the plant has ever run.
+ *
+ * This label is what `stock_groups.label` holds and what record_packed_stock()
+ * upserts on, so it is the composite key in the form Postgres can enforce with a
+ * single unique column. The pair is also held directly - see the unique index on
+ * (product_id, batch_no) in migrations/0007 - and the two agree because both are
+ * built from the same two fields.
+ *
+ * It is a function rather than a bare template at each call site so that the
+ * several places that key a lot cannot drift apart, the same reason batchLabel()
+ * and productLabel() above are functions.
+ */
+export const lotLabel = (productId, batchNo) => {
+  const product = String(productId ?? '').trim();
+  const batch = String(batchNo ?? '').trim();
+  if (!product || !batch) return '';
+  return `${product}-${batch}`;
 };
 
 export default {
   poolFor,
+  lotLabel,
   periodOf,
   slotsOf,
   slotOf,

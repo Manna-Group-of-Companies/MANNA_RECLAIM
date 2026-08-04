@@ -37,11 +37,28 @@ function predicateFor(params) {
     const value = rest.join('.');
     const unquote = (v) => v.replace(/^"|"$/g, '').replace(/\\(["\\])/g, '$1');
     if (operator === 'eq') tests.push((row) => String(row[field]) === unquote(value));
+    else if (operator === 'neq') tests.push((row) => String(row[field]) !== unquote(value));
     else if (operator === 'in') {
       const list = value.replace(/^\(|\)$/g, '').split(',').map(unquote);
       tests.push((row) => list.includes(String(row[field])));
     } else if (operator === 'gt') tests.push((row) => Number(row[field]) > Number(value));
-    else if (operator === 'ilike') {
+    else if (operator === 'gte') tests.push((row) => Number(row[field]) >= Number(value));
+    else if (operator === 'lt') tests.push((row) => Number(row[field]) < Number(value));
+    else if (operator === 'lte') tests.push((row) => Number(row[field]) <= Number(value));
+    /*
+     * `is.null` and `not.is.null`.
+     *
+     * These were missing, and a missing operator here is worse than an
+     * unsupported one: the loop simply added no test, so a filter the server
+     * relies on came back matching every row. `?ended_at=is.null` - which is how
+     * "runs in progress" is asked - answered with every run ever logged, and any
+     * test that seeded a finished run and then started another got a spurious
+     * "that machine already has a run in progress".
+     */
+    else if (operator === 'is') tests.push((row) => (row[field] ?? null) === null);
+    else if (operator === 'not' && value === 'is.null') {
+      tests.push((row) => (row[field] ?? null) !== null);
+    } else if (operator === 'ilike') {
       const rx = new RegExp(`^${unquote(value).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 'i');
       tests.push((row) => rx.test(String(row[field] ?? '')));
     }

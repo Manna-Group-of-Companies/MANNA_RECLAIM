@@ -2,7 +2,21 @@ export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin';
 export type Shift = 'Day' | 'Night';
 export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
-export type MachineKind = 'grind' | 'autoclave' | 'prerefiner' | 'refiner' | 'coarse' | 'press';
+export type MachineKind =
+  | 'grind'
+  | 'autoclave'
+  | 'prerefiner'
+  | 'refiner'
+  | 'coarse'
+  | 'press'
+  /**
+   * Sleeve and loop. Their own kinds rather than presses, because what they make
+   * is certified a shift at a time under a batch number of their own - a press
+   * pools every pack of a product into one row and one verdict, which is far too
+   * blunt for goods answered for by the shift. See MOULDING_KINDS.
+   */
+  | 'sleeve'
+  | 'loop';
 /** The finer name a machine is listed under. Mirrors MACHINE_TYPES on the server. */
 export type MachineType =
   | 'grinder'
@@ -11,6 +25,8 @@ export type MachineType =
   | 'prerefiner'
   | 'refiner'
   | 'press'
+  | 'sleeve'
+  | 'loop'
   | 'other';
 export type RunStatus = 'running' | 'done';
 export type Verdict = 'pass' | 'hold';
@@ -72,6 +88,15 @@ export interface Product {
   cyclic_min?: number | null;
   /** Pieces the mould makes per cycle. */
   cavities?: number | null;
+  /**
+   * Whether the item is moulded at all.
+   *
+   * Cavities and a cycle time are facts about a mould, so a sleeve that is cut
+   * rather than moulded is asked for neither on its run sheet - and the expected
+   * piece count, which is worked out from both, is simply not reported. Absent
+   * reads as true: everything on the list today is something a press moulds.
+   */
+  moulded?: boolean | null;
   /** What the compound this is moulded from costs, per kg. */
   compound_rate?: number | null;
   note?: string | null;
@@ -304,8 +329,47 @@ export interface Run {
    * boxing bench, which is a different state from "boxed, and it came to none".
    */
   packed_pieces?: number | null;
+  /**
+   * Whether the boxing just recorded actually reached the yard, answered by the
+   * pack route alone.
+   *
+   * Filing the stock is deliberately not allowed to fail the request - the run
+   * is saved and the group is a derived ledger that boxing again puts right -
+   * so without this the bench is told the pieces are in stock awaiting the lab
+   * whether or not a single row was written. `stock_note` says what went wrong.
+   */
+  stock_filed?: boolean;
+  stock_note?: string | null;
   flash_kg?: number | null;
   compound_rate?: number | null;
+  /**
+   * A sleeve or loop run, on top of everything a press run carries.
+   *
+   * `pieces_expected` is what the cycle and the mould said this length of run
+   * should have made, worked out and written when the run was logged rather than
+   * derived on read - the cycle, the cavities and the run time are all
+   * correctable afterwards, and a variance that quietly re-computed itself would
+   * stop being a record of what was counted. `pieces_variance_pct` is the gap as
+   * a signed percentage, negative for a lot that came up short, and
+   * `pieces_flagged` is whether it is wide enough to be worth a look.
+   *
+   * All null on a product the back office has not measured a cycle or a set of
+   * cavities into: nothing was predicted, so nothing is flagged.
+   */
+  pieces_expected?: number | null;
+  pieces_variance_pct?: number | null;
+  pieces_flagged?: boolean;
+  /**
+   * What the crew on the activity came to, and what it cost.
+   *
+   * A press is not costed on labour - it books no hours for a crew to be spread
+   * over - but these are, at the rate that was in force on the day the shift was
+   * worked. `labour_rate` is that snapshot, so a raise entered next month prices
+   * next month and leaves a closed one closed.
+   */
+  labour_rate?: number | null;
+  labour_hours?: number | null;
+  labour_cost?: number | null;
   /**
    * What that came to, derived by the API on every read: compound on the weight
    * plus the flash, spread over the pieces made. Null while the product has no
@@ -381,6 +445,25 @@ export interface QualityTest {
   } | null;
 }
 
+/**
+ * What taking a test off the record moved, beside the row itself.
+ *
+ * A verdict is not a fact about a test row; it is a fact about goods, kept on
+ * the stock group because a dispatch reads it there and cannot read a test. So
+ * deleting the test that released a pallet puts the group back where the tests
+ * that remain leave it - the one before this, or the state it would have opened
+ * in - and `stock_groups` is which groups that moved.
+ *
+ * Empty is the ordinary case and not a failure: a verdict on a batch nobody has
+ * bagged yet was never carried by a group, so there is none to put back.
+ */
+export interface RemovedQualityTest {
+  id: string;
+  batch_no: string | null;
+  quality: string | null;
+  stock_groups: { id: string; label: string; qc_status: QcStatus }[];
+}
+
 /** The whole record of one batch - what the batch detail view is drawn from. */
 export interface BatchDetail extends Batch {
   runs: Run[];
@@ -390,8 +473,18 @@ export interface BatchDetail extends Batch {
 
 export type QcStatus = 'pass' | 'fail' | 'pending';
 
-/** The three things a stock group can be - the three ways the plant makes goods. */
-export type StockKind = 'batch' | 'pool' | 'product';
+/**
+ * The four things a stock group can be - the four ways the plant makes goods.
+ *
+ *   batch    one grade off one special-line batch, certified as a lot.
+ *   pool     the coarse line's ten-day period. Not batch-identified.
+ *   product  what a press moulded, keyed on the product and the pack it is
+ *            boxed in, so every pack of it moves on one verdict.
+ *   lot      one shift of sleeve or loop, keyed on its own batch number.
+ *            Counted in pieces like a `product` group and certified per label
+ *            like a `batch` one, which is why it is neither of them.
+ */
+export type StockKind = 'batch' | 'pool' | 'product' | 'lot';
 
 /**
  * What a stock count counts.
@@ -420,6 +513,30 @@ export type QcSource = 'lab' | 'manual';
  * moulding press makes a group per product and pack, counted in pieces.
  * `label` is the stored one; `display_label` is what the yard reads, AUG-H2.
  */
+/**
+ * The lab test standing behind a stock group's verdict, as /stock sends it.
+ *
+ * A narrower thing than QualityTest, and its own type rather than a reuse: this
+ * is the yard reading one test the server has already picked - the newest one
+ * addressing this group - and it carries none of the Quality tab's machinery for
+ * choosing between them or filing another.
+ */
+export interface StockLabTest {
+  id: string;
+  kind: string;
+  verdict: Verdict | null;
+  /** What it was filed against: the batch, and the grade or the product. */
+  batch_no?: string | null;
+  quality?: string | null;
+  params?: QualityParam[];
+  tested_at?: string | null;
+  tested_by?: string | null;
+  remarks?: string | null;
+  /** The report sheet, once the bench has photographed or uploaded it. */
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+}
+
 export interface StockGroup {
   id: string;
   kind: StockKind;
@@ -428,6 +545,18 @@ export interface StockGroup {
   /** The grade on a batch or pool, and the product's id on a moulded group. */
   quality: DispatchGrade | string | null;
   product_id?: string | null;
+  /**
+   * The batch number the goods carry, where they carry one.
+   *
+   * On a `lot` it is the shift it was made on - `03/Aug/26-day` - and half of
+   * what identifies the lot; the product beside it is the other half. On a
+   * `batch` group it is the batch, which the label also says. Null on a pool and
+   * on a press's product group, neither of which is batch-identified.
+   *
+   * Cards show this and the product side by side rather than the label, which is
+   * a key rather than something to read. See StockPage.
+   */
+  batch_no?: string | null;
 
   /** What the counts count. Everything printing one has to read this first. */
   unit: StockUnit;
@@ -458,6 +587,15 @@ export interface StockGroup {
   qc_by?: string | null;
   qc_at?: string | null;
   qc_source?: QcSource | null;
+  /**
+   * The test the verdict above was made on, or null while nobody has tested it.
+   *
+   * Null is a real state rather than a gap in the response: an untested batch
+   * sits `pending`, a pool nobody has sampled sells on the `pass` it opened
+   * with, and a group the back office released by hand has a verdict with no
+   * test under it at all - which is exactly what `qc_source` is for.
+   */
+  lab_test?: StockLabTest | null;
 
   /** The span it was packed across - a pool runs ten days, a batch a shift. */
   first_packed_on?: string | null;
@@ -485,6 +623,8 @@ export interface StockSummaryRow {
   id: string;
   kind: StockKind;
   label: string;
+  /** The shift a lot was made on, or the batch behind a batch group. */
+  batch_no?: string | null;
   quality: DispatchGrade | string | null;
   unit: StockUnit;
   available_sacks: number;
@@ -574,10 +714,23 @@ export interface StockPool {
  */
 export interface MouldedStock {
   id: string;
+  /**
+   * Which of the two it is, and therefore how a verdict on it has to be filed:
+   * a `product` group is addressed by its product and moves every pack of it,
+   * a `lot` is addressed by its batch number - which is its label - and moves
+   * that shift alone.
+   */
+  kind: StockKind;
   label: string;
   display_label: string;
   /** The product - what a verdict on moulded goods is filed against. */
   product_id: string | null;
+  /**
+   * The shift a lot was made on, and the other half of what a lot verdict has to
+   * name - the product alone would move every shift of it. Null on a press's
+   * group, which is addressed by the product and pools every shift.
+   */
+  batch_no?: string | null;
   quality: string | null;
   unit: StockUnit;
   available_qty: number;

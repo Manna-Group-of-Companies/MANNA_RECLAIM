@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchRunFilters } from '@/features/reports/reportsSlice';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { runService } from '@/api/services/run.service';
 import { dispatchService } from '@/api/services/dispatch.service';
 import { toRequestError } from '@/api/axiosClient';
@@ -20,6 +21,7 @@ import {
 import {
   buildPayload,
   changedFields,
+  deletedSummary,
   draftOf,
   round2,
   runMath,
@@ -94,6 +96,7 @@ function RunSheet({
   onDeleted: (id: string) => void;
 }) {
   const notify = useToast();
+  const dispatch = useAppDispatch();
   const machines = useAppSelector((s) => s.machines.items);
   const [mode, setMode] = useState<'edit' | 'delete'>('edit');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -155,9 +158,22 @@ function RunSheet({
     setBusy(true);
     setError('');
     try {
-      await runService.remove(run.id);
+      // What went with it - the sacks off its stock group, the samples off the
+      // lab's table - rather than "deleted" and nothing about the yard moving.
+      const { message, warn } = deletedSummary(await runService.remove(run.id));
       onDeleted(run.id);
-      notify('Entry deleted', 'ok');
+      /*
+       * And tell the rest of the app to re-read itself.
+       *
+       * `onDeleted` takes the row out of this list and nothing else. A delete
+       * moves the yard as well - the sacks come off a stock group, and the
+       * group goes entirely when the run was the only thing in it - so a Stock
+       * tab that is already mounted goes on drawing a card for stock that no
+       * longer exists until somebody reloads the app. That is the same reason
+       * filing a lab verdict bumps this, and the same fix.
+       */
+      dispatch(requestRefresh());
+      notify(message, warn ? 'warn' : 'ok');
       close();
     } catch (err) {
       const message = toRequestError(err).message;

@@ -48,7 +48,8 @@ create table if not exists public.machines (
   name           text not null,
   short          text,
   kind           text not null
-                   check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press')),
+                   check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press',
+                                   'sleeve', 'loop')),
   group_name     text,
   sub            text,
   accent         text,
@@ -68,9 +69,34 @@ create table if not exists public.machines (
 create index if not exists machines_sort_order_idx on public.machines (sort_order);
 create index if not exists machines_kind_idx on public.machines (kind);
 
--- The 14 machines from the prototype, and the two moulding presses. `on conflict
--- do nothing` so a later run never overwrites a change the back office made
--- through the admin screen.
+-- ---- catching an existing table up, BEFORE anything is inserted into it ----
+--
+-- `create table if not exists` above does nothing at all on a project that
+-- already has this table, so its column list and its inline CHECK are the shape
+-- of a *new* database and say nothing about an old one. Everything the seed
+-- below relies on therefore has to be added here first.
+--
+-- Both blocks used to sit after the insert, and on an existing project that
+-- meant the insert was checked against last year's constraint: seeding `sleeve`
+-- failed with machines_kind_check, and the statement that would have allowed it
+-- was thirty lines further down and never reached.
+
+-- For a project whose machines table predates the feedstock picker. The seed
+-- names both columns, so they have to exist before it runs.
+alter table if exists public.machines add column if not exists tyre     boolean not null default false;
+alter table if exists public.machines add column if not exists def_tyre text;
+
+-- And for one whose `kind` check was written before the presses, or before
+-- sleeve and loop: the constraint is replaced rather than added to, because a
+-- check constraint cannot be widened in place.
+alter table if exists public.machines drop constraint if exists machines_kind_check;
+alter table if exists public.machines add constraint machines_kind_check
+  check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press',
+                  'sleeve', 'loop'));
+
+-- The 14 machines from the prototype, the two moulding presses, and the sleeve
+-- and loop benches. `on conflict do nothing` so a later run never overwrites a
+-- change the back office made through the admin screen.
 insert into public.machines
   (id, name, short, kind, group_name, sub, accent, capacity, out_weight, needs_quality, weigh, tyre, def_tyre, enabled, sort_order)
 values
@@ -93,19 +119,18 @@ values
   -- checked. Nothing is weighed off a press by the Weigh tab: the crew weighs
   -- the output at the machine and enters it at stop, so `out_weight` is false.
   ('PRS_P3', 'Press 3',       'P3',      'press',      'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', null, false, false, false, false, null, true, 15),
-  ('PRS_P5', 'Press 5',       'P5',      'press',      'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', null, false, false, false, false, null, true, 16)
+  ('PRS_P5', 'Press 5',       'P5',      'press',      'Moulding presses', 'platen, daylights, tonnage - to be measured', '#4d9fe8', null, false, false, false, false, null, true, 16),
+  -- Sleeve and loop. Their own activities rather than a filter on the presses:
+  -- what they make is certified a shift at a time under a batch number nobody
+  -- types, which is how reclaim works and is not how a press works. See
+  -- supabase/migrations/0006.
+  --
+  -- Seeded disabled, so the shop-floor Machines page carries no Sleeve & Loop
+  -- section - `enabled` rather than a delete, because the runs and lots already
+  -- recorded against these two point at these rows. See migrations/0008.
+  ('SLEEVE', 'Sleeve',        'Sleeve',  'sleeve',     'Sleeve & Loop', 'batch per shift - pieces, flash and crew at stop', '#7ec9a0', null, false, false, false, false, null, false, 17),
+  ('LOOP',   'Loop',          'Loop',    'loop',       'Sleeve & Loop', 'batch per shift - pieces, flash and crew at stop', '#c99ade', null, false, false, false, false, null, false, 18)
 on conflict (id) do nothing;
-
--- For a project whose machines table predates the feedstock picker.
-alter table if exists public.machines add column if not exists tyre     boolean not null default false;
-alter table if exists public.machines add column if not exists def_tyre text;
-
--- And for one whose `kind` check was written before the presses existed: the
--- constraint is replaced rather than added to, because a check constraint cannot
--- be widened in place.
-alter table if exists public.machines drop constraint if exists machines_kind_check;
-alter table if exists public.machines add constraint machines_kind_check
-  check (kind in ('grind', 'autoclave', 'prerefiner', 'refiner', 'coarse', 'press'));
 
 
 -- -----------------------------------------------------------------------------
@@ -147,6 +172,12 @@ values
   ('LOOP',  'Loop',  null, null, null, null, true, 1),
   ('SLEVE', 'Sleve', null, null, null, null, true, 2)
 on conflict (id) do nothing;
+
+-- Whether the item is moulded at all. Cavities and a cycle time are facts about
+-- a mould, so a sleeve that is cut rather than moulded is asked for neither -
+-- see supabase/migrations/0006. Default true: everything on the list today is
+-- something a press moulds.
+alter table public.products add column if not exists moulded boolean not null default true;
 
 
 -- -----------------------------------------------------------------------------
@@ -206,6 +237,48 @@ alter table public.runs add column if not exists flash_kg      numeric;
 -- filing the same pieces twice. See migrations/0005.
 alter table public.runs add column if not exists packed_pieces integer;
 alter table public.runs add column if not exists compound_rate numeric;
+
+-- What a sleeve or loop run records on top of that. `pieces` above is still the
+-- figure of record - what the crew counted off the bench - and `pieces_expected`
+-- is what the cycle and the mould said it should have been, worked out as the
+-- run is logged and kept beside it. Not derived on read, deliberately: the cycle
+-- and the cavities are correctable afterwards, and a variance that re-computed
+-- itself would stop being evidence of anything. `labour_rate` is the rupees per
+-- labourer-hour in force on the day it was worked, snapshotted so a rate raised
+-- next month prices the next shift and not this one. See migrations/0006.
+alter table public.runs add column if not exists pieces_expected integer;
+alter table public.runs add column if not exists labour_rate     numeric;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'runs_pieces_expected_non_negative') then
+    alter table public.runs
+      add constraint runs_pieces_expected_non_negative
+      check (pieces_expected is null or pieces_expected >= 0)
+      not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'runs_labour_rate_non_negative') then
+    alter table public.runs
+      add constraint runs_labour_rate_non_negative
+      check (labour_rate is null or labour_rate >= 0)
+      not valid;
+  end if;
+end $$;
+
+-- One lot per product per shift. A sleeve or loop lot is exactly the product,
+-- the shift date and the shift - the last two are its batch number and the first
+-- is the column beside it - so a second logged run claiming the same three is a
+-- duplicate lot rather than a second batch. The second start folds into the
+-- record the shift already has and lifts `passes`, the same rule the coarse and
+-- grinding lines run on. This is the guarantee behind that.
+--
+-- Scoped to the two kinds because the presses share the `product` column and
+-- pool by product and pack rather than by shift; and to closed runs because a
+-- run in progress has not claimed its lot yet, and refusing the second start
+-- outright would pre-empt the merge that resolves it.
+create unique index if not exists runs_moulding_lot_key
+  on public.runs (product, shift_date, shift)
+  where kind in ('sleeve', 'loop') and ended_at is not null;
 
 -- The picking gang on a cracker run: how many hands were put on pulling scrap
 -- tyres out of the yard, and roughly how long they were at it. The two columns
@@ -415,6 +488,11 @@ alter table public.stock_groups add column if not exists kg_per_unit     numeric
 alter table public.stock_groups add column if not exists first_packed_on date;
 alter table public.stock_groups add column if not exists last_packed_on  date;
 
+-- The batch number the goods carry - see migrations/0007. Half the key on a
+-- `lot`, provenance on a `batch` group, and null on a pool or a press's product
+-- group, neither of which is batch-identified.
+alter table public.stock_groups add column if not exists batch_no        text;
+
 -- Who released the stock and when, and whether it came from the bench or from
 -- the back office overriding it. The lab's test row keeps its tester, but the
 -- stock group is what post_dispatch() reads, and a status set by hand through
@@ -439,7 +517,7 @@ alter table public.stock_groups alter column kg_per_unit set not null;
 
 alter table public.stock_groups drop constraint if exists stock_groups_kind_check;
 alter table public.stock_groups
-  add constraint stock_groups_kind_check check (kind in ('batch', 'pool', 'product'));
+  add constraint stock_groups_kind_check check (kind in ('batch', 'pool', 'product', 'lot'));
 
 do $$
 begin
@@ -472,6 +550,18 @@ alter table public.stock_groups add constraint stock_groups_qc_by_fkey
   foreign key (qc_by) references public.users (id);
 
 create index if not exists stock_groups_product_id_idx on public.stock_groups (product_id);
+create index if not exists stock_groups_batch_no_idx   on public.stock_groups (batch_no);
+
+-- One lot per product per shift - see migrations/0007.
+--
+-- A sleeve or loop batch number is the date and the shift alone, so the two
+-- benches working one shift carry the same number and must stay two rows, and
+-- two boxings of one product on one shift must stay one. The label
+-- `<product>-<batch>` is unique in its own right and says the same thing; this
+-- is the rule itself rather than a property of a derived string.
+create unique index if not exists stock_groups_lot_key
+  on public.stock_groups (product_id, batch_no)
+  where kind = 'lot' and product_id is not null and batch_no is not null;
 
 
 -- -----------------------------------------------------------------------------
@@ -613,6 +703,13 @@ end $$;
 
 create unique index if not exists products_code_key on public.products (code);
 
+-- What these two products are ordered under. It was the prefix a sleeve or loop
+-- batch number was built from until 0007; a lot is now named by its shift with
+-- the product beside it, so nothing depends on this to make or file one. Set
+-- only where it is null, because a code the back office has chosen is theirs.
+update public.products set code = 'SLEEVE' where id = 'SLEVE' and code is null;
+update public.products set code = 'LOOP'   where id = 'LOOP'  and code is null;
+
 alter table public.products drop constraint if exists products_machine_id_fkey;
 alter table public.products add constraint products_machine_id_fkey
   foreign key (machine_id) references public.machines (id);
@@ -643,6 +740,12 @@ update public.machines
                 else kind
               end
  where type is null;
+
+-- The sleeve and loop benches come off the shop-floor Machines page. The insert
+-- above only seeds a fresh database - `on conflict do nothing` leaves an existing
+-- row exactly as it is - so a plant already running gets it here. See
+-- migrations/0008 for why this is `enabled` and not a delete.
+update public.machines set enabled = false where id in ('SLEEVE', 'LOOP');
 
 
 -- -----------------------------------------------------------------------------
@@ -677,7 +780,11 @@ create or replace function public.record_packed_stock(
   p_pack_size     integer default null,
   p_kg_per_unit   numeric default null,
   p_packed_on     date    default null,
-  p_qc_by         text    default null
+  p_qc_by         text    default null,
+  -- The batch number the goods carry - see migrations/0007. Filled in on insert
+  -- and left alone on conflict: a group's key does not move because more was
+  -- packed into it.
+  p_batch_no      text    default null
 ) returns public.stock_groups
 language plpgsql
 security definer
@@ -692,7 +799,7 @@ begin
   insert into public.stock_groups (
     kind, label, quality, packed_sacks, period_start, period_end, qc_status,
     unit, product_id, pack_size, kg_per_unit, first_packed_on, last_packed_on,
-    qc_by, qc_at, qc_source
+    qc_by, qc_at, qc_source, batch_no
   )
   values (
     p_kind, p_label, p_quality, greatest(coalesce(p_delta, 0), 0),
@@ -700,16 +807,19 @@ begin
     v_unit, p_product_id, p_pack_size, v_kg, v_day, v_day,
     case when p_qc_status is null then null else p_qc_by end,
     case when p_qc_status is null then null else now() end,
-    case when p_qc_status is null then null else 'lab' end
+    case when p_qc_status is null then null else 'lab' end,
+    nullif(p_batch_no, '')
   )
   on conflict (label) do update
     set packed_sacks = stock_groups.packed_sacks + coalesce(p_delta, 0),
         quality      = coalesce(stock_groups.quality, excluded.quality),
         -- The identity of the group, filled in where it was never set. A row
-        -- created before 0005 has no product and no pack against it; packing
-        -- into it again is what supplies them.
+        -- created before 0005 has no product and no pack against it, and one
+        -- created before 0007 has no batch number; packing into it again is what
+        -- supplies them.
         product_id   = coalesce(stock_groups.product_id, excluded.product_id),
         pack_size    = coalesce(stock_groups.pack_size, excluded.pack_size),
+        batch_no     = coalesce(stock_groups.batch_no, excluded.batch_no),
         kg_per_unit  = case
                          when excluded.kg_per_unit > 0 then excluded.kg_per_unit
                          else stock_groups.kg_per_unit

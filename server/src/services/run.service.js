@@ -3,14 +3,37 @@ import { machineService } from './machine.service.js';
 import { productService } from './product.service.js';
 import { dispatchService } from './dispatch.service.js';
 import { stockService } from './stock.service.js';
+import { qualityService } from './quality.service.js';
 import { pickingHoursOf } from './crumb.service.js';
+import { rateService, labourRateAt } from './rate.service.js';
 import { absentSchema } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
-import { TABLES, SACK_KG, COARSE_GRADE, isCracker } from '../config/constants.js';
+import {
+  TABLES,
+  SACK_KG,
+  COARSE_GRADE,
+  MOULDING_KINDS,
+  isCracker,
+  isMoulding,
+} from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
+import {
+  mouldingBatchNo,
+  expectedPieces,
+  variancePct,
+  overVariance,
+} from '../utils/mouldingBatch.js';
 import { currentShift, todayISO } from '../utils/shift.js';
 
 const base = crud(TABLES.runs, { defaultSort: 'started_at' });
+
+/**
+ * The lab's table, for the one thing this file has to do with it: a run that is
+ * deleted takes the tests filed against it with it. They are listed from here
+ * and deleted through qualityService, which is what carries their verdicts off
+ * the stock groups as well - see clearTraces().
+ */
+const tests = crud(TABLES.qualityTests, { defaultSort: 'ts' });
 
 /**
  * The tablets never wrote a `status` column - a run is open while `ended_at`
@@ -71,15 +94,59 @@ function pressCost(row) {
   };
 }
 
+/**
+ * What a sleeve or loop run cost, and how its count compares with what the
+ * mould said it should have been.
+ *
+ * Two things a press run does not carry, and both are asked for by name.
+ *
+ * Labour first. A press is not costed on labour at all - it books no hours, so
+ * there is nothing to spread a crew over - but these activities are, and the
+ * plant wants that labour in the same chain everything else is in. So it is the
+ * crew on the activity, times how long the activity ran, at the rate that was in
+ * force on the day it was worked. The rate is the run's own snapshot, not a
+ * current lookup, which is what keeps a raise next month from re-pricing a month
+ * that is closed - the same rule the loading entries and the compound rate run
+ * on.
+ *
+ * Then the variance. `pieces_expected` was worked out and written when the run
+ * was logged; this only reports the gap, so the flag is evidence of what was
+ * counted rather than of what the product master says today. Null all the way
+ * through where the product has no cycle or no cavities against it: a variance
+ * against an unmeasured product is a number with nothing behind it.
+ */
+function mouldingFigures(row) {
+  const rate = row.labour_rate == null ? null : Number(row.labour_rate);
+  const workers = Number(row.workers ?? 0);
+  // Booked minutes rather than the clock: a run stopped and started again inside
+  // the shift is one record, and `runtime_min` is what the starts of it add up
+  // to. Falling back to the hours where a correction only touched those.
+  const minutes = Number(row.runtime_min ?? 0) || Number(row.hours_run ?? 0) * 60;
+  const hours = minutes > 0 ? round2(minutes / 60) : 0;
+  const crewHours = workers > 0 && hours > 0 ? round2(workers * hours) : 0;
+
+  const pct = variancePct(row.pieces, row.pieces_expected);
+  return {
+    ...pressCost(row),
+    labour_hours: crewHours || null,
+    labour_cost: rate != null && crewHours > 0 ? round2(rate * crewHours) : null,
+    pieces_variance_pct: pct,
+    /** Wide enough that somebody should look at it - see PIECES_VARIANCE_PCT. */
+    pieces_flagged: overVariance(pct),
+  };
+}
+
 export const decorate = (row) => {
   if (!row) return row;
   const open = !row.ended_at;
   return {
     ...row,
     sources: sourcesOf(row),
-    // Only the presses are costed on the run itself; every other line is costed
-    // by the batch or the shift, out of the views the back office reads.
+    // Only the presses and the two moulding activities are costed on the run
+    // itself; every other line is costed by the batch or the shift, out of the
+    // views the back office reads.
     ...(row.kind === 'press' ? pressCost(row) : {}),
+    ...(isMoulding(row.kind) ? mouldingFigures(row) : {}),
     status: open ? 'running' : 'done',
     stopped_at: row.ended_at ?? null,
     out_weight: row.weight_kg ?? null,
@@ -100,6 +167,10 @@ export const decorate = (row) => {
      * second.
      */
     packed_pieces: row.packed_pieces ?? null,
+    // What the cycle and the mould said this run should have made. Null on
+    // everything that is not moulded a lot at a time, and on a product the back
+    // office has not measured a cycle or a set of cavities into yet.
+    pieces_expected: row.pieces_expected ?? null,
     leftout_in: row.leftout_in ?? null,
     leftout_out: row.leftout_out ?? null,
     /*
@@ -168,8 +239,12 @@ function lineFor(kind) {
   if (kind === 'coarse') return 'coarse';
   if (kind === 'refiner' || kind === 'prerefiner') return 'special';
   // The presses are their own line: they mould finished goods out of reclaim
-  // rather than making it, so they belong to none of the three above.
+  // rather than making it, so they belong to none of the three above. Sleeve and
+  // loop are each their own for the same reason, and separately from one another
+  // - they are two activities the back office wants to read apart, which is the
+  // whole point of giving them their own cards.
   if (kind === 'press') return 'press';
+  if (isMoulding(kind)) return kind;
   return null;
 }
 
@@ -182,6 +257,14 @@ function lineFor(kind) {
  * time and the cavities, when a different mould is on - come off the sheet where
  * it said so and off the product otherwise. Temperature and the compound rate
  * are the product's alone; a tablet does not get to name either.
+ *
+ * `product` is the product's id and not its name, because it is a key rather
+ * than a caption: the yard files moulded stock under it, `stock_groups.
+ * product_id` is a foreign key to `products.id`, and the lab's verdict on what
+ * a press moulded is addressed by it. It used to hold the name, which read
+ * better on a card and matched nothing at all - productOf() found no product,
+ * so the pack and the piece weight were lost, and the stock group's product_id
+ * was a value the products table had never heard of.
  */
 async function pressFields(payload) {
   const id = String(payload.product ?? '').trim();
@@ -190,11 +273,89 @@ async function pressFields(payload) {
     throw ApiError.badRequest(`No product on the list is called ${id}`);
   });
   return {
-    product: product.name ?? product.id,
+    product: product.id,
     cure_temp_c: product.cure_temp_c ?? null,
     compound_rate: product.compound_rate ?? null,
     cyclic_min: payload.cyclicMin ?? product.cyclic_min ?? null,
     cavities: payload.cavities ?? product.cavities ?? null,
+  };
+}
+
+/**
+ * The rupees per labourer-hour in force on the day a run was worked.
+ *
+ * Snapshotted onto the run rather than looked up when the cost is read, for the
+ * reason every other rate in this project is: a raise entered next month prices
+ * next month, and a closed month stays closed. The dated history has the first
+ * word and the undated figure on the Rates tab is the fallback, which is exactly
+ * the order the crumb costing reads them in - see rate.service's labourRateAt().
+ *
+ * Zero rather than a throw when the plant has never entered either. A shift is
+ * not stopped because a settings field is empty; the run logs with no labour
+ * cost against it and the figure appears the moment a rate is set and the run is
+ * corrected. Same reasoning as a product with no compound rate.
+ */
+async function labourRateFor(shiftDate) {
+  try {
+    const [history, costs] = await Promise.all([
+      rateService.labourRates().catch(() => []),
+      rateService.costRates().catch(() => ({ data: {} })),
+    ]);
+    const { rate } = labourRateAt(shiftDate, history, costs?.data?.pickingLabourPerHour ?? 0);
+    return Number(rate) > 0 ? Number(rate) : null;
+  } catch (err) {
+    logger.warn(`Starting a run on ${shiftDate}: the labour rate was not read - ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * What a sleeve or loop run is set up with, and the number it will be recorded
+ * under.
+ *
+ * The product carries the same snapshot a press run takes off it - the cure, the
+ * mould, the compound rate - because the reasoning is identical: those are what
+ * the run was made at, and a master edited next month must not rewrite them.
+ * Cavities and a cycle time are only asked for where the item is moulded at all;
+ * a sleeve that is cut has neither, and a mould's worth of settings against it
+ * would be figures nobody set.
+ *
+ * The batch number is generated here and nowhere else. It is never taken from
+ * the request even though the tablet has already worked out and displayed the
+ * same string - a client that could name its own lot could file this shift's
+ * pieces into last week's, which is the same rule the coarse pool's label runs
+ * on. The two implementations agreeing is what the shared util is for; this one
+ * is the one of record.
+ *
+ * The number is the shift and only the shift, so it does not identify the lot on
+ * its own - `product` beside it is the other half, and the two are what the yard
+ * and the lab key on. That is why the product is refused below rather than
+ * defaulted: a run with no product against it has no lot for its pieces to go
+ * into, whatever number it carries.
+ */
+async function mouldingFields(payload, shiftDate, shift) {
+  const id = String(payload.product ?? '').trim();
+  if (!id) throw ApiError.badRequest('A sleeve or loop run has to say what it is making');
+  const product = await productService.findById(id).catch(() => {
+    throw ApiError.badRequest(`No product on the list is called ${id}`);
+  });
+
+  const moulded = product.moulded !== false;
+  const batchNo = mouldingBatchNo({ shiftDate, shift });
+  if (!batchNo) {
+    throw ApiError.badRequest(
+      'A batch number could not be generated - the run needs a date and a shift',
+    );
+  }
+
+  return {
+    batch_no: batchNo,
+    product: product.id,
+    cure_temp_c: product.cure_temp_c ?? null,
+    compound_rate: product.compound_rate ?? null,
+    cyclic_min: moulded ? payload.cyclicMin ?? product.cyclic_min ?? null : null,
+    cavities: moulded ? payload.cavities ?? product.cavities ?? null : null,
+    labour_rate: await labourRateFor(shiftDate),
   };
 }
 
@@ -216,6 +377,25 @@ const mergesByShift = (run) =>
   !run.autoclave_id &&
   !run.batch_no &&
   Boolean(run.shift_date && run.shift);
+
+/**
+ * The same rule for sleeve and loop, keyed on the lot rather than on the
+ * machine.
+ *
+ * A lot is the product, the shift date and the shift - the last two are its
+ * batch number and the first is the column beside it - so a second run of the
+ * same product in the same shift is more of the same lot however it was started.
+ * Stopping and starting for a mould change did not make two batches, and
+ * recording it as two would put two rows in the yard claiming the same key.
+ *
+ * Deliberately not keyed on the machine, which is where this differs from the
+ * coarse and grinding lines. Those merge per machine because the record is "what
+ * this machine did this shift"; here the record is the lot, and the lot does not
+ * become two because the crew moved benches. `passes` is what says how many
+ * start/stops it took.
+ */
+const mergesByLot = (run) =>
+  isMoulding(run.kind) && Boolean(run.product && run.shift_date && run.shift);
 
 /**
  * The picking figures a stop is filing, or nothing at all.
@@ -289,8 +469,34 @@ export function mergePatch(record, run, leg) {
     // Loads banked on either row are the same shift's output.
     weigh_entries: entries.length ? entries : null,
     needs_weigh: Boolean(record.needs_weigh || run.needs_weigh),
+    /*
+     * What a sleeve or loop lot made across all of its start/stops.
+     *
+     * Pieces and flash add for the same reason the weight does - both are output
+     * of the lot, however many times the bench was stopped. So does the expected
+     * count: each leg is measured against its own run time and its own mould, so
+     * adding them is what "what should this lot have made" means. A leg that
+     * could not be measured contributes nothing rather than dragging the total
+     * to null, which is what addNum() does.
+     *
+     * Null on every other line, where both are already null and stay so.
+     */
+    pieces: addNum(record.pieces, leg.pieces),
+    pieces_expected: addNum(record.pieces_expected, leg.pieces_expected),
+    flash_kg: addNum(record.flash_kg, leg.flash_kg),
     // Filled in from this leg only where the shift had nothing on record.
     formulation: record.formulation ?? run.formulation,
+    // A lot's own snapshots. The number and the rate belong to the lot as it was
+    // opened, so a leg logged later joins it rather than renaming or re-pricing
+    // it - a rate that changed mid-shift is not a thing, and a batch number that
+    // moved would leave stock filed under the old one.
+    batch_no: record.batch_no ?? run.batch_no,
+    product: record.product ?? run.product,
+    labour_rate: record.labour_rate ?? run.labour_rate,
+    cyclic_min: record.cyclic_min ?? run.cyclic_min,
+    cavities: record.cavities ?? run.cavities,
+    cure_temp_c: record.cure_temp_c ?? run.cure_temp_c,
+    compound_rate: record.compound_rate ?? run.compound_rate,
     tyre_type: record.tyre_type ?? run.tyre_type,
     mesh: record.mesh ?? run.mesh,
     supervisor: record.supervisor ?? run.supervisor,
@@ -375,6 +581,23 @@ async function latestShiftWithRuns() {
  * the shift opened on, which is the one that has to survive the merge.
  */
 async function shiftRecordFor(run) {
+  if (mergesByLot(run)) {
+    // The lot this product already has for the shift, on whichever machine
+    // opened it. Postgres holds the same rule from below - see the partial
+    // unique index runs_moulding_lot_key in migrations/0006 - so a race between
+    // two tablets is refused rather than filed as a duplicate lot.
+    return base.findOne(
+      {
+        kind: MOULDING_KINDS,
+        product: run.product,
+        shift_date: run.shift_date,
+        shift: run.shift,
+        ended_at: op.notNull(),
+        id: op.neq(run.id),
+      },
+      { sort: 'started_at', ascending: true },
+    );
+  }
   if (!mergesByShift(run)) return null;
   return base.findOne(
     {
@@ -387,6 +610,133 @@ async function shiftRecordFor(run) {
     },
     { sort: 'started_at', ascending: true },
   );
+}
+
+/**
+ * The packed output of a run, taken back out of the yard.
+ *
+ * The keying is the one the packing bench used, because it has to be: a press
+ * files pieces against its product and pack, a coarse run pools by period, and
+ * anything else goes to its batch and grade - see stockService.targetOf().
+ *
+ * One thing is a best guess and worth naming. A pool is keyed on the day the
+ * sacks were *filed*, and the run does not record which day the Packing tab was
+ * used - only the shift it was made on. Bagging is same-day or next-morning
+ * work, so the shift date lands in the right ten-day pool nearly always, and
+ * when it does not the reversal finds nothing rather than taking sacks out of
+ * the wrong period. Nothing is what the caller is then told; see clearTraces().
+ */
+async function unfileStock(run) {
+  // Both benches that count in pieces. Which group they came out of differs -
+  // a press pools by product and pack, a sleeve or loop shift is its own lot -
+  // and targetOf() is what knows, from the same `kind` that filed them.
+  const boxed = run.kind === 'press' || isMoulding(run.kind);
+  const qty = boxed ? Number(run.packed_pieces || 0) : Number(run.packed_sacks || 0);
+  if (qty <= 0) return null;
+
+  if (boxed) {
+    const product = await runService.productOf(run).catch(() => null);
+    const productId = product?.id ?? run.product ?? null;
+    return stockService.reversePacking({
+      kind: isMoulding(run.kind) ? 'lot' : 'product',
+      productId,
+      packSize: product?.pack_size ?? null,
+      quality: productId,
+      batchNo: run.batch_no,
+      qty,
+      packedOn: run.shift_date ?? todayISO(),
+    });
+  }
+
+  return stockService.reversePacking({
+    quality: run.quality ?? (run.line === 'coarse' ? COARSE_GRADE : null),
+    batchNo: run.batch_no,
+    qty,
+    packedOn: run.shift_date ?? todayISO(),
+  });
+}
+
+/** The lab's tests filed against this run, on a project that records the tie. */
+async function testsOf(runId) {
+  if ((absentSchema()[TABLES.qualityTests] ?? []).includes('run_id')) return [];
+  return tests.all({ run_id: runId }).catch(() => []);
+}
+
+/**
+ * Everything a run put outside its own row, taken back before the row goes.
+ *
+ * A run is not only a row in `runs`. Packing it filed sacks into a stock group,
+ * the bench may have tested the machine against it, and a lorry may already
+ * have carried the result out of the gate. Deleting the row alone left all
+ * three behind - stock in the yard belonging to a run that no longer exists,
+ * lab tests pointing at nothing, and no way to notice either from any screen.
+ *
+ * The order is the point:
+ *
+ *   1. refuse if the output has been dispatched. The ledger says those sacks
+ *      left, and nothing here may make that untrue. A dispatch is corrected by
+ *      a reversal document, which is the same rule dispatch.routes runs on.
+ *   2. take the packing back out of the yard - this can also refuse, and it
+ *      does so before anything at all has been deleted.
+ *   3. delete the lab's tests, through qualityService so the verdicts they were
+ *      carrying come off the stock groups with them.
+ *
+ * So either the whole thing goes or none of it does, short of a failure between
+ * the steps. There is no transaction across PostgREST calls to have; what there
+ * is instead is an order in which a partial failure leaves the record readable,
+ * and this is it - stock is corrected before its run disappears, never after.
+ */
+async function clearTraces(run) {
+  const id = run.id;
+
+  let sold = 0;
+  try {
+    sold = Number((await dispatchService.sacksByRun([id]))[id] ?? 0);
+  } catch (err) {
+    // A project with no `run_id` on dispatches cannot answer this. The delete
+    // is not blocked on a question the schema cannot be asked - the reversal
+    // below still refuses to push a group below what has gone out of it.
+    logger.warn(`Deleting run ${id}: the dispatches were not checked - ${err.message}`);
+  }
+  if (sold > 0) {
+    throw ApiError.conflict(
+      `${sold} of this run's packed output has already been dispatched - reverse that dispatch before deleting the run`,
+    );
+  }
+
+  const boxed = run.kind === 'press' || isMoulding(run.kind);
+  const packed = boxed ? Number(run.packed_pieces || 0) : Number(run.packed_sacks || 0);
+  const stock = await unfileStock(run);
+
+  const filed = await testsOf(id);
+  for (const test of filed) await qualityService.remove(test.id);
+
+  return {
+    /**
+     * What came back out of the yard, and out of which group. `removed` is the
+     * group emptying completely and going with it - the run was the only thing
+     * that ever put anything in it, so there is no yard row left to explain.
+     */
+    stock_cleared: stock
+      ? {
+          id: stock.id,
+          label: stock.display_label ?? stock.label,
+          taken: packed,
+          left: stock.removed ? 0 : stock.available_sacks,
+          removed: Boolean(stock.removed),
+        }
+      : null,
+    /*
+     * Packed output that no group could be found for. Not an error and not
+     * silence either: the sacks are unaccounted for in the yard and somebody
+     * has to be told which, because no screen would ever show it.
+     */
+    stock_note:
+      packed > 0 && !stock
+        ? `${packed} packed ${boxed ? 'pieces' : 'sacks'} could not be traced to a stock group - check the yard for ${run.batch_no ?? 'this period'}`
+        : null,
+    quality_tests_deleted: filed.length,
+  };
 }
 
 export const runService = {
@@ -510,7 +860,10 @@ export const runService = {
      */
     const pressed = await base.list(
       { order: 'desc', sort: 'ended_at', limit: 200, ...query },
-      { kind: 'press', pieces: op.gt(0) },
+      // And the sleeve and loop benches, which owe the yard a count of pieces on
+      // exactly the same terms - the only difference is which group the pieces
+      // are filed into, and that is settled at the door in packPieces().
+      { kind: ['press', ...MOULDING_KINDS], pieces: op.gt(0) },
     );
     const presses = pressed.rows
       .map((row) => ({ ...decorate(row), needs_pack: true }))
@@ -606,13 +959,22 @@ export const runService = {
     const nonProduction = payload.nonProduction === true;
     const isAutoclave = machine.kind === 'autoclave';
     const isPress = machine.kind === 'press';
+    const moulding = isMoulding(machine.kind);
     const startedAt = payload.startedAt || new Date().toISOString();
-    // A press is set up for a product, and moulds against a batch number of its
-    // own; the curing settings come off that product rather than off the sheet.
+    const shiftDate = payload.shiftDate || todayISO();
+    const shift = payload.shift || currentShift();
+    // A press is set up for a product, and the curing settings come off that
+    // product rather than off the sheet. It carries no batch number of its own:
+    // what it moulded is named by the product, and the compound it moulded it
+    // out of is not tracked back to a batch on the press floor.
     const press = isPress ? await pressFields(payload) : null;
-    if (isPress && !String(payload.batchNo ?? payload.batchId ?? '').trim()) {
-      throw ApiError.badRequest('A press run has to say which batch it is moulding');
-    }
+    /*
+     * Sleeve and loop take the same snapshot and one thing more: the batch
+     * number, generated from the shift date and the shift. Nobody types it and
+     * nothing in the request can name it - see mouldingFields(). The product
+     * beside it is what makes the pair a lot.
+     */
+    const mould = moulding ? await mouldingFields(payload, shiftDate, shift) : null;
 
     const row = await base.create({
       machine_id: payload.machineId,
@@ -625,8 +987,8 @@ export const runService = {
       mesh: payload.mesh ?? null,
       quality: payload.quality || null,
       capacity: machine.capacity ?? null,
-      shift_date: payload.shiftDate || todayISO(),
-      shift: payload.shift || currentShift(),
+      shift_date: shiftDate,
+      shift: shift,
       supervisor: payload.supervisor ?? null,
       workers: payload.workers ?? null,
       // An autoclave run belongs to the vessel it was charged in, and says
@@ -647,12 +1009,20 @@ export const runService = {
       ...sourceColumns(payload.sources),
       // A press run: the product it is set up for and what it is moulded at.
       ...(press ?? {}),
+      // A sleeve or loop run: the same, plus the batch number it will be
+      // recorded under and the labour rate of the day. Spread after `batch_no`
+      // above on purpose - the generated number is the only one a lot may carry,
+      // and a request that sent one of its own is overwritten rather than
+      // honoured.
+      ...(mould ?? {}),
       ended_at: null,
       weight_kg: null,
       non_production: nonProduction,
-      // A press weighs its own output at the machine and enters it at stop, so
-      // it never reaches the Weigh tab however its machine row is flagged.
-      needs_weigh: !nonProduction && !isPress && Boolean(machine.out_weight || machine.weigh),
+      // A press weighs its own output at the machine and enters it at stop, and
+      // so do sleeve and loop - neither ever reaches the Weigh tab however its
+      // machine row is flagged.
+      needs_weigh:
+        !nonProduction && !isPress && !moulding && Boolean(machine.out_weight || machine.weigh),
     });
     return decorate(row);
   },
@@ -683,9 +1053,24 @@ export const runService = {
     // how long it ran is there to be seen; it is simply not booked as run time
     // that the plant's own hours are added up from.
     const isPressRun = run.kind === 'press';
-    const hoursRun = isPressRun
+    /*
+     * Sleeve and loop book no run hours either, for the same reasons a press
+     * does not: no hour meter, and none of the figures a plant machine's hours
+     * are read for. What they do keep, and a press does not, is the run time in
+     * minutes - the cycle and the mould are measured against it, so how long the
+     * bench actually ran is the input to the expected count rather than a number
+     * only shown on a card.
+     */
+    const isMouldingRun = isMoulding(run.kind);
+    const hoursRun = isPressRun || isMouldingRun
       ? run.hours_run ?? null
       : recordedHours ?? run.hours_run ?? (clockMin != null ? +(clockMin / 60).toFixed(2) : null);
+
+    const runtimeMin = isPressRun
+      ? run.runtime_min ?? null
+      : recordedHours != null
+        ? Math.round(recordedHours * 60)
+        : run.runtime_min ?? clockMin;
 
     // This start/stop on its own, before anything is decided about where it
     // gets filed.
@@ -693,11 +1078,7 @@ export const runService = {
       ended_at: ended,
       // See start(): an autoclave keeps its own discharge time alongside.
       unloaded_at: run.kind === 'autoclave' ? ended : run.unloaded_at,
-      runtime_min: isPressRun
-        ? run.runtime_min ?? null
-        : recordedHours != null
-          ? Math.round(recordedHours * 60)
-          : run.runtime_min ?? clockMin,
+      runtime_min: runtimeMin,
       hours_run: hoursRun,
       elec_end: payload.elecEnd ?? run.elec_end,
       hour_end: payload.hourEnd ?? run.hour_end,
@@ -710,6 +1091,27 @@ export const runService = {
       // Both are charged as material - see pressCost().
       pieces: payload.pieces ?? run.pieces,
       flash_kg: payload.flashKg ?? run.flash_kg,
+      /*
+       * And on a sleeve or loop leg, what the cycle and the mould said this
+       * length of run should have made.
+       *
+       * Written now rather than derived on read, because the three figures it
+       * comes from are all correctable afterwards and a variance that quietly
+       * re-computed itself would stop being a record of anything. What the crew
+       * counted and what the mould predicted are two independent statements, and
+       * the point of keeping both is that they can disagree.
+       *
+       * Null where the product has no cycle or no cavities against it, and on an
+       * item that is not moulded at all - nothing was predicted, so nothing is
+       * flagged. See expectedPieces().
+       */
+      pieces_expected: isMouldingRun
+        ? expectedPieces({
+            runtimeMin,
+            cyclicMin: run.cyclic_min,
+            cavities: run.cavities,
+          })
+        : run.pieces_expected,
       // The picking gang that fed the cracker this shift. Only the cracker is
       // asked, and only the cracker is believed: picking is what feeds it, and
       // a figure arriving against a grinder is a sheet sent by something that
@@ -763,6 +1165,53 @@ export const runService = {
       if (payload[field] !== undefined) patch[column] = payload[field];
     }
 
+    /*
+     * A sleeve or loop lot's number is not a field.
+     *
+     * It is the shift date and the shift, so correcting either moves the lot and
+     * the number has to follow - a run that said it made loops on the 3rd and
+     * actually made them on the 4th belongs to the 4th's lot, and leaving
+     * `03/Aug/26-day` on it would file the next boxing into a shift that never
+     * happened. A number typed by hand is dropped for the same reason it cannot
+     * be sent at start.
+     *
+     * The product moves the lot too, and does not appear in the number. That is
+     * exactly why the check below is on all three fields rather than on the two
+     * the number is built from: the lot is the product and the number together,
+     * so re-pointing a run from sleeve to loop moves its output to a different
+     * group while the string on the row stays word for word the same. A guard
+     * that watched the number would see nothing happen.
+     *
+     * Not once the pieces are in the yard, though. Boxed stock is standing under
+     * the old key, and moving the run out from under it is the one shape of
+     * error this project keeps refusing: invisible from both ends, with a group
+     * in the yard belonging to a lot that no longer exists. Delete the run - which
+     * takes its stock back out through clearTraces() - and record it again.
+     */
+    if (isMoulding(run.kind)) {
+      delete patch.batch_no;
+      const moves =
+        payload.product !== undefined ||
+        payload.shiftDate !== undefined ||
+        payload.shift !== undefined;
+      if (moves) {
+        if (Number(run.packed_pieces || 0) > 0) {
+          throw ApiError.conflict(
+            `${run.packed_pieces} of this lot's pieces are already boxed into ${run.product} ${run.batch_no} - delete the run and record it again, rather than moving it under the stock`,
+          );
+        }
+        const after = { ...run, ...patch };
+        if (!String(after.product ?? '').trim()) {
+          throw ApiError.badRequest('That leaves the lot with no product - it is half of what names it');
+        }
+        const batchNo = mouldingBatchNo({ shiftDate: after.shift_date, shift: after.shift });
+        if (!batchNo) {
+          throw ApiError.badRequest('That leaves no batch number - a lot needs a date and a shift');
+        }
+        patch.batch_no = batchNo;
+      }
+    }
+
     // Worked out against the run as it will read once this patch lands, not as
     // it reads now - an edit that moves only the start reading still has to
     // re-derive against the end that is already on the row.
@@ -802,8 +1251,11 @@ export const runService = {
   async cancel(id) {
     const run = await base.findById(id);
     if (run.ended_at) throw ApiError.conflict('That run is already logged - it cannot be cancelled');
+    // An open run has packed nothing, but the bench may already have sampled the
+    // machine against it - see clearTraces().
+    const cleared = await clearTraces(run);
     await base.remove(id);
-    return { id, machine_id: run.machine_id, machine: run.machine ?? null };
+    return { id, machine_id: run.machine_id, machine: run.machine ?? null, ...cleared };
   },
 
   /**
@@ -815,9 +1267,15 @@ export const runService = {
    * figures are all added up from these rows, so it is the back office's call
    * (see run.routes) and what the row was carrying comes back to the caller so
    * the screen can say what was removed.
+   *
+   * The row is not the whole of the run. What it packed is standing in the yard
+   * and what the bench tested is on the lab's table, and both are cleared with
+   * it - see clearTraces(), which is also what refuses the delete outright when
+   * the output has already been sold.
    */
   async discard(id) {
     const run = await base.findById(id);
+    const cleared = await clearTraces(run);
     await base.remove(id);
     return {
       id,
@@ -827,6 +1285,7 @@ export const runService = {
       shift: run.shift ?? null,
       batch_no: run.batch_no ?? null,
       weight_kg: run.weight_kg ?? null,
+      ...cleared,
     };
   },
 
@@ -866,14 +1325,16 @@ export const runService = {
    */
   async pack(id, body = {}) {
     const run = await base.findById(id);
-    if (run.kind === 'press') {
+    if (run.kind === 'press' || isMoulding(run.kind)) {
       if (body.sacks != null) {
-        throw ApiError.badRequest('A press run is boxed by the piece, not bagged in sacks');
+        throw ApiError.badRequest(
+          `A ${run.kind === 'press' ? 'press' : run.kind} run is boxed by the piece, not bagged in sacks`,
+        );
       }
       return runService.packPieces(run, body);
     }
     if (body.pieces != null) {
-      throw ApiError.badRequest('Only a press run is boxed by the piece');
+      throw ApiError.badRequest('Only a press, sleeve or loop run is boxed by the piece');
     }
     return runService.packSacks(run, body);
   },
@@ -985,29 +1446,78 @@ export const runService = {
      * group is a derived ledger that boxing again will put right, so it is
      * logged rather than raised at somebody standing at the bench.
      */
+    /*
+     * Whether the boxing actually reached the yard.
+     *
+     * The filing below is deliberately not allowed to fail the request - the
+     * run is already saved and the group is a derived ledger that boxing again
+     * puts right - but "not raised at the crew" was being read as "not told to
+     * the crew at all", and the two are not the same thing. A project without
+     * migration 0005 has no way to hold moulded stock: the boxed count is
+     * dropped on the way in and the group cannot be created, and the bench got
+     * a toast saying the pieces were filed and awaiting the lab. This carries
+     * the truth back so the screen can say which of the two happened.
+     */
+    let stockNote = null;
+    if (saved.packed_pieces == null && boxed > 0) {
+      stockNote =
+        'This project cannot record boxed pieces yet - run supabase/schema.sql, then box again.';
+    }
+
     const delta = boxed - before;
     if (delta) {
       try {
         const product = await runService.productOf(run);
+        /*
+         * Keyed on the product's id, which is what `stock_groups.product_id`
+         * references and what a verdict on moulded goods is addressed by. The
+         * column is the fallback rather than the source: a run written while it
+         * held the product's name would otherwise file stock against a value the
+         * products table has never heard of, and the foreign key would refuse
+         * the whole group.
+         */
+        const productId = product?.id ?? run.product ?? null;
         await stockService.recordPacking({
-          kind: 'product',
-          productId: run.product ?? null,
+          /*
+           * Which yard the pieces go into, and it is the run that decides.
+           *
+           * A press pools by the product and the pack it is boxed in, so every
+           * pack of loops it has ever moulded is one row and one verdict. Sleeve
+           * and loop are made a shift at a time under a batch number of their
+           * own and answered for a shift at a time, so each is its own lot -
+           * keyed on the product and that number together, and a second shift's
+           * boxing opens a second row rather than joining this one.
+           *
+           * Both halves, which is what keeps the two benches apart. The number is
+           * the date and the shift, so a sleeve shift and a loop shift worked
+           * side by side carry the same one; keyed on it alone they would box
+           * into each other's row.
+           *
+           * Boxing the same lot again is what appends to it, and that is the
+           * `delta` above doing its work: the group is keyed on the pair, so two
+           * starts inside one shift - which are one run by the time they get
+           * here - and a correction next morning all land in the same row.
+           */
+          kind: isMoulding(run.kind) ? 'lot' : 'product',
+          productId,
           packSize: product?.pack_size ?? null,
           kgPerUnit: product?.piece_kg ?? null,
-          // The batch of compound the press was moulding, which is what the lab
-          // files its verdict against - so a run boxed after the bench has
-          // already answered opens on that answer rather than on `pending`.
+          // On a press: null on anything moulded since it stopped naming a batch,
+          // so the group opens `pending` for the bench to answer. On a lot it is
+          // the generated number, and it is the key rather than provenance.
           batchNo: run.batch_no,
-          quality: run.product ?? null,
+          quality: productId,
           delta,
           packedOn: run.shift_date ?? todayISO(),
         });
       } catch (err) {
         logger.warn(`Boxing run ${id}: the stock group was not updated - ${err.message}`);
+        stockNote ??= `The pieces are on the run but did not reach the yard - ${err.message}`;
       }
     }
 
-    return decorate(saved);
+    // The run either way; `stock_filed` is what the bench is told.
+    return { ...decorate(saved), stock_filed: !stockNote, stock_note: stockNote };
   },
 
   /**
@@ -1022,14 +1532,25 @@ export const runService = {
    * A product that has since been deleted, or a project with no products table,
    * answers null - and the pieces are then filed as loose. Stock in the yard is
    * not contingent on a settings row still being there.
+   *
+   * Looked up by id, then by name. The name is only for the runs written while
+   * pressFields() stored one - they are on the table, they have pieces on them
+   * nobody has boxed yet, and read as an id they would find nothing and box
+   * loose under a label the products table does not know. New runs never take
+   * the second branch.
    */
   async productOf(run) {
-    const id = String(run?.product ?? '').trim();
-    if (!id) return null;
+    const key = String(run?.product ?? '').trim();
+    if (!key) return null;
     try {
-      return await productService.findById(id);
+      return await productService.findById(key);
     } catch {
-      return null;
+      // Not an id. A row written before the column held one names the product.
+      try {
+        return (await productService.findOne({ name: key })) ?? null;
+      } catch {
+        return null;
+      }
     }
   },
 

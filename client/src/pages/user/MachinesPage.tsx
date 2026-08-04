@@ -55,11 +55,29 @@ import {
   autoclaveWorkers,
   defaultWorkers,
   isCracker,
+  isMoulding,
   opensBatch,
+  PIECES_VARIANCE_PCT,
   type AutoclaveForm,
   type TyreType,
 } from '@/config/constants';
-import { atLocal, clock24, currentShift, dayMonth, shiftForTime, todayISO } from '@/utils/date';
+import {
+  expectedPieces,
+  minutesBetween,
+  mouldingBatchNo,
+  overVariance,
+  variancePct,
+} from '@/utils/mouldingBatch';
+import {
+  atLocal,
+  clock24,
+  currentShift,
+  dayMonth,
+  monthLetter,
+  monthShort,
+  shiftForTime,
+  todayISO,
+} from '@/utils/date';
 import { ago, elapsed } from '@/utils/format';
 import type { BearingDue, MaintenanceLog, Machine, Product, Quality, Run, Shift } from '@/types/models';
 
@@ -117,12 +135,13 @@ const lineIsShiftwise = (line?: string | null) => line === 'grind' || line === '
 const isPress = (kind?: string | null) => kind === 'press';
 
 /**
- * Every machine but the autoclaves and the presses is metered, so its sheets ask
- * for the two readings either side of the run. The autoclaves burn firewood and
- * are timed by their load; a press records neither energy nor hours at all.
+ * Every machine but the autoclaves, the presses and the two moulding activities
+ * is metered, so its sheets ask for the two readings either side of the run. The
+ * autoclaves burn firewood and are timed by their load; a press, a sleeve bench
+ * and a loop bench record neither energy nor hours at all.
  */
 const hasMeters = (kind?: string | null) =>
-  Boolean(kind) && kind !== 'autoclave' && kind !== 'press';
+  Boolean(kind) && kind !== 'autoclave' && kind !== 'press' && !isMoulding(kind);
 
 /** A figure the plant has not measured into the system yet reads as such. */
 const orNotSet = (value: number | null | undefined, unit: string) =>
@@ -161,6 +180,18 @@ const blankPress = { product: '', cyclicMin: '', cavities: '' };
 
 /** The press stop sheet: what came out of the mould, and the flash trimmed off. */
 const blankPressStop = { pieces: '', flash: '' };
+
+/**
+ * The sleeve and loop stop sheet, on top of the press's pieces and flash: a note
+ * about the shift.
+ *
+ * These are the only run sheets that ask for one. Everything else the plant
+ * records is a reading or a count with a rule behind it, and a free-text box on
+ * those would fill up with things that belong in a field - but a lot of sleeves
+ * is answered for as a lot by the lab, and "second mould was short all shift" is
+ * exactly what somebody needs a week later and has nowhere else to put.
+ */
+const blankMouldStop = { remarks: '' };
 
 /**
  * The picking half of the cracker's stop sheet: how many hands were put on
@@ -233,11 +264,15 @@ export function MachinesPage() {
   /** Press only: what it is moulding, and what it is set up to mould it at. */
   const [press, setPress] = useState(blankPress);
   const [pressStop, setPressStop] = useState(blankPressStop);
+  /** Sleeve and loop only: the note the crew leaves against the lot. */
+  const [mouldStop, setMouldStop] = useState(blankMouldStop);
   /** Cracker only: the yard gang that picked the scrap tyres it was fed. */
   const [picking, setPicking] = useState(blankPicking);
   const [downTime, setDownTime] = useState('');
   const [repair, setRepair] = useState(blankRepair);
   const [temps, setTemps] = useState<Record<string, string>>({});
+  /** When the temperatures were read off the machine. Blank means just now. */
+  const [tempTime, setTempTime] = useState('');
   /** The load being added to a running machine's tally, in kg. */
   const [tallyAdd, setTallyAdd] = useState('');
 
@@ -264,7 +299,6 @@ export function MachinesPage() {
     return map;
   }, [shiftRuns]);
 
-  const dueNow = due.filter((d) => d.due);
   const closeSheet = () => setSheet(null);
 
   // The run this machine last finished, for the "last end" note beside each
@@ -299,18 +333,38 @@ export function MachinesPage() {
     [startSpecial, batchNo, refinableBatches],
   );
 
-  // ---- the press being set up ----
+  // ---- the press, sleeve bench or loop bench being set up ----
   const startIsPress = isPress(startMachine?.kind);
-  /** The product this run is being moulded to, once one is picked. */
-  const pressProduct: Product | undefined = startIsPress
+  /**
+   * A sleeve or loop activity. It is set up exactly as a press is - a product,
+   * and the two settings the floor may change for one run - and differs in what
+   * it is recorded as: a lot, under a batch number generated from the date and
+   * the shift, which nobody types. The product is recorded beside that number
+   * rather than inside it, and the two together are what identify the lot.
+   */
+  const startIsMoulding = isMoulding(startMachine?.kind);
+  const startPicksProduct = startIsPress || startIsMoulding;
+  /** The product this run is being made to, once one is picked. */
+  const pressProduct: Product | undefined = startPicksProduct
     ? products.find((p) => p.id === press.product)
     : undefined;
+  /** Cavities and a cycle time are facts about a mould - see Product.moulded. */
+  const productIsMoulded = pressProduct ? pressProduct.moulded !== false : true;
   /**
-   * A press cannot be started with nothing to mould. The list has to have been
-   * read first: a connection that dropped is not an empty product list, and
-   * telling the crew to go and add one would send them after the wrong problem.
+   * The number this run will be filed under, shown before it starts so the crew
+   * can see what it is about to be recorded as. The server generates its own and
+   * never takes this one - see utils/mouldingBatch.
    */
-  const startNoProducts = startIsPress && productsLoaded && products.length === 0;
+  const startBatchNo = startIsMoulding
+    ? mouldingBatchNo({ shiftDate: startDate, shift: startShift })
+    : '';
+  /**
+   * Neither a press nor a sleeve bench can be started with nothing to make. The
+   * list has to have been read first: a connection that dropped is not an empty
+   * product list, and telling the crew to go and add one would send them after
+   * the wrong problem.
+   */
+  const startNoProducts = startPicksProduct && productsLoaded && products.length === 0;
 
   // ---- the autoclave being charged ----
   const startIsAutoclave = startMachine?.kind === 'autoclave';
@@ -326,8 +380,33 @@ export function MachinesPage() {
    * worked through in grades, so both are counted by their runs alone.
    */
   const loadOpensBatch = opensBatch(form);
+  /**
+   * The month letter a coarse number carries - see monthLetter(). Off the day
+   * the charge went in, which is the day it belongs to; the shift date stands in
+   * where the crew has not given the load its own, and today's where neither has
+   * been picked yet.
+   */
+  const loadLetter = loadIsCoarse
+    ? monthLetter(load.loadDate || load.shiftDate || todayISO())
+    : '';
   /** The loading time decides the shift, not the clock the sheet was opened at. */
   const loadShift = shiftForTime(load.loadTime);
+
+  /**
+   * Starts a coarse number off with its month letter, so the crew types the
+   * running number alone and cannot open one under last month's letter on the
+   * 1st - the day it is easiest to get wrong and hardest to notice.
+   *
+   * Only over an empty field or a bare prefix, which is what keeps it from
+   * fighting the crew: once there is a number after the letter the field is
+   * theirs, and a coarse charge back-dated into another month is left exactly as
+   * typed rather than being renumbered under them. The prefix itself does follow
+   * the date, because until a number is against it there is nothing to lose.
+   */
+  useEffect(() => {
+    if (!loadLetter) return;
+    setBatchNo((current) => (/^[A-La-l]?-?$/.test(current) ? `${loadLetter}-` : current));
+  }, [loadLetter]);
 
   // ---- the run being stopped, and what its sheet has to ask for ----
   const stopping = sheet?.kind === 'stop' ? sheet.run : undefined;
@@ -338,6 +417,10 @@ export function MachinesPage() {
   const stopIsAutoclave = Boolean(stopping) && stopKind === 'autoclave';
   /** A press is stopped on what came out of the mould: pieces, weight, flash. */
   const stopIsPress = Boolean(stopping) && isPress(stopKind);
+  /** A sleeve or loop lot, stopped on the same figures plus what was expected. */
+  const stopIsMoulding = Boolean(stopping) && isMoulding(stopKind);
+  /** Both benches that are logged on a count rather than on a scale reading. */
+  const stopCountsPieces = stopIsPress || stopIsMoulding;
   // The line the run was started on has the last word: a coarse-line machine
   // put on the special line for a batch is not a shiftwise run.
   const stopShiftwise = stopping?.line ? lineIsShiftwise(stopping.line) : isShiftwise(stopKind);
@@ -412,7 +495,9 @@ export function MachinesPage() {
     stopIssues.push(
       stopIsPress
         ? 'Weight: must be greater than zero — weigh what came off the press.'
-        : 'Output weight: must be greater than zero (leave it blank to weigh later).',
+        : stopIsMoulding
+          ? 'Weight: must be greater than zero — weigh what came off the bench.'
+          : 'Output weight: must be greater than zero (leave it blank to weigh later).',
     );
   }
 
@@ -441,7 +526,7 @@ export function MachinesPage() {
   // ---- what came off a press, and what the compound in it cost ----
   const piecesValue = asNumber(pressStop.pieces);
   const flashValue = asNumber(pressStop.flash);
-  if (stopIsPress) {
+  if (stopCountsPieces) {
     if (piecesValue != null && (piecesValue <= 0 || !Number.isInteger(piecesValue))) {
       stopIssues.push('How many: a whole number of pieces, above zero.');
     }
@@ -449,6 +534,31 @@ export function MachinesPage() {
       stopIssues.push('Flash: cannot be less than nothing.');
     }
   }
+
+  /*
+   * ---- what a sleeve or loop lot was expected to make ----
+   *
+   * Worked out from how long the bench has been running, the cycle it was set up
+   * at and the mould on it, so the crew sees the figure they are about to be
+   * measured against before they commit the count rather than after.
+   *
+   * It is shown and never enforced. The count off the bench is the figure of
+   * record - a mould that ran short made what it made - so a wide gap is a
+   * warning and not a refusal. The server works the same figure out again from
+   * the booked run time and stores it beside the count; this one is the live
+   * reading while the sheet is open, which is why the two can differ by a
+   * minute's worth and neither is wrong.
+   */
+  const mouldRunMin = stopIsMoulding ? minutesBetween(stopping?.started_at) : null;
+  const mouldExpected = stopIsMoulding
+    ? expectedPieces({
+        runtimeMin: mouldRunMin,
+        cyclicMin: stopping?.cyclic_min,
+        cavities: stopping?.cavities,
+      })
+    : null;
+  const mouldVariance = variancePct(piecesValue, mouldExpected);
+  const mouldFlagged = overVariance(mouldVariance);
   /**
    * Material is charged on the weight plus the flash - that compound was spent
    * either way - at the rate the run was started under, and cost per piece
@@ -577,20 +687,30 @@ export function MachinesPage() {
     if (machine.kind === 'autoclave') return confirmLoad();
     const metered = hasMeters(machine.kind);
     const pressRun = isPress(machine.kind);
+    const mouldRun = isMoulding(machine.kind);
+    /** A press, a sleeve bench or a loop bench - all set up the same way. */
+    const productRun = pressRun || mouldRun;
 
-    // A press has no meters, but it is still started for a named shift: it asks
-    // for the date and the shift the same way a metered machine does.
-    if (pressRun) {
+    // None of the three has meters, but each is still started for a named shift:
+    // they ask for the date and the shift the same way a metered machine does.
+    // On a sleeve or loop run those two are not only context - together with the
+    // product they *are* the batch number, which is why the sheet shows it.
+    if (productRun) {
       if (!startDate) {
         notify('Pick a date', 'warn');
         return;
       }
       if (!press.product) {
-        notify('Pick what it is moulding', 'warn');
+        notify(mouldRun ? 'Pick what it is making' : 'Pick what it is moulding', 'warn');
         return;
       }
-      if (!batchNo.trim()) {
-        notify('Enter the batch number', 'warn');
+      // The number the run will be filed under has to exist before it starts.
+      // It cannot be typed and it cannot be corrected afterwards without moving
+      // the lot, so a sheet that cannot form one is stopped here rather than at
+      // the server. It takes the date and the shift and nothing else, so this
+      // can only be a date the picker has not accepted.
+      if (mouldRun && !startBatchNo) {
+        notify('No batch number can be made — check the date and the shift', 'warn');
         return;
       }
       const cavities = asNumber(press.cavities);
@@ -656,20 +776,25 @@ export function MachinesPage() {
           // on the batch's own grade, but the crew has the last word.
           quality: machine.needs_quality || special ? quality : null,
           // A shiftwise machine runs whatever the line feeds it, so it carries
-          // no batch of its own.
-          batchNo: shiftwise ? null : batchNo.trim() || null,
-          formulation: shiftwise ? null : picked?.formulation ?? null,
+          // no batch of its own - and neither does a press, which is named by
+          // the product it is moulding rather than by a batch of compound. A
+          // sleeve or loop run does carry one, and deliberately does not send
+          // it: the server generates the number from the product, the date and
+          // the shift, so a tablet cannot name the lot its pieces land in.
+          batchNo: shiftwise || productRun ? null : batchNo.trim() || null,
+          formulation: shiftwise || productRun ? null : picked?.formulation ?? null,
           tyreType: machine.tyre ? tyre : null,
           mesh: machine.tyre && tyre ? TYRES[tyre].mesh : null,
-          shiftDate: metered || pressRun ? startDate : todayISO(),
-          shift: metered || pressRun ? startShift : currentShift(),
+          shiftDate: metered || productRun ? startDate : todayISO(),
+          shift: metered || productRun ? startShift : currentShift(),
           supervisor: supervisor || null,
           elecStart: elec,
           hourStart: hour,
-          // A press: what it is moulding, and the two settings the floor may
-          // change for this run. The temperature and the compound rate are the
-          // product's, and the server copies both off it.
-          ...(pressRun
+          // What it is making, and the two settings the floor may change for
+          // this run. The temperature and the compound rate are the product's,
+          // and the server copies both off it - as it does the labour rate on a
+          // sleeve or loop run.
+          ...(productRun
             ? {
                 product: press.product,
                 cyclicMin: asNumber(press.cyclicMin),
@@ -690,9 +815,15 @@ export function MachinesPage() {
             ? ` · special line${nonProd ? ' · non-production' : ''}${
                 mix.length ? ` · mixed with ${mix.length}` : ''
               }`
-            : pressRun
-              ? ` · ${pressProduct?.name ?? press.product} · ${batchNo.trim()}`
-              : ''
+            : mouldRun
+              ? // The number it will be recorded under and what it is making,
+                // said back to the crew - they saw both on the sheet, and this
+                // is the confirmation that it is what actually got written. Both,
+                // because either alone names a lot only halfway.
+                ` · ${startBatchNo} · ${pressProduct?.name ?? press.product}`
+              : pressRun
+                ? ` · ${pressProduct?.name ?? press.product}`
+                : ''
       }`,
       'Could not start the run',
     );
@@ -710,15 +841,21 @@ export function MachinesPage() {
       notify('Check the highlighted readings before logging', 'warn');
       return;
     }
-    // A press run is the count of what it made, so that count is the point of
-    // logging it - there is nothing to weigh later and no second chance at it.
-    if (stopIsPress) {
+    // A press, sleeve or loop run is the count of what it made, so that count is
+    // the point of logging it - there is nothing to weigh later and no second
+    // chance at it.
+    if (stopCountsPieces) {
       if (piecesValue == null) {
         notify('Enter how many pieces it made', 'warn');
         return;
       }
       if (weightValue == null) {
-        notify('Enter the weight that came off the press', 'warn');
+        notify(
+          stopIsMoulding
+            ? 'Enter the weight that came off the bench'
+            : 'Enter the weight that came off the press',
+          'warn',
+        );
         return;
       }
     }
@@ -755,9 +892,13 @@ export function MachinesPage() {
           kwh: stopsWithMeters ? asNumber(stop.elecDiff) : null,
           hoursRun: stopsWithMeters ? asNumber(stop.hourDiff) : null,
           // What came out of the mould. The flash counts as material spent, so a
-          // press with no flash trimmed off it says zero rather than nothing.
-          pieces: stopIsPress ? piecesValue : null,
-          flashKg: stopIsPress ? flashValue ?? 0 : null,
+          // bench with no flash trimmed off it says zero rather than nothing.
+          pieces: stopCountsPieces ? piecesValue : null,
+          flashKg: stopCountsPieces ? flashValue ?? 0 : null,
+          // The note against a lot. Only the sleeve and loop sheets ask for one -
+          // see blankMouldStop - and a blank stays blank rather than being sent
+          // as an empty string that reads as a note somebody left.
+          remarks: stopIsMoulding ? mouldStop.remarks.trim() || null : null,
           // The yard gang that fed the cracker. Sent only from the cracker's own
           // sheet, and the server ignores it from anywhere else.
           pickingLabourers: stopIsCracker ? pickLabourers : null,
@@ -766,7 +907,14 @@ export function MachinesPage() {
       ),
       stopIsAutoclave
         ? 'Unloaded · logged'
-        : stopIsPress
+        : stopIsMoulding
+          ? // Named by the lot rather than by the machine: the batch number is
+            // what the pieces are now standing in the yard under, and it is the
+            // thing the crew would go looking for.
+            `${stopping?.batch_no ?? stopMachine?.short ?? ''} · ${piecesValue} pcs logged${
+              mouldFlagged ? ` · ${mouldVariance! > 0 ? '+' : ''}${mouldVariance}% vs expected` : ''
+            }`
+          : stopIsPress
           ? `${stopMachine?.short ?? stopping?.machine_id} · ${piecesValue} pcs logged${
               pressPerPiece != null ? ` · ₹${pressPerPiece}/pc` : ''
             }`
@@ -787,6 +935,7 @@ export function MachinesPage() {
       setStop(blankStop);
       setUnload(blankUnload);
       setPressStop(blankPressStop);
+      setMouldStop(blankMouldStop);
       setPicking(blankPicking);
       // Logging a run moves the batch on: unloading takes it out of the vessel
       // and releases it to the refiners, and an R4 pass marks the grade it
@@ -887,6 +1036,17 @@ export function MachinesPage() {
       notify('Temperatures must be above zero', 'warn');
       return;
     }
+    // A blank time means "just read"; a time is read as today's clock, rolled
+    // back a day if that would put the reading in the future - the same way a
+    // breakdown time is read.
+    let ts: string | undefined;
+    if (tempTime) {
+      const at = new Date(`${todayISO()}T${tempTime}`);
+      if (!Number.isNaN(at.getTime())) {
+        if (at.getTime() > Date.now()) at.setDate(at.getDate() - 1);
+        ts = at.toISOString();
+      }
+    }
     const okay = await run(
       dispatch(
         logBearings({
@@ -897,12 +1057,16 @@ export function MachinesPage() {
           supervisor: supervisor || null,
           shiftDate: todayISO(),
           shift: currentShift(),
+          ts,
         }),
       ),
       `${sheet.machine.short ?? sheet.machine.name} ${sheet.due.bearingType} temps logged`,
       'Could not log the temperatures',
     );
-    if (okay) setTemps({});
+    if (okay) {
+      setTemps({});
+      setTempTime('');
+    }
   };
 
   if (loading && !Object.keys(groups).length) return <PageLoader label="Loading machines" />;
@@ -919,26 +1083,6 @@ export function MachinesPage() {
   return (
     <>
       <ViewHead title="Machines" />
-
-      {dueNow.length > 0 && (
-        <button
-          type="button"
-          className="duebar"
-          onClick={() => {
-            const first = dueNow[0];
-            const machine = Object.values(groups)
-              .flat()
-              .find((m) => m.id === first?.machineId);
-            if (machine && first) {
-              setTemps({});
-              setSheet({ kind: 'bearing', machine, due: first });
-            }
-          }}
-        >
-          {dueNow.length} machine{dueNow.length > 1 ? 's' : ''} due for bearing temp logging —{' '}
-          {dueNow.map((d) => d.machine ?? d.machineId).join(', ')} · tap to log
-        </button>
-      )}
 
       {Object.entries(groups).map(([group, machines]) => {
         const runningHere = machines.filter((m) => runByMachine.has(m.id)).length;
@@ -971,10 +1115,14 @@ export function MachinesPage() {
                     const fits = m.kind === 'autoclave' ? autoclaveFormsFor(m.capacity) : [];
                     setForm(fits.length === 1 ? fits[0] ?? null : null);
                     setLoad(blankLoad);
-                    // A press moulds one product at a time, and its cure and
-                    // cavities come off whichever is picked. A plant with only
-                    // one product on the list has it picked already.
-                    const only = m.kind === 'press' && products.length === 1 ? products[0] : null;
+                    // A press, sleeve bench or loop bench makes one product at a
+                    // time, and its cure and cavities come off whichever is
+                    // picked. A plant with only one product on the list has it
+                    // picked already.
+                    const only =
+                      (m.kind === 'press' || isMoulding(m.kind)) && products.length === 1
+                        ? products[0]
+                        : null;
                     setPress(
                       only
                         ? {
@@ -1000,6 +1148,10 @@ export function MachinesPage() {
                   onStop={(r) => {
                     setOutWeight('');
                     setPressStop(blankPressStop);
+                    // A lot stopped and started again inside the shift is one
+                    // record, so the sheet opens on the note the earlier stop
+                    // left rather than asking for it twice.
+                    setMouldStop({ remarks: r.remarks ?? '' });
                     const autoclave = machine.kind === 'autoclave';
                     const coarse = r.line ? lineIsShiftwise(r.line) : false;
                     // The crew this machine usually runs with, so the common
@@ -1060,6 +1212,7 @@ export function MachinesPage() {
                     const d = dueByMachine.get(m.id);
                     if (d) {
                       setTemps({});
+                      setTempTime('');
                       setSheet({ kind: 'bearing', machine: m, due: d });
                     }
                   }}
@@ -1124,6 +1277,13 @@ export function MachinesPage() {
               ? `${sheet.machine.capacity ?? '—'} kg · firewood entered at unload`
               : startIsPress
                 ? `Moulding press — pieces and weight at stop${supervisor ? ` · ${supervisor}` : ''}`
+              : startIsMoulding
+                ? // The number leads, because it is the one thing on this sheet
+                  // the crew cannot change and the thing their output will be
+                  // found under afterwards.
+                  `${startBatchNo || 'Pick a date and a shift'} — one lot per product per shift${
+                    supervisor ? ` · ${supervisor}` : ''
+                  }`
               : startShiftwise
               ? `${sheet.machine.kind === 'grind' ? 'Grinding line' : 'Coarse line'} — pick the shift it is running for. Units & crew at stop${
                   sheet.machine.out_weight ? '; output weighed shiftwise.' : '.'
@@ -1166,12 +1326,17 @@ export function MachinesPage() {
 
         {/* A press moulds a product, and its cure, its mould and what its
             compound costs all come off that product - so there is nothing to
-            fill in until one exists. */}
+            fill in until one exists. A sleeve or loop bench needs one for the
+            same reasons and one more: the product is half the batch number. */}
         {sheet?.kind === 'start' && startNoProducts && (
           <EmptyState
             icon={icons.packing}
             title="The product list is empty"
-            hint="Add what this press moulds before starting a run."
+            hint={
+              startIsMoulding
+                ? 'Add what this bench makes before starting a run.'
+                : 'Add what this press moulds before starting a run.'
+            }
           />
         )}
 
@@ -1214,11 +1379,19 @@ export function MachinesPage() {
               />
             </PickGrid>
 
-            <SheetLabel>{loadIsCoarse ? 'Coarse batch number' : 'Batch number'}</SheetLabel>
+            <SheetLabel>
+              {loadIsCoarse ? 'Coarse batch number' : 'Batch number'}
+              {loadIsCoarse && loadLetter && (
+                <span className="muted normal-case tracking-normal">
+                  {' '}
+                  — {loadLetter} is {monthShort(load.loadDate || load.shiftDate || todayISO())}
+                </span>
+              )}
+            </SheetLabel>
             <TextField
               inputMode="numeric"
               autoComplete="off"
-              placeholder={loadIsCoarse ? 'e.g. C-2893' : 'e.g. 2893'}
+              placeholder={loadIsCoarse ? `e.g. ${loadLetter || 'C'}-2893` : 'e.g. 2893'}
               value={batchNo}
               onChange={(e) => setBatchNo(e.target.value)}
               fieldClassName="mb-0"
@@ -1334,14 +1507,6 @@ export function MachinesPage() {
               />
             </FieldRow>
 
-            <TextField
-              label="Batch number"
-              placeholder="e.g. P-104"
-              autoComplete="off"
-              value={batchNo}
-              onChange={(e) => setBatchNo(e.target.value)}
-            />
-
             <FieldRow>
               <TextField
                 label="Date"
@@ -1371,7 +1536,139 @@ export function MachinesPage() {
           </>
         )}
 
-        {sheet?.kind === 'start' && !startIsAutoclave && !startIsPress && !startNothingReady && (
+        {/* ---- a sleeve or loop bench ----
+            Set up exactly as a press is - a product, and the two settings the
+            floor may change for this run - and recorded quite differently: what
+            it makes is a lot, and the number that lot is filed under is the date
+            and the shift. So the number is shown before anything is committed,
+            read-only, and the two fields under it are the two that decide it.
+
+            The product is not in the number and is not meant to be. It is the
+            other half of what identifies the lot, which is why the hint says so
+            out loud - a crew reading `03/Aug/26-day` on two benches at once is
+            reading one shift, not one lot.
+
+            No meters, no hours, no energy: none of them exist here, exactly as
+            on a press. */}
+        {sheet?.kind === 'start' && startIsMoulding && !startNoProducts && (
+          <>
+            <SheetLabel>Batch number</SheetLabel>
+            <Readout
+              label={startBatchNo ? 'This run will be recorded as' : 'Not decided yet'}
+              value={startBatchNo || '— pick a date and a shift'}
+              valueColor="var(--brand)"
+              className="mb-3.5"
+            />
+            <div className="hint -mt-2">
+              Generated from the date and the shift — it is not typed and cannot be changed. The
+              lot is this number and the product together, so sleeve and loop on one shift share
+              the number and stay separate lots. A second run of the same product in this shift
+              joins this same lot rather than opening another.
+            </div>
+
+            <SheetLabel>Product</SheetLabel>
+            {products.length ? (
+              <PickGrid>
+                {products.map((p) => (
+                  <Pick
+                    key={p.id}
+                    title={p.name}
+                    sub={[
+                      p.piece_kg != null ? `${p.piece_kg} kg each` : 'unit weight not set',
+                      p.moulded === false ? 'not moulded' : null,
+                      p.cavities != null ? `${p.cavities} cav` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                    selected={press.product === p.id}
+                    onClick={() =>
+                      setPress({
+                        product: p.id,
+                        cyclicMin: p.cyclic_min != null ? String(p.cyclic_min) : '',
+                        cavities: p.cavities != null ? String(p.cavities) : '',
+                      })
+                    }
+                  />
+                ))}
+              </PickGrid>
+            ) : (
+              <div className="hint">Reading the product list…</div>
+            )}
+
+            {/* The unit weight is a fact of the product, entered once on the
+                master and never per run - it is what the yard weighs the lot by,
+                so showing it here is how the crew knows it has been set. */}
+            {pressProduct && (
+              <Readout
+                label="Unit weight"
+                value={orNotSet(pressProduct.piece_kg, 'kg a piece')}
+                valueColor="var(--steel)"
+                className="mt-3.5"
+              />
+            )}
+
+            {/* Cavities and a cycle time are facts about a mould, so an item
+                that is not moulded is asked for neither. */}
+            {productIsMoulded && (
+              <FieldRow className="mt-4">
+                <TextField
+                  label="Cyclic time"
+                  note="— from the product"
+                  type="number"
+                  inputMode="decimal"
+                  suffix="min"
+                  placeholder={pressProduct?.cyclic_min != null ? String(pressProduct.cyclic_min) : 'not set'}
+                  value={press.cyclicMin}
+                  onChange={(e) => setPress({ ...press, cyclicMin: e.target.value })}
+                />
+                <TextField
+                  label="Cavities"
+                  note="— change if a different mould is on"
+                  type="number"
+                  inputMode="numeric"
+                  placeholder={pressProduct?.cavities != null ? String(pressProduct.cavities) : 'not set'}
+                  value={press.cavities}
+                  onChange={(e) => setPress({ ...press, cavities: e.target.value })}
+                />
+              </FieldRow>
+            )}
+
+            <FieldRow className={productIsMoulded ? undefined : 'mt-4'}>
+              <TextField
+                label="Date"
+                note="— the night shift keeps its start date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <SelectField
+                label="Shift"
+                value={startShift}
+                onChange={(e) => setStartShift(e.target.value as Shift)}
+              >
+                {SHIFTS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </SelectField>
+            </FieldRow>
+
+            {productIsMoulded && (pressProduct?.cyclic_min == null || pressProduct?.cavities == null) && (
+              <div className="hint">
+                No cycle time or cavities against {pressProduct?.name ?? 'this product'} yet, so the
+                run will log without an expected piece count to compare against. Enter them here for
+                this run, or on the product list for good.
+              </div>
+            )}
+          </>
+        )}
+
+        {sheet?.kind === 'start' &&
+          !startIsAutoclave &&
+          !startIsPress &&
+          !startIsMoulding &&
+          !startNothingReady && (
           <>
             {startPicksBatch && refinableBatches.length > 0 && (
               <>
@@ -1607,6 +1904,12 @@ export function MachinesPage() {
             ? undefined
             : stopIsAutoclave
               ? [stopping.batch_no, stopping.formulation, stopping.quality].filter(Boolean).join(' · ')
+              : stopIsMoulding
+                ? // The lot first: it is what the pieces will stand in the yard
+                  // under, and what the lab will answer on.
+                  [stopping.batch_no, stopping.product, `ran ${elapsed(stopping.started_at)}`]
+                    .filter(Boolean)
+                    .join(' · ')
               : stopIsPress
                 ? [stopping.product, stopping.batch_no, `ran ${elapsed(stopping.started_at)}`]
                     .filter(Boolean)
@@ -1636,7 +1939,7 @@ export function MachinesPage() {
             <Button variant="primary" onClick={confirmStop} disabled={stopIssues.length > 0}>
               {stopIsAutoclave
                 ? 'Log & unload'
-                : stopsWithMeters || stopIsPress
+                : stopsWithMeters || stopCountsPieces
                   ? 'Log run'
                   : 'Stop run'}
             </Button>
@@ -1818,9 +2121,120 @@ export function MachinesPage() {
               </>
             )}
 
+            {/* ---- what a sleeve or loop shift made ----
+                The same shape as the press sheet, with the one thing a press has
+                no use for: what the cycle and the mould say the run should have
+                come to. The two are kept side by side rather than one derived
+                from the other, because the point of showing the expected figure
+                is that the counted one can disagree with it - a mould running
+                short all shift is exactly what this is meant to surface, and it
+                is invisible if the app quietly reports the arithmetic instead of
+                the count. */}
+            {stopIsMoulding && (
+              <>
+                <Readout
+                  label="Lot"
+                  value={stopping.batch_no ?? '—'}
+                  valueColor="var(--brand)"
+                  className="mb-3.5"
+                />
+
+                {mouldExpected != null && (
+                  <Readout
+                    label="Expected"
+                    value={`${mouldExpected} pcs`}
+                    valueColor="var(--steel)"
+                    className="mb-3.5"
+                  />
+                )}
+
+                <FieldRow>
+                  <TextField
+                    label="How many"
+                    note="— actually counted"
+                    type="number"
+                    inputMode="numeric"
+                    suffix="nos"
+                    placeholder={mouldExpected != null ? String(mouldExpected) : '0'}
+                    value={pressStop.pieces}
+                    onChange={(e) => setPressStop({ ...pressStop, pieces: e.target.value })}
+                  />
+                  <TextField
+                    label="Workers"
+                    note="— on the activity"
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={stop.workers}
+                    onChange={(e) => setStop({ ...stop, workers: e.target.value })}
+                  />
+                </FieldRow>
+
+                <FieldRow>
+                  <TextField
+                    label="Weight"
+                    note="— weighed output"
+                    inputMode="decimal"
+                    suffix="kg"
+                    placeholder="0"
+                    value={outWeight}
+                    onChange={(e) => setOutWeight(e.target.value.replace(/[^\d.]/g, ''))}
+                  />
+                  <TextField
+                    label="Flash"
+                    note="— waste compound"
+                    inputMode="decimal"
+                    suffix="kg"
+                    placeholder="0"
+                    value={pressStop.flash}
+                    onChange={(e) => setPressStop({ ...pressStop, flash: e.target.value.replace(/[^\d.]/g, '') })}
+                  />
+                </FieldRow>
+
+                {/* The comparison, spelled out before it is committed - the same
+                    way a meter pair shows its difference. A wide gap is said out
+                    loud and never refused: the count off the bench is what was
+                    made, and the crew is being told the figure will be flagged,
+                    not being asked to change it. */}
+                {mouldVariance != null ? (
+                  <div className={cn('diffout show', mouldFlagged && 'bad')}>
+                    Expected <b>{mouldExpected}</b>, counted <b>{piecesValue}</b> ={' '}
+                    <b>
+                      {mouldVariance > 0 ? '+' : ''}
+                      {mouldVariance}%
+                    </b>
+                    {mouldFlagged
+                      ? ` — over ${PIECES_VARIANCE_PCT}%, so this run is flagged for the back office.`
+                      : ' — within the usual range.'}
+                  </div>
+                ) : (
+                  <div className="hint">
+                    {stopping.cyclic_min == null || stopping.cavities == null
+                      ? 'No cycle time or cavities were set on this run, so there is nothing to compare the count against.'
+                      : 'The comparison shows once the count is in.'}
+                  </div>
+                )}
+
+                <TextAreaField
+                  label="Remarks"
+                  note="— anything about this lot worth knowing later"
+                  rows={2}
+                  placeholder="mould change, short run, material problem…"
+                  value={mouldStop.remarks}
+                  onChange={(e) => setMouldStop({ remarks: e.target.value })}
+                />
+
+                <div className="hint">
+                  The pieces go to the yard under <b>{stopping.batch_no ?? 'this lot'}</b> awaiting the
+                  lab once they are boxed in the Packing tab. Only a lot the lab has passed can be
+                  dispatched.
+                </div>
+              </>
+            )}
+
             {/* Nothing comes off an autoclave to weigh - the batch is weighed
                 once the refiners have worked through it. */}
-            {!stopIsAutoclave && !stopIsPress && (!stopsWithMeters || stopWeighs) && (
+            {!stopIsAutoclave && !stopCountsPieces && (!stopsWithMeters || stopWeighs) && (
               <TextField
                 label="Output weight"
                 note={stopWeighs ? '— optional, or weigh later' : '— blank sends it to the Weigh tab'}
@@ -1939,14 +2353,14 @@ export function MachinesPage() {
               ) : null}
             </FormWarning>
 
-            {(stopsWithMeters || stopIsAutoclave || stopIsPress) && (
+            {(stopsWithMeters || stopIsAutoclave || stopCountsPieces) && (
               <Button
                 variant="danger"
                 size="lg"
                 className="mt-2"
                 onClick={() => setSheet({ kind: 'cancelLoad', run: stopping })}
               >
-                Cancel this {stopIsPress ? 'run' : 'load'} (entered by mistake)
+                Cancel this {stopCountsPieces ? 'run' : 'load'} (entered by mistake)
               </Button>
             )}
           </>
@@ -2186,6 +2600,13 @@ export function MachinesPage() {
                 onChange={(e) => setTemps({ ...temps, [position]: e.target.value })}
               />
             ))}
+            <TextField
+              label="Reading time"
+              note="— leave blank for now"
+              type="time"
+              value={tempTime}
+              onChange={(e) => setTempTime(e.target.value)}
+            />
             <SupervisorPick fieldClassName="mt-3" note="— signs these temperatures" />
           </>
         )}

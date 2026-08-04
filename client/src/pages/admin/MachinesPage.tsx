@@ -27,6 +27,11 @@ const TYPES: MachineType[] = [
   'prerefiner',
   'refiner',
   'press',
+  // The two activities that make finished goods a lot at a time. They carry no
+  // platen figures - a sleeve bench has none - so they read here as what they
+  // are and nothing more.
+  'sleeve',
+  'loop',
   'other',
 ];
 

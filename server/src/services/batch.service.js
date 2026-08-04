@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { crud } from './base.service.js';
 import { machineService } from './machine.service.js';
 import { decorate as decorateRun } from './run.service.js';
+import { qualityService } from './quality.service.js';
 import {
   TABLES,
   VIEWS,
@@ -665,8 +666,10 @@ export const batchService = {
       );
     }
 
+    // Through qualityService rather than straight off the table, so a verdict
+    // one of them had pushed onto a stock group comes off with it.
     const linkedTests = await tests.all({ batch_no: batch.ref }).catch(() => []);
-    for (const test of linkedTests) await tests.remove(test.id);
+    for (const test of linkedTests) await qualityService.remove(test.id);
 
     await mutateBatches((batches) => {
       const next = batches.filter((b) => b.id !== id);

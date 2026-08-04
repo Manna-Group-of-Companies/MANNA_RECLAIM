@@ -25,6 +25,9 @@ router.post(
   validate({ body: efficiencyNoteSchema }),
   reports.addEfficiencyNote,
 );
+// The machine log as a spreadsheet. Admin only for the same reason /costing is:
+// it carries every run the plant has ever logged, with what each cost.
+router.get('/machine-log.csv', adminOnly, validate({ query: dateRange }), reports.machineLog);
 router.get('/costing', adminOnly, validate({ query: dateRange }), reports.costing);
 router.get('/dashboard', adminOnly, validate({ query: dateRange }), reports.dashboard);
 

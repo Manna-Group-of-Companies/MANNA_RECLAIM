@@ -14,10 +14,10 @@ import {
   ViewHead,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { SACK_KG } from '@/config/constants';
+import { SACK_KG, isMoulding } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
-import { dayMonth } from '@/utils/date';
+import { clock24, dayMonth } from '@/utils/date';
 import type { Run } from '@/types/models';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -26,33 +26,109 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const totalFor = (run: Run) => round2((run.weight_kg ?? run.out_weight ?? 0) + (run.leftout_in ?? 0));
 const sacksNeeded = (run: Run) => Math.max(0, Math.floor(totalFor(run) / SACK_KG));
 
-/** A press run is boxed by the piece; everything else is bagged by weight. */
-const isPress = (run: Run) => run.kind === 'press';
+/**
+ * Boxed by the piece rather than bagged by weight - a press, and the sleeve and
+ * loop benches. `isPress` keeps its name because the whole bagged/boxed split on
+ * this screen was written against it; what it means now is "counted, not
+ * weighed".
+ */
+const isPress = (run: Run) => run.kind === 'press' || isMoulding(run.kind);
 
 /**
- * What the run is filed under on this screen and in the yard.
+ * What the run is filed under on this screen.
  *
- * A press run has no grade - it moulded a product - so it is grouped by the
- * product instead, which is also what the stock group it files into is keyed on.
- * Everything else is its grade, and a run with none is coarse.
+ * A press, a sleeve bench and a loop bench have no grade - they moulded a
+ * product - so they are filed under the product. Everything else is its grade,
+ * and a run with none is coarse.
+ *
+ * The product rather than the lot number, on the sleeve and loop side. The two
+ * together are what the yard keys the stock on, but the number is not what the
+ * bench is looking for on this list: a crew that has just finished a shift of
+ * sleeves is looking for the word "Sleve", and a filter chip reading
+ * `03/Aug/26-day` would say when rather than what - and say the same thing for
+ * the loop bench beside them. The number is still on the card, in the reference
+ * slot, which is where a batch number goes everywhere else in the app.
  */
-const gradeOf = (run: Run) => (isPress(run) ? (run.product ?? 'Moulded') : (run.quality ?? 'Coarse'));
+const gradeOf = (run: Run) => {
+  if (isPress(run)) return run.product ?? 'Moulded';
+  return run.quality ?? 'Coarse';
+};
+
+const mouldedOf = (run: Run) => Number(run.pieces ?? 0);
+const boxedOf = (run: Run) => Number(run.packed_pieces ?? 0);
+
+/**
+ * One line of the packing list, and it is one run - every card on this screen,
+ * bagged or boxed.
+ *
+ * Nothing on this list is added to anything else. A bagged run could never be:
+ * the sub-sack remainder is carried into the next batch of that grade, so two
+ * runs cannot be totalled without deciding whose carry the answer belongs to.
+ * Boxing has no such arithmetic - a piece is a piece - and for a while the
+ * boxed side pooled by product on the strength of that, so a shift's presses
+ * came up as one card with one count.
+ *
+ * They do not any more. A pooled count is a figure nobody on the floor can
+ * check: the crew counts what came off a machine, not what came off a product,
+ * and a total that spans three benches has to be cut back across them by a rule
+ * the crew cannot see. Worse on the sleeve and loop side, where each run is a
+ * lot of its own that the lab answers separately - a pooled figure there would
+ * write pieces into a lot the bench did not mean to touch.
+ *
+ * So: one run, one card, one count, filed under the product or the grade it
+ * made. What tells two cards of the same product apart is on the card - the lot
+ * number where there is one, the machine and the time it started where there is
+ * not.
+ */
+type PackCard = {
+  key: string;
+  press: boolean;
+  /** What the card is filed under: the product, or the grade. */
+  label: string;
+  /**
+   * The lot number for the reference slot, where the run has one. Null on a
+   * press run, which moulds against a product and is never given a number.
+   */
+  batch: string | null;
+  run: Run;
+};
+
+/**
+ * What names the card in the reference slot.
+ *
+ * The lot number where the run has one - a batch of reclaim, a sleeve lot, a
+ * loop lot. A press run is never given one: it moulds against a product rather
+ * than a batch, and the slot used to hold the shift date on its own, in the
+ * place a batch number goes, which read as the batch being a date.
+ *
+ * So a press names its press and when it started. That is what tells two cards
+ * of the same product apart now that a shift's runs are listed rather than
+ * pooled - three presses on SLEVE are `P3 · 03 Aug 06:40`, `P5 · 03 Aug 07:10`
+ * and so on, not three rows reading the same thing.
+ */
+const refOf = ({ batch, run }: PackCard) =>
+  batch ??
+  [run.machine ?? run.machine_id, `${dayMonth(run.shift_date)} ${clock24(run.started_at)}`]
+    .filter(Boolean)
+    .join(' · ');
 
 /**
  * Packing - the door everything the plant makes comes into the yard by.
  *
  * Two benches, listed together because they are one job on the floor: the shift
- * finishes, and what it made gets counted into stock.
+ * finishes, and what it made gets counted into stock. One run is one card on
+ * either of them - nothing on this screen is added to anything else.
  *
  *   bagging  everything weighed goes out in 50 kg sacks, and the remainder
  *            under one sack is not bagged - it is carried into the next batch of
  *            the same grade. That carry is the whole reason this is its own step
  *            rather than a number typed on the Weigh tab.
- *   boxing   a press moulds finished goods and counts them one at a time. There
- *            is nothing to weigh and nothing to carry: the only question is how
- *            many were boxed, and the pack they go into is read off the product
- *            rather than asked for, so nobody can file a hundred loose pieces as
- *            two packs of fifty.
+ *   boxing   a press, a sleeve bench or a loop bench moulds finished goods and
+ *            counts them one at a time. There is nothing to weigh and nothing to
+ *            carry: the only question is how many of that run were boxed, and
+ *            the pack they go into is read off the product rather than asked
+ *            for, so nobody can file a hundred loose pieces as two packs of
+ *            fifty.
  *
  * Boxing is new here, and it is the reason the Stock page could not previously
  * answer the question it exists to answer. A press run's pieces stopped at the
@@ -63,13 +139,53 @@ export function PackingPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
   const { pendingPack, loading } = useAppSelector((s) => s.runs);
-  const [target, setTarget] = useState<Run | null>(null);
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+  const [target, setTarget] = useState<PackCard | null>(null);
   const [count, setCount] = useState('');
   const [grade, setGrade] = useState('');
 
+  /*
+   * On mount, and whenever anything asks for a refresh.
+   *
+   * The second half is what a delete needs. This list was read once when the
+   * tab opened and never again, so a run corrected out of existence in History
+   * stayed on the bagging bench until the app was reloaded - a card the crew
+   * could still open and pack, filing sacks against a run that no longer
+   * exists. Same signal the yard and the lab tab already watch.
+   */
   useEffect(() => {
     void dispatch(fetchPendingPack());
-  }, [dispatch]);
+  }, [dispatch, refreshTick]);
+
+  /**
+   * The list itself: one card per run waiting, boxed ones first.
+   *
+   * Nothing is pooled - see the note on PackCard. The run is the unit that gets
+   * written, keeps its own `packed_pieces` and its own guard against boxing more
+   * than it moulded, and it is now also the unit the crew is asked about, so the
+   * question and the record are the same thing.
+   *
+   * Boxed above bagged only so the two benches do not interleave. Within each,
+   * the order the server sent them in.
+   */
+  const cards = useMemo<PackCard[]>(() => {
+    const boxed: PackCard[] = [];
+    const bagged: PackCard[] = [];
+
+    for (const run of pendingPack) {
+      const press = isPress(run);
+      const card: PackCard = {
+        key: run.id,
+        press,
+        label: gradeOf(run),
+        batch: run.batch_no ?? null,
+        run,
+      };
+      (press ? boxed : bagged).push(card);
+    }
+
+    return [...boxed, ...bagged];
+  }, [pendingPack]);
 
   /*
    * The grades and products actually waiting, rather than everything the plant
@@ -79,9 +195,9 @@ export function PackingPage() {
    */
   const counts = useMemo(() => {
     const tally: Record<string, number> = {};
-    for (const run of pendingPack) tally[gradeOf(run)] = (tally[gradeOf(run)] ?? 0) + 1;
+    for (const card of cards) tally[card.label] = (tally[card.label] ?? 0) + 1;
     return tally;
-  }, [pendingPack]);
+  }, [cards]);
 
   // Widened to string: this is what the filter is set to, and it holds whatever
   // a chip carried rather than a member of the grade union.
@@ -91,8 +207,8 @@ export function PackingPage() {
   );
 
   const visible = useMemo(
-    () => (grade ? pendingPack.filter((run) => gradeOf(run) === grade) : pendingPack),
-    [pendingPack, grade],
+    () => (grade ? cards.filter((card) => card.label === grade) : cards),
+    [cards, grade],
   );
 
   /*
@@ -104,21 +220,24 @@ export function PackingPage() {
     if (grade && !grades.includes(grade)) setGrade('');
   }, [grade, grades]);
 
-  const open = (run: Run) => {
-    setTarget(run);
+  const open = (card: PackCard) => {
+    setTarget(card);
+    const run = card.run;
     setCount(
       String(
-        isPress(run)
-          ? (run.packed_pieces ?? run.pieces ?? '')
+        card.press
+          ? (boxedOf(run) || mouldedOf(run) || '')
           : (run.packed_sacks ?? sacksNeeded(run) ?? ''),
       ),
     );
   };
 
-  const boxing = Boolean(target && isPress(target));
+  const boxing = Boolean(target?.press);
+  /** The bagged card's run. Meaningless while boxing, and not read there. */
+  const one = target && !target.press ? target.run : null;
   const entered = Number(count) || 0;
-  const moulded = Number(target?.pieces ?? 0);
-  const leftOut = target && !boxing ? round2(totalFor(target) - entered * SACK_KG) : 0;
+  const moulded = target ? mouldedOf(target.run) : 0;
+  const leftOut = one ? round2(totalFor(one) - entered * SACK_KG) : 0;
   /** Pieces moulded but not yet boxed - what is still owed to the yard. */
   const unboxed = boxing ? moulded - entered : 0;
 
@@ -133,36 +252,57 @@ export function PackingPage() {
       return;
     }
     if (!boxing && leftOut < 0) {
-      notify(`That is more than the ${totalFor(target)} kg available`, 'warn');
+      notify(`That is more than the ${totalFor(one!)} kg available`, 'warn');
       return;
     }
 
-    const result = await dispatch(
+    /*
+     * One card, one run, one write.
+     *
+     * `packed_pieces` is an absolute figure on the run rather than a delta, so
+     * this is safe to re-enter: the same count resolves to the same yard, and a
+     * correction from 800 to 870 moves seventy pieces rather than re-cutting
+     * anything.
+     */
+    const res = await dispatch(
       packRun(
         boxing
-          ? { id: target.id, pieces: entered }
-          : {
-              id: target.id,
-              sacks: entered,
-              leftoutIn: target.leftout_in ?? 0,
-              leftoutOut: leftOut,
-            },
+          ? { id: target.run.id, pieces: entered }
+          : { id: one!.id, sacks: entered, leftoutIn: one!.leftout_in ?? 0, leftoutOut: leftOut },
       ),
     );
-    const okay = packRun.fulfilled.match(result);
+
+    const okay = packRun.fulfilled.match(res);
+    const result = okay ? res.payload : null;
+
+    /*
+     * The boxing bench says whether the pieces reached the yard, and it is not
+     * the same question as whether the call succeeded.
+     *
+     * Filing the stock is not allowed to fail the request - the run is saved
+     * either way - so a project that cannot hold moulded stock yet answered 200
+     * and this screen said "→ Stock · awaiting QC" over a yard that had
+     * received nothing. The count stays on screen when that happens rather than
+     * the sheet closing on a job nobody did.
+     */
+    const filed = okay && result?.stock_filed !== false;
+    const note = okay ? result?.stock_note : null;
+
     // What is counted here is stock from here on: it shows up on the Stock tab
     // straight away, pending the lab, so the toast says where it went.
     notify(
-      okay
+      !okay
         ? boxing
-          ? `${entered} pieces boxed → Stock · awaiting QC`
-          : `${entered} sacks packed → Stock · ${leftOut} kg carried forward`
-        : boxing
           ? 'Could not record the boxing'
-          : 'Could not record the packing',
-      okay ? 'ok' : 'err',
+          : 'Could not record the packing'
+        : !filed
+          ? (note ?? 'Recorded on the run, but it did not reach Stock')
+          : boxing
+            ? `${entered} pieces boxed → Stock · awaiting QC`
+            : `${entered} sacks packed → Stock · ${leftOut} kg carried forward`,
+      !okay ? 'err' : !filed ? 'warn' : 'ok',
     );
-    if (okay) setTarget(null);
+    if (okay && filed) setTarget(null);
   };
 
   if (loading && !pendingPack.length) return <PageLoader label="Loading runs" />;
@@ -219,29 +359,25 @@ export function PackingPage() {
       )}
 
       <div className="stack">
-        {visible.map((run) => {
-          const press = isPress(run);
-          const done = press ? (run.packed_pieces ?? 0) : (run.packed_sacks ?? 0);
+        {visible.map((card) => {
+          const run = card.run;
+          const done = card.press ? boxedOf(run) : (run.packed_sacks ?? 0);
           const total = totalFor(run);
           return (
-            <div key={run.id} className="wcard">
+            <div key={card.key} className="wcard">
               <div className="info">
                 <div className="row1">
-                  <BatchRef>{run.batch_no ?? dayMonth(run.shift_date)}</BatchRef>
-                  <QualityChip quality={gradeOf(run)} />
-                  {run.formulation && <FormChip>{run.formulation}</FormChip>}
+                  {/* The lot, or the press and when it ran - see refOf(). */}
+                  <BatchRef>{refOf(card)}</BatchRef>
+                  <QualityChip quality={card.label} />
+                  {!card.press && run.formulation && <FormChip>{run.formulation}</FormChip>}
                 </div>
-                {press ? (
-                  done > 0 ? (
-                    <small style={{ color: 'var(--elec)' }}>
-                      {done} of {run.pieces ?? 0} pieces boxed
-                    </small>
-                  ) : (
-                    <small>
-                      moulded {run.pieces ?? 0} pieces
-                      {run.flash_kg ? ` · ${run.flash_kg} kg flash` : ''}
-                    </small>
-                  )
+                {card.press ? (
+                  <small style={done > 0 ? { color: 'var(--elec)' } : undefined}>
+                    {done > 0
+                      ? `${done} of ${mouldedOf(run)} pieces boxed`
+                      : `moulded ${mouldedOf(run)} pieces`}
+                  </small>
                 ) : done > 0 ? (
                   <small style={{ color: 'var(--elec)' }}>
                     {done} sacks packed · {round2(total - done * SACK_KG)} kg left
@@ -254,8 +390,8 @@ export function PackingPage() {
                   </small>
                 )}
               </div>
-              <Button variant="primary" onClick={() => open(run)}>
-                {done > 0 ? 'Update ▸' : press ? 'Box ▸' : 'Pack ▸'}
+              <Button variant="primary" onClick={() => open(card)}>
+                {done > 0 ? 'Update ▸' : card.press ? 'Box ▸' : 'Pack ▸'}
               </Button>
             </div>
           );
@@ -265,16 +401,19 @@ export function PackingPage() {
       <BottomSheet
         open={Boolean(target)}
         title={
+          /* The reference first, then what it made - the same shape on both
+             benches, and on the boxed side it is what says which of the shift's
+             runs this sheet is about. */
           target
-            ? `${boxing ? 'Box' : 'Pack'} ${target.batch_no ?? dayMonth(target.shift_date)} · ${gradeOf(target)}`
+            ? `${boxing ? 'Box' : 'Pack'} ${refOf(target)} · ${target.label}`
             : ''
         }
         subtitle={
           target
             ? boxing
-              ? `${moulded} pieces moulded. The pack is read off the product, so only the count is entered here.`
-              : `Weighed ${target.weight_kg ?? target.out_weight ?? 0} kg${
-                  target.leftout_in ? ` + ${target.leftout_in} kg carried = ${totalFor(target)} kg` : ''
+              ? `${moulded} pieces moulded on this run. The pack is read off the product, so only the count is entered here.`
+              : `Weighed ${one?.weight_kg ?? one?.out_weight ?? 0} kg${
+                  one?.leftout_in ? ` + ${one.leftout_in} kg carried = ${totalFor(one)} kg` : ''
                 } · ${SACK_KG} kg per sack.`
             : undefined
         }
@@ -315,35 +454,37 @@ export function PackingPage() {
               />
             </>
           ) : (
-            <>
-              {(target.leftout_in ?? 0) > 0 && (
+            one && (
+              <>
+                {(one.leftout_in ?? 0) > 0 && (
+                  <Readout
+                    label="Carried in from last batch"
+                    value={`+${one.leftout_in} kg`}
+                    valueColor="var(--elec)"
+                    className="mb-2.5"
+                  />
+                )}
                 <Readout
-                  label="Carried in from last batch"
-                  value={`+${target.leftout_in} kg`}
-                  valueColor="var(--elec)"
+                  label="Full sacks"
+                  value={`${sacksNeeded(one)} sacks · ${sacksNeeded(one) * SACK_KG} kg`}
                   className="mb-2.5"
                 />
-              )}
-              <Readout
-                label="Full sacks"
-                value={`${sacksNeeded(target)} sacks · ${sacksNeeded(target) * SACK_KG} kg`}
-                className="mb-2.5"
-              />
-              <Readout
-                label={`Left out → next ${gradeOf(target)} batch`}
-                value={`${leftOut} kg`}
-                valueColor={leftOut < 0 ? 'var(--err)' : 'var(--amber)'}
-                className="mb-3.5"
-              />
-              <TextField
-                label="Sacks packed"
-                type="number"
-                inputMode="numeric"
-                placeholder={String(sacksNeeded(target))}
-                value={count}
-                onChange={(e) => setCount(e.target.value.replace(/[^\d]/g, ''))}
-              />
-            </>
+                <Readout
+                  label={`Left out → next ${target.label} batch`}
+                  value={`${leftOut} kg`}
+                  valueColor={leftOut < 0 ? 'var(--err)' : 'var(--amber)'}
+                  className="mb-3.5"
+                />
+                <TextField
+                  label="Sacks packed"
+                  type="number"
+                  inputMode="numeric"
+                  placeholder={String(sacksNeeded(one))}
+                  value={count}
+                  onChange={(e) => setCount(e.target.value.replace(/[^\d]/g, ''))}
+                />
+              </>
+            )
           ))}
       </BottomSheet>
     </>

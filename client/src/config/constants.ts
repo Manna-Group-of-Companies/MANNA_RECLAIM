@@ -177,6 +177,11 @@ export const KIND_ACCENT: Record<string, string> = {
   prerefiner: 'var(--elec)',
   refiner: 'var(--elec)',
   press: 'var(--brand)',
+  // Sleeve and loop get a colour each rather than sharing one. They are two
+  // activities on two cards, and a crew glancing at the screen mid-shift picks
+  // the card out by its rail before it reads the name.
+  sleeve: '#7ec9a0',
+  loop: '#c99ade',
 };
 
 /**
@@ -186,6 +191,38 @@ export const KIND_ACCENT: Record<string, string> = {
  * tab and no packing path. What a press run records is pieces against a product.
  */
 export const PRESS_IDS = ['PRS_P3', 'PRS_P5'];
+
+/**
+ * Sleeve and loop - the two activities that make finished goods a lot at a time.
+ *
+ * They sit beside the presses rather than inside them, and the difference is
+ * what they are certified as. A press pools by the product and the pack it is
+ * boxed in, so one verdict moves every loop the plant has ever made; sleeve and
+ * loop are made a shift at a time under a generated batch number and answered
+ * for a shift at a time, which is how a batch of reclaim works.
+ *
+ * Everything else about them a press already does: no meters, no hours, no
+ * bearings, pieces counted against a product.
+ *
+ * Mirrors MOULDING_KINDS in server/src/config/constants.js.
+ */
+export const MOULDING_KINDS = ['sleeve', 'loop'];
+
+export const isMoulding = (kind?: string | null) =>
+  Boolean(kind) && MOULDING_KINDS.includes(kind as string);
+
+/**
+ * How far the count off the bench may sit from what the cycle and the mould say
+ * before the run is flagged, as a percentage.
+ *
+ * A flag on any difference at all would fire on nearly every shift - a cycle
+ * time is nominal, and a run does not stop on a whole cycle - and a flag that
+ * always fires is one nobody reads.
+ *
+ * Mirrors PIECES_VARIANCE_PCT on the server, which is where the flag that gets
+ * stored is actually decided. This one only draws it.
+ */
+export const PIECES_VARIANCE_PCT = 10;
 
 /** The two feedstocks the grinding line runs on, and the crumb each yields. */
 export const TYRES = {
@@ -244,6 +281,13 @@ export const defaultWorkers = (machineId: string, shift: Shift, shiftwise: boole
     // otherwise.
     case 'PRS_P3':
     case 'PRS_P5':
+      return 2;
+    // Sleeve and loop are worked the same way and by the same number of hands -
+    // one on the bench, one trimming and counting. The stop sheet still lets the
+    // crew say otherwise, and it is their figure the labour cost is worked out
+    // from, so this is a starting point rather than an assumption.
+    case 'SLEEVE':
+    case 'LOOP':
       return 2;
     default:
       return shiftwise ? 2 : null;

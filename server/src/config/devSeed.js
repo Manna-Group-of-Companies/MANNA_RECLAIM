@@ -52,6 +52,16 @@ export const DEV_MACHINES = [
   { id: 'R2', name: 'Refiner 2', short: 'R2', kind: 'coarse', group_name: 'Coarse line', sub: 'coarse - or Medium grade', accent: '#e0762e', out_weight: true, enabled: true, sort_order: 14 },
   { id: 'PRS_P3', name: 'Press 3', short: 'P3', kind: 'press', group_name: 'Moulding presses', sub: 'platen, daylights, tonnage - to be measured', accent: '#4d9fe8', enabled: true, sort_order: 15 },
   { id: 'PRS_P5', name: 'Press 5', short: 'P5', kind: 'press', group_name: 'Moulding presses', sub: 'platen, daylights, tonnage - to be measured', accent: '#4d9fe8', enabled: true, sort_order: 16 },
+  // Sleeve and loop. Their own activities rather than a filter on the presses:
+  // what they make is certified a shift at a time under a generated batch
+  // number, which is how a batch of reclaim works and is not how a press works.
+  //
+  // Off the floor, so the Machines page carries no Sleeve & Loop section. Same
+  // lever as the two idle autoclaves above rather than a delete: the runs, lots
+  // and lab verdicts already recorded against these two stay where they are, and
+  // the admin screen turns them back on the day the benches are worked again.
+  { id: 'SLEEVE', name: 'Sleeve', short: 'Sleeve', kind: 'sleeve', type: 'sleeve', group_name: 'Sleeve & Loop', sub: 'batch per shift - pieces, flash and crew at stop', accent: '#7ec9a0', enabled: false, sort_order: 17 },
+  { id: 'LOOP', name: 'Loop', short: 'Loop', kind: 'loop', type: 'loop', group_name: 'Sleeve & Loop', sub: 'batch per shift - pieces, flash and crew at stop', accent: '#c99ade', enabled: false, sort_order: 18 },
 ];
 
 /**
@@ -62,9 +72,14 @@ export const DEV_MACHINES = [
  * the costing then treats as fact. The press sheets show "not set" against each
  * one until the back office fills it in.
  */
+// `code` is the one figure that is not left unset. It is a name rather than a
+// measurement - what an order matches on - which is why seeding it is not the
+// same as inventing a rate. It used to be the prefix a sleeve or loop batch
+// number was built from; since 0007 a lot is named by its shift with the product
+// beside it, so nothing depends on this to start a run.
 export const DEV_PRODUCTS = [
-  { id: 'LOOP', name: 'Loop', cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 1 },
-  { id: 'SLEVE', name: 'Sleve', cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 2 },
+  { id: 'LOOP', name: 'Loop', code: 'LOOP', moulded: true, cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 1 },
+  { id: 'SLEVE', name: 'Sleve', code: 'SLEEVE', moulded: true, cure_temp_c: null, cyclic_min: null, cavities: null, compound_rate: null, active: true, sort_order: 2 },
 ];
 
 let warned = false;

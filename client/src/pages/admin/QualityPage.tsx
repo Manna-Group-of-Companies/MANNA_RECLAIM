@@ -1,20 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchPendingQuality, fetchQualitySummary } from '@/features/quality/qualitySlice';
+import {
+  fetchPendingQuality,
+  fetchQualitySummary,
+  removeTest,
+} from '@/features/quality/qualitySlice';
 import { batchQc, batchQcChip, type BatchQc } from '@/features/quality/qc';
 import { QUALITIES } from '@/config/constants';
+import { useToast } from '@/hooks/useToast';
 import { dayLong, dayMonth, lastNDays, todayISO } from '@/utils/date';
 import { cn } from '@/utils/cn';
-import type { Batch, QualityTest, Verdict } from '@/types/models';
+import type { Batch, QcStatus, QualityTest, RemovedQualityTest, Verdict } from '@/types/models';
 
 /**
  * The lab record as the back office reads it: how each grade is passing, which
  * open batches are still short a verdict, and every test on file with its
  * report.
  *
- * Read-only, like Bearings. A verdict belongs to whoever ran the test at the
+ * Verdicts are not written here. One belongs to whoever ran the test at the
  * bench, so it is filed from the shop-floor Quality tab - a manager reading this
  * page is checking whether a batch may load, not signing for it from a desk.
+ *
+ * What is written here is a delete, and it is the one lab edit the bench cannot
+ * make. Tests are append-only: the bench corrects itself by filing again, and
+ * the newest verdict standing is the one the yard reads. That fixes a wrong
+ * reading and cannot fix a wrong address - a test filed against the wrong batch
+ * or the wrong grade goes on releasing goods it was never about, and every
+ * re-test lands on a different key. Taking the row off is what puts those goods
+ * back, which is why it is admin-gated and why it says what it moved.
  */
 
 /** How far back the page looks. The lab tests daily, so a month is the default. */
@@ -40,8 +53,30 @@ const verdictBadge = (verdict: Verdict) => (verdict === 'hold' ? 'warn' : 'ok');
 /** Holds first, then batches still awaiting a test, then the settled ones. */
 const attention = (qc: BatchQc) => (qc.anyHold ? 0 : qc.allDone ? 2 : 1);
 
+/** Where a group is left once the test that was speaking for it is gone. */
+const QC_WORD: Record<QcStatus, string> = {
+  pass: 'QC passed',
+  fail: 'QC failed',
+  pending: 'awaiting the lab',
+};
+
+/**
+ * What the delete moved in the yard, for the toast.
+ *
+ * Nothing moved is the ordinary case rather than a failure - a verdict releases
+ * stock that already exists and does not create any, so a test filed against a
+ * batch nobody bagged was never carried by a group. Said out loud, because from
+ * a desk "removed" with no more to it is indistinguishable from a delete that
+ * left a released pallet standing.
+ */
+const movedText = (removed: RemovedQualityTest) =>
+  removed.stock_groups.length
+    ? removed.stock_groups.map((g) => `${g.label} → ${QC_WORD[g.qc_status]}`).join(' · ')
+    : 'no stock in the yard was standing on it';
+
 export function AdminQualityPage() {
   const dispatch = useAppDispatch();
+  const notify = useToast();
   const { batches, tests, summary, loading, error } = useAppSelector((s) => s.quality);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
 
@@ -49,6 +84,15 @@ export function AdminQualityPage() {
   const [grade, setGrade] = useState('');
   const [verdict, setVerdict] = useState('');
   const [openBatch, setOpenBatch] = useState<Batch | null>(null);
+  /**
+   * Which test is one tap from being deleted, and which is being deleted.
+   *
+   * One id rather than a flag per row, so arming a second row disarms the
+   * first - the same two-step the run delete uses. A delete moves stock in the
+   * yard and there is no undo behind it, so it is not a single tap.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   useEffect(() => {
     void dispatch(fetchPendingQuality());
@@ -95,6 +139,59 @@ export function AdminQualityPage() {
 
   const untestedBatches = cards.filter(({ qc }) => !qc.allDone).length;
   const heldBatches = cards.filter(({ qc }) => qc.anyHold).length;
+
+  /**
+   * Take a test off the record, and say what it moved in the yard.
+   *
+   * The thunk bumps the refresh tick, so a Stock view open in another tab
+   * re-reads itself rather than going on drawing the verdict this row was
+   * carrying.
+   */
+  const remove = async (test: QualityTest) => {
+    setRemoving(test.id);
+    const done = await dispatch(removeTest(test.id));
+    setRemoving(null);
+    setConfirming(null);
+    if (!removeTest.fulfilled.match(done)) {
+      notify(`Could not remove the ${test.grade} verdict on ${test.batch_no ?? 'this batch'}`, 'err');
+      return;
+    }
+    notify(`${test.batch_no ?? 'Test'} · ${test.grade} removed — ${movedText(done.payload)}`, 'ok');
+  };
+
+  /**
+   * The two-step control, wherever a test is listed.
+   *
+   * Written once because the same test is reachable from the batch it was filed
+   * against and from the window's list of verdicts, and a delete that behaved
+   * differently depending on which screen it was pressed from would be two
+   * controls wearing one name.
+   */
+  const deleteControl = (test: QualityTest) =>
+    confirming === test.id ? (
+      <span className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="btn danger"
+          onClick={() => void remove(test)}
+          disabled={removing === test.id}
+        >
+          {removing === test.id ? 'Removing…' : 'Yes, remove it'}
+        </button>
+        <button type="button" className="btn" onClick={() => setConfirming(null)}>
+          Cancel
+        </button>
+      </span>
+    ) : (
+      <button
+        type="button"
+        className="btn"
+        onClick={() => setConfirming(test.id)}
+        title="Take this test off the record and put the stock it released back"
+      >
+        Remove
+      </button>
+    );
 
   /** One batch on its own: each grade, and every test ever filed against it. */
   if (openBatch) {
@@ -175,8 +272,8 @@ export function AdminQualityPage() {
               </div>
             )}
             {remarkOf(test) && <div className="sub mt-2">{remarkOf(test)}</div>}
-            {test.attachment_url && (
-              <div className="mt-2">
+            <div className="row mt-2 items-center justify-between gap-2">
+              {test.attachment_url ? (
                 <a
                   href={test.attachment_url}
                   target="_blank"
@@ -185,6 +282,19 @@ export function AdminQualityPage() {
                 >
                   {test.attachment_name || 'lab report'} ↗
                 </a>
+              ) : (
+                <span className="muted text-[11px]">no report on file</span>
+              )}
+              {deleteControl(test)}
+            </div>
+            {/* Said beside the armed button rather than only in the toast
+                afterwards: what this moves is stock in the yard, and that is
+                the part somebody at a desk is least likely to have in mind. */}
+            {confirming === test.id && (
+              <div className="sub mt-2">
+                Removing this puts the stock it released back where the tests
+                that remain leave it — the verdict before this one, or awaiting
+                the lab if this was the only one.
               </div>
             )}
           </div>
@@ -357,6 +467,10 @@ export function AdminQualityPage() {
                 <th>When</th>
                 <th>Readings</th>
                 <th>Report</th>
+                {/* The whole window rather than one batch, which is where a
+                    verdict filed against the wrong batch is actually spotted -
+                    it does not appear under the batch it was meant for. */}
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -390,6 +504,7 @@ export function AdminQualityPage() {
                       <span className="muted">—</span>
                     )}
                   </td>
+                  <td>{deleteControl(test)}</td>
                 </tr>
               ))}
             </tbody>

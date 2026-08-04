@@ -5,21 +5,27 @@
  *   node scripts/stock-diagnose.js --pools    -> just the coarse pools
  *   node scripts/stock-diagnose.js AUG-H1     -> one group, by label
  *
- * The yard is read through three endpoints that do not answer the same
+ * The yard is read through four endpoints that do not answer the same
  * question, and a group missing from one while sitting on another is nearly
  * always one of them filtering it rather than the row being absent:
  *
- *   /stock          the manager's. Every group, whatever is left in it.
- *   /stock/summary  the shop floor's. Drops anything with no sacks left - an
- *                   empty group is not stock, and the floor's question is only
- *                   ever "what is there".
- *   /stock/pools    the lab's. Coarse only, and it does *not* drop empty ones,
- *                   because a spent pool still has a sampling record to finish.
+ *   /stock           the manager's. Every group, whatever is left in it.
+ *   /stock/summary   the shop floor's. Every group too, including the spent
+ *                    ones - a pallet somebody is standing in front of and
+ *                    cannot find on the screen is not answered by the row being
+ *                    absent. The difference from the manager's read is the
+ *                    fields on it, not the rows.
+ *   /stock/pools     the lab's coarse tab. Pools only, spent ones included,
+ *                    because a spent pool still has a sampling record to finish.
+ *   /stock/moulded   the lab's moulded tab. Product groups only, and the only
+ *                    way the bench can reach what a press made: a batch is
+ *                    found through the batch card and a pool through the route
+ *                    above, and a group keyed on a product and a pack is on
+ *                    neither. Without it, boxed pieces sit `pending` forever
+ *                    and post_dispatch() refuses to load them.
  *
- * So a coarse pool that has all gone out shows on the lab's tab and on the
- * manager's table and is absent from the supervisor's - which looks like a bug
- * and is the rule working. This prints which of the three each row lands on and
- * why, so the answer takes one command instead of three logins.
+ * This prints which of the four each row lands on and why, so the answer takes
+ * one command instead of four logins.
  *
  * It writes nothing. Safe to run against the live project while the plant is
  * working.
@@ -40,25 +46,28 @@ const tests = crud(TABLES.qualityTests, { defaultSort: 'ts' });
 const int = (value) => Number(value ?? 0);
 const pad = (text, width) => String(text).padEnd(width);
 
-/** Which of the three reads this row lands on, and what keeps it off the rest. */
+/** Which of the four reads this row lands on, and what keeps it off the rest. */
 function visibility(row) {
   const available = int(row.available_sacks ?? int(row.packed_sacks) - int(row.dispatched_sacks));
-  const pool = row.kind === 'pool';
-  const on = [];
+  const on = ['/stock', '/stock/summary'];
   const off = [];
 
-  on.push('/stock');
-
-  if (available > 0) on.push('/stock/summary');
-  else off.push('/stock/summary — nothing left in it (available_sacks is 0)');
-
-  if (pool) on.push('/stock/pools');
+  // The lab reaches a pool and a moulded group by a route of its own and
+  // neither by the other's, which is the answer to most of "why can the bench
+  // not see it". A batch group is on neither and needs neither: it is certified
+  // through the batch card, which is where its grades are listed.
+  if (row.kind === 'pool') on.push('/stock/pools');
+  // Both moulded kinds are on the one list, and each is answered differently:
+  // a `product` verdict moves every pack of it, a `lot` verdict moves that
+  // shift alone. Which one the bench is looking at is on the row.
+  else if (row.kind === 'product' || row.kind === 'lot') on.push('/stock/moulded');
+  else off.push('the lab\'s stock routes — a batch group is certified from the batch card');
 
   // Not a view, but the question behind most of these: may it go on a vehicle?
   if (row.qc_status !== 'pass') {
     off.push(`dispatch — post_dispatch() refuses qc_status='${row.qc_status}'`);
   } else if (available <= 0) {
-    off.push('dispatch — no sacks left to draw down');
+    off.push('dispatch — nothing left to draw down');
   }
 
   return { available, on, off };

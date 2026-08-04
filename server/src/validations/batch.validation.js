@@ -63,6 +63,17 @@ export const batchQualitySchema = z.object({
  *            a batch test with the enum loosened. `batchNo` is the batch of
  *            compound the press was running, which is what a re-test is filed
  *            against.
+ *   lot      one shift of sleeve or loop. Also moulded goods, and `grade`
+ *            carries the product here too - but a lot is certified per shift, so
+ *            the verdict is addressed by `grade` and `batchNo` together, and the
+ *            number is required rather than optional. That is the whole
+ *            difference from a `product` test: one moves a shift of one product,
+ *            the other moves every pack of that product in the yard.
+ *
+ *            Both halves, because the number is the date and the shift and
+ *            nothing else - `03/Aug/26-day` is what the sleeve bench and the loop
+ *            bench both worked. A verdict addressed by it alone would certify
+ *            goods nobody tested.
  *
  * `batchNo` carries the pool's label on a pool test, which is why it is not
  * renamed: it is the same column, holding the same kind of thing - the key of
@@ -74,7 +85,7 @@ export const batchQualitySchema = z.object({
  * coarse by definition, so a pool test naming anything else is one too.
  */
 export const qualityTestSchema = z.object({
-  kind: z.enum(['batch', 'pool', 'product']).optional().default('batch'),
+  kind: z.enum(['batch', 'pool', 'product', 'lot']).optional().default('batch'),
   batchNo: z.string().optional().nullable(),
   batchId: z.string().optional().nullable(),
   runId: z.string().optional().nullable(),
@@ -101,7 +112,10 @@ export const qualityTestSchema = z.object({
   attachmentName: z.string().max(200).optional().nullable(),
 }).superRefine((test, ctx) => {
   const pool = test.kind === 'pool';
-  const product = test.kind === 'product';
+  const lot = test.kind === 'lot';
+  // Both kinds of moulded verdict name a product in `grade` rather than one of
+  // the plant's grades, so the grade rules below leave both alone.
+  const product = test.kind === 'product' || lot;
 
   if (pool && test.grade !== 'Coarse') {
     ctx.addIssue({
@@ -133,14 +147,45 @@ export const qualityTestSchema = z.object({
     });
   }
 
-  // A moulded verdict releases the product's stock, so it has to say which
-  // product - and it names the batch of compound the press was running, which is
-  // what a re-test is filed against and what the yard's card is read back by.
-  if (product && !test.batchNo) {
+  /*
+   * A moulded verdict names its product, and that is all it is required to name.
+   *
+   * It used to have to carry the batch of compound the press was running as
+   * well, and that requirement could not be met: a press run records no batch
+   * number - `runs.batch_no` is null on everything moulded since the presses
+   * stopped naming one - so there was nothing for the bench to type. The verdict
+   * was refused, the pieces stayed `pending`, and post_dispatch() refuses
+   * anything that is not `pass`, so a product could be moulded and boxed and
+   * never sold, with no screen anywhere able to say why. That is the same trap
+   * coarse pools were in before they were released on packing.
+   *
+   * Nothing was resting on it either. A moulded group is addressed by its
+   * product - see stockService.applyLabVerdict() - so the batch never decided
+   * which stock a verdict moved. It stays optional and is kept where it is
+   * known, because an older run that does carry one is worth recording against
+   * the test; it is provenance, not a key.
+   */
+
+  /*
+   * The lot the verdict is about.
+   *
+   * Required here where it is optional on a `product` test, and the asymmetry is
+   * the point rather than an oversight. A press verdict is addressed by the
+   * product, so its batch was only ever provenance and asking for one that a
+   * press run does not record is what used to strand moulded goods at `pending`.
+   * A lot verdict is addressed by the batch number and the product together - it
+   * is half the key - and one filed without it would move no stock at all and
+   * look exactly like one that had.
+   *
+   * Nobody types it. The number is generated from the shift date and the shift,
+   * and the bench picks the lot off the moulded stock list, which is where the
+   * product it is paired with comes from too.
+   */
+  if (lot && !test.batchNo) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['batchNo'],
-      message: 'A moulded test has to name the batch the press was moulding',
+      message: 'A sleeve or loop verdict has to name the lot it is about',
     });
   }
 

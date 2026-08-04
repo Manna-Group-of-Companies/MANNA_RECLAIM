@@ -78,6 +78,12 @@ const FIELD_COLUMNS = {
   packSize: 'pack_size',
   packLabel: 'pack_label',
   pieceKg: 'piece_kg',
+  /*
+   * Whether it is moulded at all. Cavities and a cycle time are facts about a
+   * mould, so the sleeve and loop run sheets ask for neither where this is off -
+   * see run.service's mouldingFields().
+   */
+  moulded: 'moulded',
   machineId: 'machine_id',
   rawMaterialCost: 'raw_material_cost',
   firewoodCost: 'firewood_cost',

@@ -57,6 +57,12 @@ interface Draft {
   cyclicMin: string;
   cavities: string;
   compoundRate: string;
+  /**
+   * Whether the item is moulded at all. Cavities and a cycle time are facts
+   * about a mould, so an item that is cut or assembled has neither - and the
+   * sleeve and loop run sheets then ask for neither.
+   */
+  moulded: boolean;
   note: string;
 }
 
@@ -79,8 +85,15 @@ const blank: Draft = {
   cyclicMin: '',
   cavities: '',
   compoundRate: '',
+  // A new product is assumed to be moulded: everything on the list today is.
+  moulded: true,
   note: '',
 };
+
+/** The draft fields that are typed into a text box, as against ticked. */
+type TextKey = {
+  [K in keyof Draft]: Draft[K] extends string ? K : never;
+}[keyof Draft];
 
 const text = (value: number | null | undefined) => (value == null ? '' : String(value));
 
@@ -103,6 +116,9 @@ const draftOf = (p: Product): Draft => ({
   cyclicMin: text(p.cyclic_min),
   cavities: text(p.cavities),
   compoundRate: text(p.compound_rate),
+  // Absent reads as moulded: the column defaults true, and every row written
+  // before it existed was something a press moulds.
+  moulded: p.moulded !== false,
   note: p.note ?? '',
 });
 
@@ -177,6 +193,7 @@ export function ProductsPage() {
       cyclicMin: asNumber(draft.cyclicMin),
       cavities: asNumber(draft.cavities),
       compoundRate: asNumber(draft.compoundRate),
+      moulded: draft.moulded,
       note: draft.note.trim() || null,
     };
     setSaving(true);
@@ -212,7 +229,10 @@ export function ProductsPage() {
     id: string,
     label: string,
     unit: string | null,
-    key: keyof Draft,
+    // The typed fields only. `moulded` is a checkbox and `id` is not edited, so
+    // neither goes through this helper - and narrowing the key here is what
+    // stops one being handed to it by accident.
+    key: TextKey,
     hint?: string,
     numeric = true,
   ) => (
@@ -342,7 +362,12 @@ export function ProductsPage() {
                 value={draft.code}
                 onChange={(e) => setDraft({ ...draft, code: e.target.value.toUpperCase() })}
               />
-              <div className="sub mt-1">Unique across the list — this is what an order is matched on.</div>
+              <div className="sub mt-1">
+                Unique across the list — this is what an order is matched on. A sleeve or loop
+                batch number no longer uses it: a lot is named by the shift it was made on,{' '}
+                <b>03/Aug/26-day</b>, with the product beside it. So a product with no code can
+                still be made and still be sold; it is the order that will not match.
+              </div>
             </div>
             <div className="field">
               <label htmlFor="p-quality">Quality</label>
@@ -413,6 +438,30 @@ export function ProductsPage() {
             {field('p-mh', 'Machine hours', 'h', 'machineHours')}
 
             <div className="sheet-label mt-3">Press settings</div>
+            {/*
+              Whether it is moulded at all.
+
+              Cavities and a cycle time are facts about a mould, so an item that
+              is cut or assembled rather than moulded has neither - and the
+              sleeve and loop run sheets then ask for neither, and report no
+              expected piece count, because there is no cycle to work one out
+              from. A checkbox rather than one of the numeric fields above: it is
+              a yes or no about the item, not a figure somebody measures.
+            */}
+            <div className="field">
+              <label htmlFor="p-moulded">Moulded</label>
+              <input
+                id="p-moulded"
+                type="checkbox"
+                checked={draft.moulded}
+                onChange={(e) => setDraft({ ...draft, moulded: e.target.checked })}
+              />
+              <div className="sub mt-1">
+                Off for anything cut or assembled rather than moulded. The two settings below are
+                then not asked for at the run, and there is no expected piece count to compare a
+                shift against.
+              </div>
+            </div>
             {field('p-temp', 'Curing temperature', '°C', 'cureTempC', 'Shown at the press as a fact of the product, never typed there.')}
             {field('p-cycle', 'Cyclic time', 'min', 'cyclicMin', 'Pre-filled at the run, and editable for that run alone.')}
             {field('p-cav', 'Cavities', null, 'cavities', 'How many pieces the mould makes per cycle.')}

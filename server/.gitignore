@@ -28,6 +28,9 @@ coverage/
 uploads/
 tmp/
 temp/
+# what scripts/lot-key-split.js writes before it touches anything - real plant
+# rows, and not ours to commit
+backups/
 
 # editors / os
 .vscode/

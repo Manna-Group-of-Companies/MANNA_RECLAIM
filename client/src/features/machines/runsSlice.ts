@@ -6,7 +6,7 @@ import {
   type StopRunPayload,
 } from '@/api/services/run.service';
 import { toRequestError } from '@/api/axiosClient';
-import { SACK_KG, WEIGHED_PAGE } from '@/config/constants';
+import { SACK_KG, WEIGHED_PAGE, isMoulding } from '@/config/constants';
 import type { Run, Shift } from '@/types/models';
 
 interface RunsState {
@@ -71,12 +71,14 @@ const asStock = (run: Run, known?: Run): Run => {
  *
  * On a bagged run that means under one sack of material left, because the
  * remainder is carried into the next batch of the same grade rather than
- * bagged. On a press run it means every piece it moulded has been boxed - there
- * is no weight to divide and no remainder to carry, so the comparison is
- * between two counts.
+ * bagged. On anything counted by the piece - a press, and the sleeve and loop
+ * benches - it means every piece it made has been boxed: there is no weight to
+ * divide and no remainder to carry, so the comparison is between two counts.
  */
 const stillPacking = (run: Run) => {
-  if (run.kind === 'press') return (run.pieces ?? 0) > (run.packed_pieces ?? 0);
+  if (run.kind === 'press' || isMoulding(run.kind)) {
+    return (run.pieces ?? 0) > (run.packed_pieces ?? 0);
+  }
   const total = (run.weight_kg ?? run.out_weight ?? 0) + (run.leftout_in ?? 0);
   const packed = (run.packed_sacks ?? 0) * SACK_KG;
   return run.packed_sacks == null || total - packed >= SACK_KG;

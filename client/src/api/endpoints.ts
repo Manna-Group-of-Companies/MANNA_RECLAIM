@@ -124,6 +124,12 @@ export const endpoints = {
     shifts: '/reports/shifts',
     shiftEfficiency: '/reports/shift-efficiency',
     efficiencyNotes: '/reports/efficiency-notes',
+    /**
+     * The machine log as a spreadsheet - every logged run, one column set for
+     * the whole plant. The only route that answers with a file rather than the
+     * usual envelope, which is why it is fetched as a blob.
+     */
+    machineLog: '/reports/machine-log.csv',
   },
 } as const;
 

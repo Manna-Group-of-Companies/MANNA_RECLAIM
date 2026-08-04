@@ -1,5 +1,5 @@
-import { CRACKER_IDS } from '@/config/constants';
-import type { UpdateRunPayload } from '@/api/services/run.service';
+import { CRACKER_IDS, isMoulding } from '@/config/constants';
+import type { RemovedRun, UpdateRunPayload } from '@/api/services/run.service';
 import type { Run } from '@/types/models';
 
 /**
@@ -107,7 +107,14 @@ export function runMath(run: Run, draft: Draft): RunMath {
   // A press run re-costs itself as it is corrected: material follows the weight
   // and the flash, at the rate the run was moulded under, and cost per piece
   // follows the count. The rate itself is not editable, so it comes off the run.
-  const isPress = run.kind === 'press';
+  //
+  // A sleeve or loop run corrects the same way and is included here: it is
+  // moulded against the same product, costed against the same compound rate,
+  // and counted in the same pieces. What it does not do is take a corrected
+  // product, date or shift - those three are its batch number, and moving it
+  // would leave its boxed pieces standing in the yard under a lot that no longer
+  // exists. The server refuses that outright; see run.service's edit().
+  const isPress = run.kind === 'press' || isMoulding(run.kind);
   const rate = run.compound_rate != null ? Number(run.compound_rate) : null;
   const charged = round2((asNumber(draft.outWeight) ?? 0) + (asNumber(draft.flashKg) ?? 0));
   const material = isPress && rate != null && charged > 0 ? round2(rate * charged) : null;
@@ -133,7 +140,7 @@ export function runMath(run: Run, draft: Draft): RunMath {
     issues.push('The hour meter reads lower at the end than at the start.');
   }
   if (isPress && pieces != null && pieces <= 0) {
-    issues.push('A press run that made no pieces has nothing to cost.');
+    issues.push('A run that made no pieces has nothing to cost.');
   }
   if (isCracker && (pickLabourers ?? 0) > 0 !== (pickHours ?? 0) > 0) {
     issues.push('Picking needs both the labourers and the hours, or neither.');
@@ -196,4 +203,32 @@ export function buildPayload(draft: Draft, changed: DraftField[], math: RunMath)
   if (math.elecPair) delete payload.kwh;
   if (math.hourPair) delete payload.hoursRun;
   return payload;
+}
+
+/**
+ * What a delete actually took, as a sentence for the crew.
+ *
+ * A run is not only its own row. What it packed was standing in the yard and
+ * what the bench tested was on the lab's table, and deleting the run takes both
+ * - so "Entry deleted" on its own understates it by exactly the part somebody
+ * would want to check. The count and the group are named, because a supervisor
+ * who sees the yard drop by twelve sacks an hour later should be able to
+ * remember why.
+ *
+ * The unaccounted case is the one worth saying out loud: packed output no group
+ * could be found for is a discrepancy in the yard that no screen would
+ * otherwise show, so the server's note is passed straight through.
+ */
+export function deletedSummary(removed: RemovedRun): { message: string; warn: boolean } {
+  const parts: string[] = ['Entry deleted'];
+  if (removed.stock_cleared) {
+    const { taken, label, removed: gone } = removed.stock_cleared;
+    parts.push(gone ? `${label} cleared from stock` : `${taken} off ${label}`);
+  }
+  if (removed.quality_tests_deleted) {
+    const n = removed.quality_tests_deleted;
+    parts.push(`${n} lab test${n > 1 ? 's' : ''} removed`);
+  }
+  if (removed.stock_note) return { message: removed.stock_note, warn: true };
+  return { message: parts.join(' · '), warn: false };
 }
