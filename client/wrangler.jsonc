@@ -14,6 +14,26 @@
   // this deployment behaves.
   "compatibility_date": "2025-06-01",
 
+  /**
+   * What to run before deploying. Wrangler runs this itself, so the compile is
+   * described here next to the thing it produces rather than living only in the
+   * Workers Builds project settings, where nothing in the repo can see it and a
+   * wrong value is invisible until a deploy hangs.
+   *
+   * It hung exactly that way: the dashboard's build command was `npm run dev`,
+   * which starts Vite's dev server. That listens forever instead of exiting, so
+   * the job never reached `wrangler deploy` and dist/ was never written - a
+   * build that fails by succeeding quietly and then waiting.
+   *
+   * `npm run build` is `tsc --noEmit && vite build`: the typecheck gates the
+   * bundle, so a type error stops the deploy rather than shipping past it.
+   * vercel.json says the same thing for the other target; the two describe the
+   * same build and neither reads the other, so they have to be changed together.
+   */
+  "build": {
+    "command": "npm run build"
+  },
+
   // No "main": there is no Worker script. Cloudflare serves dist/ straight from
   // its edge cache, which is all a compiled React bundle needs.
   "assets": {
