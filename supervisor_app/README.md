@@ -8,11 +8,34 @@ the same route, with the same body.
 ```
 flutter pub get
 flutter run --dart-define=API_URL=http://10.0.2.2:5000/api/v1
-flutter build apk --release --dart-define=API_URL=https://api.example.com/api/v1
+./tool/build-release.sh          # the APK to hand out - see below
 ```
 
 `10.0.2.2` is the Android emulator's route to the host machine. On real
 hardware, point `API_URL` at the plant's API host.
+
+### The APK you hand out
+
+Build it with `./tool/build-release.sh`, not `flutter build apk --release`.
+
+The API URL is a compile-time constant, read from `.env` by
+`--dart-define-from-file`. Leave that flag off and the build takes
+`AppConfig.apiUrl`'s fallback instead - silently, because a define that was
+never passed leaves no trace in the output. A release APK went out that way
+pointing at `10.0.2.2:4000`, the emulator's alias for its host machine, which
+resolves to nothing on a real phone: every call failed and the app sat on
+"network unreachable, working offline", which reads as a handset with no
+signal rather than as an APK that was never told where the server is.
+
+The script passes the flag, then reads the URL back out of the AOT snapshot in
+the APK it just built. If that turns out to be `localhost`, `10.0.2.2`,
+`127.0.0.1` or a LAN address, it deletes the APK and exits non-zero - because a
+refusal that leaves the file on disk only means the next person to reach for
+`app-release.apk` picks up the broken one.
+
+The fallback now points at the deployed API rather than the emulator, so
+forgetting the flag no longer breaks the app. It would still ignore anything
+else `.env` sets, which is why the script is the documented route.
 
 ### On a phone, against the dev server
 
