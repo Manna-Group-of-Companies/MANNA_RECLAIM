@@ -1,0 +1,29 @@
+<!-- The brand plate's tile and mark, from components/layout/Header.tsx, with the
+     wordmark dropped: "Manna / PRODUCTION MGMT" is illegible at 16px and only
+     muddies the glyph. The tile keeps the company green rather than a theme
+     colour, so the tab reads the same against a light or dark browser chrome.
+
+     The mark is drawn at 24 units inside a 32 unit tile - proportionally larger
+     than in the header, and on a heavier stroke - because a favicon is rendered
+     at 16px, where the header's weight closes up into a green blob. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="mannaLogo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6cb83f" />
+      <stop offset="1" stop-color="#3f8a22" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#mannaLogo)" />
+  <g
+    transform="translate(4,4)"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="2.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <polyline points="23 4 23 10 17 10" />
+    <polyline points="1 20 1 14 7 14" />
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+  </g>
+</svg>

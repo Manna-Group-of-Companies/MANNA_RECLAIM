@@ -8,6 +8,12 @@
     <meta name="theme-color" content="#1a232f" />
     <meta name="color-scheme" content="dark" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- One SVG covers every browser that draws a tab. iOS is the exception:
+         Safari ignores an SVG here and, with nothing to fall back to, puts a
+         screenshot of the page on the home screen - which matters because this
+         is installed to the home screen on the floor phones. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Manna Production Management</title>
   </head>
   <body>
