@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchPendingPack, packRun } from '@/features/machines/runsSlice';
+import { fetchPendingPack, packRun, unpackRun } from '@/features/machines/runsSlice';
+import { toRequestError } from '@/api/axiosClient';
 import {
   BatchRef,
   BottomSheet,
@@ -14,7 +15,7 @@ import {
   ViewHead,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { SACK_KG, isMoulding } from '@/config/constants';
+import { ADMIN_ROLES, SACK_KG, isMoulding } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { clock24, dayMonth } from '@/utils/date';
@@ -143,6 +144,28 @@ export function PackingPage() {
   const [target, setTarget] = useState<PackCard | null>(null);
   const [count, setCount] = useState('');
   const [grade, setGrade] = useState('');
+  /**
+   * Whether this account may undo a packing.
+   *
+   * The crew cannot, and the control is not drawn for it - DELETE
+   * /runs/:id/pack is adminOnly, so the button would be a tap that comes back
+   * 403. Nothing is taken away by that: the packed figure is absolute and
+   * re-entering it is a correction, so a crew that bagged eleven and meant
+   * twelve fixes it at the bench the way it always did. What needs the office
+   * is taking the packing off altogether, because that pulls filed stock back
+   * out of the yard.
+   */
+  const mayUnpack = useAppSelector((s) =>
+    s.auth.user ? ADMIN_ROLES.includes(s.auth.user.role) : false,
+  );
+  /**
+   * Which card is one tap from having its packing undone, and which is busy.
+   *
+   * One id rather than a flag per card, so arming a second disarms the first -
+   * the same two-step the run delete and the lab-test delete use.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
 
   /*
    * On mount, and whenever anything asks for a refresh.
@@ -305,6 +328,45 @@ export function PackingPage() {
     if (okay && filed) setTarget(null);
   };
 
+  /**
+   * Take the packing off a run, and say what came back out of the yard.
+   *
+   * "Deleted" on its own would understate it by exactly the part somebody would
+   * want to check: what this moves is stock, and the group empties - and goes
+   * entirely when this run was the only thing in it. So the toast names the
+   * group and the count, the same way the History tab's delete does.
+   *
+   * The server's refusals come straight through rather than being reworded
+   * here. Both of them - already dispatched, or more than the group is holding
+   * - name the document or the tab the work is actually on, and a screen that
+   * replaced that with "could not remove the packing" would be throwing away
+   * the only part of the answer that helps.
+   */
+  const undo = async (card: PackCard) => {
+    setUndoing(card.run.id);
+    const done = await dispatch(unpackRun(card.run.id));
+    setUndoing(null);
+    if (!unpackRun.fulfilled.match(done)) {
+      setConfirming(null);
+      notify(String(done.payload ?? toRequestError(done.error).message), 'err');
+      return;
+    }
+    setConfirming(null);
+
+    const { stock_cleared: cleared, stock_note: note } = done.payload;
+    if (note) return notify(note, 'warn');
+    notify(
+      cleared
+        ? `${refOf(card)} unpacked — ${
+            cleared.removed
+              ? `${cleared.label} cleared from stock`
+              : `${cleared.taken} off ${cleared.label}`
+          }`
+        : `${refOf(card)} unpacked`,
+      'ok',
+    );
+  };
+
   if (loading && !pendingPack.length) return <PageLoader label="Loading runs" />;
 
   if (!pendingPack.length) {
@@ -363,8 +425,9 @@ export function PackingPage() {
           const run = card.run;
           const done = card.press ? boxedOf(run) : (run.packed_sacks ?? 0);
           const total = totalFor(run);
+          const armed = confirming === card.key;
           return (
-            <div key={card.key} className="wcard">
+            <div key={card.key} className={cn('wcard', armed && 'flex-wrap')}>
               <div className="info">
                 <div className="row1">
                   {/* The lot, or the press and when it ran - see refOf(). */}
@@ -390,9 +453,53 @@ export function PackingPage() {
                   </small>
                 )}
               </div>
-              <Button variant="primary" onClick={() => open(card)}>
-                {done > 0 ? 'Update ▸' : card.press ? 'Box ▸' : 'Pack ▸'}
-              </Button>
+              <span className="flex flex-none items-center gap-1.5">
+                {/* Only once something has actually been packed. A run nobody
+                    has bagged yet has no packing to take off, and the server
+                    says so - offering the button anyway would be a tap whose
+                    only outcome is an error message. */}
+                {mayUnpack && done > 0 && !armed && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirming(card.key)}
+                    title="Take this packing off and put the stock back out of the yard"
+                  >
+                    Remove
+                  </Button>
+                )}
+                <Button variant="primary" onClick={() => open(card)}>
+                  {done > 0 ? 'Update ▸' : card.press ? 'Box ▸' : 'Pack ▸'}
+                </Button>
+              </span>
+
+              {/* The consequence spelled out beside the armed button rather
+                  than left to the toast afterwards. What this moves is stock in
+                  the yard, and the run staying put is the part worth saying -
+                  it is what makes this different from the History tab's
+                  delete, which takes the shift off the record as well. */}
+              {armed && (
+                <div className="w-full">
+                  <div className="hint mt-2">
+                    This takes {done} {card.press ? 'boxed pieces' : 'sacks'} back out of the yard
+                    and puts {refOf(card)} back on the bench to be{' '}
+                    {card.press ? 'boxed' : 'packed'} again. The run itself stays on the record.
+                  </div>
+                  <div className="mt-1.5 flex gap-2">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      loading={undoing === card.run.id}
+                      onClick={() => void undo(card)}
+                    >
+                      Yes, remove the packing
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

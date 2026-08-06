@@ -7,8 +7,15 @@ import {
   fetchPendingQuality,
   fetchQualitySummary,
   recordTest,
+  removeTest,
 } from '@/features/quality/qualitySlice';
-import { batchQc, batchQcChip, type BatchQc, type GradeStatus } from '@/features/quality/qc';
+import {
+  batchQc,
+  batchQcChip,
+  removedText,
+  type BatchQc,
+  type GradeStatus,
+} from '@/features/quality/qc';
 import {
   BatchRef,
   BottomSheet,
@@ -25,7 +32,13 @@ import {
   TextField,
   ViewHead,
 } from '@/components/ui';
-import { QC_PARAM_SUGGEST, QC_REPORT_MAX_BYTES, SUPERVISORS, counted } from '@/config/constants';
+import {
+  DELETE_ROLES,
+  QC_PARAM_SUGGEST,
+  QC_REPORT_MAX_BYTES,
+  SUPERVISORS,
+  counted,
+} from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
@@ -37,7 +50,6 @@ import type {
   PoolSlot,
   Quality,
   QualityParam,
-  QualityTest,
   StockPool,
   Verdict,
 } from '@/types/models';
@@ -84,6 +96,17 @@ interface Draft {
    * against and what makes the record mean anything later.
    */
   batchNo: string;
+  /**
+   * The verdict already standing here, where there is one.
+   *
+   * The sheet is opened on a grade or a sample point rather than on a test, so
+   * this is what says whether that point has been answered before - which is
+   * what a re-test starts from, and what the delete at the foot of the sheet
+   * acts on. Null on a moulded draft, which is opened on a stock group: the
+   * verdict on those is addressed by product and batch rather than kept on the
+   * row, so there is no single test to offer here.
+   */
+  test: StandingTest | null;
   grade: Quality | 'Coarse' | string;
   params: QualityParam[];
   verdict: Verdict;
@@ -113,6 +136,27 @@ const poolHint = (pool: StockPool) => {
   return `${pool.samples_taken} of ${pool.samples_total} sampled`;
 };
 
+/**
+ * The verdict a sheet was opened on, in the fields the sheet actually uses.
+ *
+ * One field carries both kinds because it is one row on the server served by two
+ * serializers: a batch grade's verdict arrives as a QualityTest and a pool
+ * sample's as a PoolSample, and they differ only in that the pool's `grade`
+ * widens to take 'Coarse'. Narrowing to what the two share is truer than casting
+ * one into the other, and it is exactly what the delete below needs - the id to
+ * send, and enough of the rest to say what is about to go.
+ */
+interface StandingTest {
+  id: string;
+  verdict: Verdict;
+  grade: string;
+  batch_no?: string | null;
+  tested_at?: string | null;
+  tested_by?: string | null;
+  tester?: string | null;
+  params?: QualityParam[];
+}
+
 const emptyEntry = { name: '', value: '', unit: '' };
 
 /** When the batch went into the autoclave - how old the material is. */
@@ -121,7 +165,7 @@ const chargedText = (batch: Batch) => {
   return [batch.machine_id, when && `charged ${when}`].filter(Boolean).join(' · ');
 };
 
-const readings = (test: QualityTest) => {
+const readings = (test: { params?: QualityParam[] }) => {
   const count = test.params?.length ?? 0;
   return count ? `${count} reading${count > 1 ? 's' : ''}` : 'no readings';
 };
@@ -182,6 +226,27 @@ export function QualityPage() {
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   // Whoever is signed in on this device is the default tester.
   const supervisor = useAppSelector((s) => s.auth.user?.name ?? '');
+  /**
+   * Whether this account may take a test off the record.
+   *
+   * The admin account alone - not the bench, and not a manager either. See
+   * DELETE_ROLES, and note that this is narrower than the rest of the back
+   * office's reach on purpose.
+   *
+   * The bench does not need it: tests are append-only here by design - the lab
+   * corrects itself by filing again, and the newest verdict standing is the one
+   * the yard reads. Neither does a manager, who can already move goods the
+   * reversible way with PATCH /stock/:id/qc. What is behind this list is the one
+   * edit a re-test cannot make - a verdict filed against the wrong batch or the
+   * wrong grade, which goes on releasing goods it was never about because every
+   * re-test lands on a different key - and it cannot be undone once it is done.
+   *
+   * DELETE /quality-tests/:id is gated the same way on the server, so drawing
+   * this any wider would be offering a tap that comes back 403.
+   */
+  const mayRemove = useAppSelector((s) =>
+    s.auth.user ? DELETE_ROLES.includes(s.auth.user.role) : false,
+  );
 
   /** The batch whose grades are listed, and the grade being written up. */
   const [target, setTarget] = useState<Batch | null>(null);
@@ -190,6 +255,15 @@ export function QualityPage() {
   const [saving, setSaving] = useState(false);
   /** Which state the list is narrowed to. Empty is all of them. */
   const [state, setState] = useState<QcState | ''>('');
+  /**
+   * Which verdict is one tap from being deleted, and which is being deleted.
+   *
+   * One id rather than a flag per row, so arming a second row disarms the
+   * first. A delete moves stock in the yard and there is no undo behind it, so
+   * it is not a single tap.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   /** The coarse pools and their sample slots - the other half of the bench's work. */
   const [pools, setPools] = useState<StockPool[]>([]);
@@ -291,6 +365,7 @@ export function QualityPage() {
       pool: null,
       moulded: null,
       batchNo: '',
+      test: prev ?? null,
       grade: status.grade,
       // A re-test starts from what was measured last time rather than blank.
       params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
@@ -314,6 +389,7 @@ export function QualityPage() {
       pool: { pool, slot },
       moulded: null,
       batchNo: '',
+      test: prev ?? null,
       grade: 'Coarse',
       params: prev?.params ? prev.params.map((p) => ({ ...p })) : [],
       verdict: prev?.verdict ?? 'pass',
@@ -362,6 +438,7 @@ export function QualityPage() {
        * with its own.
        */
       batchNo: row.kind === 'lot' ? (row.batch_no ?? '') : '',
+      test: null,
       grade: row.product_id ?? row.quality ?? '',
       params: [],
       verdict: 'pass',
@@ -543,6 +620,50 @@ export function QualityPage() {
         : 'ok',
     );
     setDraft(null); // back to the batch's grades, or to the pools
+  };
+
+  /**
+   * Take a verdict off the record, and say what it moved in the yard.
+   *
+   * The thunk re-reads the pending batches and bumps the refresh tick, so this
+   * page's own lists and anything open beside it - the back office's lab
+   * record, the pass-rate bars, the yard - all redraw without the verdict
+   * rather than going on showing what it was releasing.
+   */
+  const remove = async (test: StandingTest) => {
+    setRemoving(test.id);
+    const done = await dispatch(removeTest(test.id));
+    setRemoving(null);
+    setConfirming(null);
+    if (!removeTest.fulfilled.match(done)) {
+      notify(`Could not remove the ${test.grade} verdict on ${test.batch_no ?? 'this batch'}`, 'err');
+      return false;
+    }
+    notify(`${test.batch_no ?? 'Test'} · ${test.grade} removed — ${removedText(done.payload)}`, 'ok');
+    return true;
+  };
+
+  /**
+   * The same delete, from the sheet the verdict is being read in.
+   *
+   * The list of recent verdicts below only carries the newest dozen, and a
+   * verdict filed against the wrong grade is usually found by opening that grade
+   * and seeing what is standing on it - which is here. So the control is offered
+   * where the mistake is actually seen rather than only where the newest rows
+   * happen to be listed. It is the one call either way, so the two cannot come
+   * apart.
+   *
+   * The sheet closes on success: what it was opened to show is gone, and leaving
+   * it up would offer a re-test seeded from a verdict that no longer exists.
+   */
+  const removeFromSheet = async (test: StandingTest) => {
+    if (await remove(test)) setDraft(null);
+  };
+
+  /** Shut the sheet, and disarm anything armed inside it. */
+  const closeDraft = () => {
+    setConfirming(null);
+    setDraft(null);
   };
 
   if (loading && !batches.length && !tests.length) return <PageLoader label="Loading quality" />;
@@ -890,6 +1011,43 @@ export function QualityPage() {
                     )}
                   </div>
                 )}
+
+                {/* Two-step, and the consequence spelled out beside the armed
+                    button rather than left to the toast afterwards: what this
+                    moves is stock in the yard, which is the part somebody
+                    reading a list of verdicts is least likely to have in mind. */}
+                {mayRemove &&
+                  (confirming === test.id ? (
+                    <>
+                      <div className="hint mt-1.5">
+                        Removing this puts the stock it released back where the tests that remain
+                        leave it — the verdict before this one, or awaiting the lab if this was the
+                        only one.
+                      </div>
+                      <div className="mt-1.5 flex gap-2">
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          loading={removing === test.id}
+                          onClick={() => void remove(test)}
+                        >
+                          Yes, remove it
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mt-1.5"
+                      onClick={() => setConfirming(test.id)}
+                    >
+                      Remove
+                    </Button>
+                  ))}
               </div>
             ))}
           </div>
@@ -975,10 +1133,12 @@ export function QualityPage() {
             : undefined
         }
         led="var(--led-brand)"
-        onClose={() => setDraft(null)}
+        /* Disarmed on the way out, so the same verdict is not still one tap from
+           being deleted in the list of recent ones behind this sheet. */
+        onClose={closeDraft}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setDraft(null)}>
+            <Button variant="ghost" onClick={closeDraft}>
               Cancel
             </Button>
             <Button variant="primary" onClick={save} loading={saving}>
@@ -1202,6 +1362,66 @@ export function QualityPage() {
                 ? 'A hold stops the whole period — the pool cannot be dispatched until a later sample passes. An unsampled pool still sells.'
                 : 'A hold does not stop a dispatch — it flags the batch so whoever loads it decides deliberately.'}
             </div>
+
+            {/*
+              Taking the verdict standing here off the record.
+
+              Only where there is one, and only for the back office - the bench
+              corrects itself by saving again, which is what the button in the
+              footer does and what tests being append-only means. This is the
+              other case: a verdict filed against the wrong grade or the wrong
+              sample point, which every re-test misses because each one lands on
+              a different key. Two-step, and the consequence is spelled out on
+              the armed control rather than left to the toast, because what this
+              moves is stock in the yard.
+            */}
+            {mayRemove && draft.test && (
+              <>
+                <SheetLabel className="mt-4">This verdict</SheetLabel>
+                <div className="hint mb-1.5">
+                  {[
+                    draft.test.verdict === 'hold' ? 'Held' : 'Passed',
+                    dayMonth(draft.test.tested_at),
+                    draft.test.tested_by ?? draft.test.tester,
+                    readings(draft.test),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                  . Saving above files a re-test beside it; removing it takes it off the record
+                  altogether.
+                </div>
+                {confirming === draft.test.id ? (
+                  <>
+                    <div className="hint" style={{ color: 'var(--warn)' }}>
+                      Removing this puts the stock it released back where the tests that remain
+                      leave it — the verdict before this one, or awaiting the lab if this was the
+                      only one.
+                    </div>
+                    <div className="mt-1.5 flex gap-2">
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={removing === draft.test.id}
+                        onClick={() => void removeFromSheet(draft.test as StandingTest)}
+                      >
+                        Yes, remove it
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConfirming(draft.test?.id ?? null)}
+                  >
+                    Remove this verdict
+                  </Button>
+                )}
+              </>
+            )}
           </>
         )}
       </BottomSheet>

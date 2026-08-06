@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { stockService } from '@/api/services/stock.service';
 import { toRequestError } from '@/api/axiosClient';
 import { Badge, Button, EmptyState, PageLoader, QualityChip, ViewHead } from '@/components/ui';
 import { NewDispatchSheet, type DispatchableStock } from '@/features/dispatch/NewDispatchSheet';
-import { ADMIN_ROLES, DISPATCH_ROLES, UNIT_NOUN, counted } from '@/config/constants';
+import { ADMIN_ROLES, DELETE_ROLES, DISPATCH_ROLES, UNIT_NOUN, counted } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
@@ -133,6 +134,23 @@ const blockedReason = (card: { qc: QcStatus; available: number }): string | null
 };
 
 /**
+ * Why this group cannot be cleared off the list, in the words to say it in.
+ *
+ * The server's two refusals, said before the tap rather than after it, and each
+ * naming where the work actually is. A group is the running total of the packing
+ * filed against one label and nothing records which runs fed it, so a full one
+ * cannot go without stranding every run that says it packed into it - the way to
+ * empty one is to take the packing off the run, which is the Packing tab. A
+ * group with a dispatch behind it is refused for good: the ledger says those
+ * sacks left, and the row is the record of it.
+ */
+const deleteBlock = (card: { available: number; dispatched: number | null }): string | null => {
+  if (card.available > 0) return 'Still holding stock — take the packing off on the Packing tab';
+  if ((card.dispatched ?? 0) > 0) return 'Stock has gone out of this group — the row is the record of it';
+  return null;
+};
+
+/**
  * Why this account cannot press the button even when the stock is fine.
  *
  * A different kind of answer from the ones above - it is about who is asking
@@ -204,6 +222,20 @@ interface YardCard {
    * certified as a lot rather than sampled across a period.
    */
   samples: { taken: number; total: number; anyHold: boolean } | null;
+  /**
+   * How much has ever left this group on a dispatch.
+   *
+   * Only on the back office's card - it comes off the manager's read, which is
+   * the one that carries the packed-against-dispatched ledger at all. Null on
+   * the floor's, and that null is "not told", not "none": nothing on the
+   * supervisor's side asks the question, and the delete it decides is the
+   * office's anyway.
+   *
+   * Its own field rather than being read back out of `ledger`, which is a
+   * sentence for a person. What this decides is whether a group may be deleted,
+   * and that is not a thing to work out by parsing prose.
+   */
+  dispatched: number | null;
 }
 
 /**
@@ -292,6 +324,7 @@ const fromGroup = (row: StockGroup, pool?: StockPool): YardCard => ({
   signed: signature(row),
   test: row.lab_test ?? null,
   samples: samplesOf(pool),
+  dispatched: Number(row.dispatched_qty ?? 0),
 });
 
 /**
@@ -341,6 +374,7 @@ const fromSummary = (row: StockSummaryRow, pool?: StockPool): YardCard => ({
    */
   test: null,
   samples: samplesOf(pool),
+  dispatched: null,
 });
 
 /** "tested 2 Aug · R. Kumar", or whichever half of it was recorded. */
@@ -448,6 +482,7 @@ const readyLine = (t: ReturnType<typeof tally>) => {
 
 export function StockPage() {
   const notify = useToast();
+  const dispatch = useAppDispatch();
   const role = useAppSelector((s) => s.auth.user?.role);
   /*
    * Two different questions, and they are no longer the same one.
@@ -458,6 +493,17 @@ export function StockPage() {
    */
   const isManager = Boolean(role && ADMIN_ROLES.includes(role));
   const mayDispatch = Boolean(role && DISPATCH_ROLES.includes(role));
+  /*
+   * And a third, narrower than either: who may clear a group off the yard.
+   *
+   * The admin account alone - see DELETE_ROLES. A manager keeps the whole
+   * ledger read and the QC verdict, both of which can be taken back; what they
+   * no longer have is the row delete, which nothing in this app undoes. It is
+   * still only ever offered on a card the manager's read produced, because
+   * `dispatched` is what decides whether a group may go at all and the floor's
+   * summary does not carry it.
+   */
+  const mayDelete = Boolean(role && DELETE_ROLES.includes(role));
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
 
   const [groups, setGroups] = useState<StockGroup[]>([]);
@@ -470,6 +516,13 @@ export function StockPage() {
   const [dispatching, setDispatching] = useState(false);
   /** The group the sheet should open on, when it was opened from a card. */
   const [dispatchFrom, setDispatchFrom] = useState<string | null>(null);
+  /**
+   * Which emptied group is one tap from being cleared off the list, and which
+   * is going. One id, so arming a second disarms the first - the same two-step
+   * every destructive control in the app uses.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const openDispatch = useCallback(
     (stockGroupId: string | null) => {
@@ -484,6 +537,34 @@ export function StockPage() {
     },
     [mayDispatch],
   );
+
+  /**
+   * Clear an emptied group off the yard's list.
+   *
+   * Optimistic only in the sense that the row goes as soon as the server says
+   * it did - there is nothing to put back and nothing else on this page that
+   * was reading it. The refresh tick goes out because the yard is also drawn on
+   * the back office's Quality tab and counted into the lab's own lists.
+   *
+   * The server's refusals come through unchanged. Each names where the work
+   * actually is - reverse the dispatch, or take the packing off on the Packing
+   * tab - and rewording that to "could not delete" would throw away the only
+   * useful half of the answer.
+   */
+  const removeGroup = async (card: YardCard) => {
+    setDeleting(card.id);
+    try {
+      await stockService.remove(card.id);
+      setGroups((prev) => prev.filter((g) => g.id !== card.id));
+      setConfirming(null);
+      notify(`${card.ref} cleared off the yard`, 'ok');
+      dispatch(requestRefresh());
+    } catch (err) {
+      notify(toRequestError(err).message, 'err');
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -943,6 +1024,57 @@ export function StockPage() {
                             not about enforcement.
                           */}
                           <div className="acts">
+                            {/*
+                              Clearing an emptied group off the list.
+
+                              Only a group with nothing in it and nothing ever
+                              out of it can actually go, and that is the whole of
+                              what this deletes - see deleteBlock() for why each
+                              of the other two is refused. But the button is
+                              drawn on every group the admin account can see,
+                              dead and saying why, rather than appearing on the
+                              three rows it would work on. That is this page's
+                              rule everywhere else - see the note at the top -
+                              and it is the same argument: an absent Delete is a
+                              question somebody answers with a walk to the
+                              office, and a dead one that names the Packing tab
+                              has already answered it.
+
+                              The rule stops at who is asking, which is why this
+                              is `mayDelete` and not a dead button for everyone
+                              else. A manager is not going to be given a Delete
+                              that can never move for them on any card in the
+                              yard - that is not an answer, it is twenty rows of
+                              furniture.
+                            */}
+                            {mayDelete &&
+                              (() => {
+                                const stopped = deleteBlock(c);
+                                return (
+                                  <Button
+                                    variant={confirming === c.id ? 'danger' : 'ghost'}
+                                    size="sm"
+                                    loading={deleting === c.id}
+                                    disabled={Boolean(stopped)}
+                                    title={
+                                      stopped ??
+                                      'Nothing was ever made here and nothing ever left it — clear the row'
+                                    }
+                                    aria-label={
+                                      stopped
+                                        ? `${c.ref} — ${stopped}`
+                                        : `Delete the empty stock group ${c.ref}`
+                                    }
+                                    onClick={() =>
+                                      confirming === c.id
+                                        ? void removeGroup(c)
+                                        : setConfirming(c.id)
+                                    }
+                                  >
+                                    {confirming === c.id ? 'Sure? Delete' : 'Delete'}
+                                  </Button>
+                                );
+                              })()}
                             {/*
                               On every account, and dead on most of them. The
                               reason is on the tooltip for a pointer and printed

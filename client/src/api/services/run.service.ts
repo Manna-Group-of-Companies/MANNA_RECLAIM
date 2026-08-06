@@ -141,6 +141,35 @@ export interface RemovedRun {
 }
 
 /**
+ * What undoing a packing gave back.
+ *
+ * The run itself, because it is still there - that is the whole difference
+ * between this and a delete - and it comes back unpacked, so the list can put
+ * the card straight back on the bench without asking the server again. The
+ * yard half is the same shape a run delete reports, and means the same thing.
+ */
+export interface UnpackedRun {
+  run: Run;
+  stock_cleared?: RemovedRun['stock_cleared'];
+  stock_note?: string | null;
+}
+
+/**
+ * What clearing a weighing gave back.
+ *
+ * The run itself, because it is still there - the same difference this has from
+ * a delete that unpack() has - and it comes back owing a weight, so the Weigh
+ * tab can put the card straight back on the queue without asking again. The
+ * figure that was cleared travels with it so the screen can name what it removed
+ * rather than only that a row moved.
+ */
+export interface UnweighedRun {
+  run: Run;
+  weight_kg: number | null;
+  entries_cleared: number;
+}
+
+/**
  * What came off a finished run and into the yard.
  *
  * Two benches, one route. A weighed run is bagged into 50 kg sacks and reports
@@ -203,9 +232,41 @@ export const runService = {
     return res.data.data;
   },
 
+  /**
+   * Takes the weighing back off a run and puts it back on the scale queue - the
+   * Weigh tab's delete.
+   *
+   * Not remove(). The run stays: it happened, the machine logged its hours, and
+   * the reports are added up off that row - clearing a figure entered against
+   * the wrong run is no reason to rewrite the plant's production record. A
+   * mistyped weight is not this either; that is weigh() again, which the floor
+   * may call all day. Refused by the server once anything has been packed off
+   * the weight, and it names the Packing tab.
+   */
+  async unweigh(id: string): Promise<UnweighedRun> {
+    const res = await axiosClient.delete<ApiEnvelope<UnweighedRun>>(endpoints.runs.weigh(id));
+    return res.data.data;
+  },
+
   /** Records the sacks bagged off a weighed run. */
   async pack(id: string, payload: PackRunPayload): Promise<Run> {
     const res = await axiosClient.post<ApiEnvelope<Run>>(endpoints.runs.pack(id), payload);
+    return res.data.data;
+  },
+
+  /**
+   * Takes the packing back off a run and the stock back out of the yard - the
+   * Packing tab's delete.
+   *
+   * Not remove(). The run stays: it happened, the machine logged its hours and
+   * the reports are added up off that row, and undoing a counting mistake is no
+   * reason to rewrite the plant's production record. What comes back is the run
+   * as it now stands - unpacked, and back on the packing list - beside the same
+   * `stock_cleared` a run delete reports, so the screen can name what left the
+   * yard. Refused by the server once any of it has been dispatched.
+   */
+  async unpack(id: string): Promise<UnpackedRun> {
+    const res = await axiosClient.delete<ApiEnvelope<UnpackedRun>>(endpoints.runs.pack(id));
     return res.data.data;
   },
 

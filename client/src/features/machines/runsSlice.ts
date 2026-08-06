@@ -6,6 +6,7 @@ import {
   type StopRunPayload,
 } from '@/api/services/run.service';
 import { toRequestError } from '@/api/axiosClient';
+import { requestRefresh } from '@/features/ui/uiSlice';
 import { SACK_KG, WEIGHED_PAGE, isMoulding } from '@/config/constants';
 import type { Run, Shift } from '@/types/models';
 
@@ -228,11 +229,55 @@ export const weighRun = createAsyncThunk(
   },
 );
 
+/**
+ * Clears the weighing off a run, and tells the rest of the app the run moved.
+ *
+ * The refresh is here for the same reason it is on unpackRun: what this changes
+ * is mostly not on the Weigh tab. A run with no weight is not packable, so it
+ * comes off the Packing tab's queue - and a tab left open on that screen would
+ * otherwise go on offering a bagging bench for a run with nothing to bag.
+ */
+export const unweighRun = createAsyncThunk(
+  'runs/unweigh',
+  async (id: string, { rejectWithValue, dispatch }) => {
+    try {
+      const undone = await runService.unweigh(id);
+      void dispatch(requestRefresh());
+      return undone;
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 export const packRun = createAsyncThunk(
   'runs/pack',
   async ({ id, ...payload }: PackRunPayload & { id: string }, { rejectWithValue }) => {
     try {
       return await runService.pack(id, payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+/**
+ * Undoes a packing, and tells the rest of the app the yard has moved.
+ *
+ * The refresh is half the point. What this call changes is mostly not on the
+ * Packing tab at all: sacks come off a stock group and the group goes entirely
+ * when this run was the only thing in it, so the Stock tab and the lab's own
+ * lists - the coarse pools and the moulded goods it reads straight out of the
+ * yard - are stale the moment it returns. Bumped here rather than in the screen
+ * because the write is what makes them stale, the same way recordTest does it.
+ */
+export const unpackRun = createAsyncThunk(
+  'runs/unpack',
+  async (id: string, { rejectWithValue, dispatch }) => {
+    try {
+      const undone = await runService.unpack(id);
+      void dispatch(requestRefresh());
+      return undone;
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -361,6 +406,28 @@ const runsSlice = createSlice({
           state.weighedTotal += 1;
         }
       })
+      /*
+       * The mirror of weighRun above. A run with its weight cleared owes one
+       * again, so it goes back on the queue the same call took it off - and it
+       * leaves the packing list with it, because there is nothing to bag off a
+       * run that has not been weighed.
+       *
+       * `needs_weight` is set here rather than read off the answer: the flag is
+       * what listPendingWeigh() stamps on its own rows, and this run is being
+       * put on that list by hand rather than fetched from it.
+       */
+      .addCase(unweighRun.fulfilled, (state, action) => {
+        const run = action.payload.run;
+        state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
+        state.pendingPack = state.pendingPack.filter((r) => r.id !== run.id);
+        if (state.weighed.some((r) => r.id === run.id)) {
+          state.weighed = state.weighed.filter((r) => r.id !== run.id);
+          state.weighedTotal = Math.max(0, state.weighedTotal - 1);
+        }
+        if (!state.pendingWeigh.some((r) => r.id === run.id)) {
+          state.pendingWeigh.unshift({ ...run, needs_weight: true });
+        }
+      })
       .addCase(packRun.fulfilled, (state, action) => {
         const run = action.payload;
         state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
@@ -374,6 +441,27 @@ const runsSlice = createSlice({
         const stock = asStock(run, known);
         state.packed = state.packed.filter((r) => r.id !== run.id);
         if ((stock.avail_sacks ?? 0) > 0) state.packed.unshift(stock);
+      })
+      /*
+       * The mirror of packRun above, and it has to be: an unpacked run is back
+       * on the bench and its sacks are out of the yard, so the card goes back
+       * onto the packing list and the row comes off the Stock tab's own copy.
+       *
+       * `stillPacking` decides the first, rather than the run being pushed on
+       * unconditionally - a run whose weight never amounted to a full sack was
+       * not on that list before it was packed either, and putting it there now
+       * would be a card the bench can open and cannot complete.
+       */
+      .addCase(unpackRun.fulfilled, (state, action) => {
+        const run = action.payload.run;
+        state.shift = state.shift.map((r) => (r.id === run.id ? run : r));
+        state.packed = state.packed.filter((r) => r.id !== run.id);
+        const listed = state.pendingPack.some((r) => r.id === run.id);
+        if (listed) {
+          state.pendingPack = state.pendingPack.map((r) => (r.id === run.id ? run : r));
+        } else if (stillPacking(run)) {
+          state.pendingPack.unshift(run);
+        }
       })
       .addCase(flushQueue.fulfilled, (state) => {
         state.queue = [];

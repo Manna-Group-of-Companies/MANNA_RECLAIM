@@ -290,7 +290,49 @@ export function MachinesPage() {
     void dispatch(fetchProducts());
   }, [dispatch]);
 
-  const runByMachine = useMemo(() => new Map(active.map((r) => [r.machine_id, r])), [active]);
+  /**
+   * Every open run a machine has, oldest first - and the one its card shows.
+   *
+   * A machine is meant to have one run open and normally does. It can end up
+   * with several: starting is a check for an open run and then an insert, with
+   * a round trip in between, so a Start that fires twice - a double tap, a
+   * retry after a slow reply - can put both requests through the check before
+   * either row lands. server/src/services/run.service.js now removes the loser
+   * of that race and migrations/0009 has the database refuse it outright, but
+   * rows made before either are still out there.
+   *
+   * They have to be visible here or they cannot be got rid of: a card keys on
+   * the machine, so extra rows are invisible on this screen, and stopping the
+   * one the card holds only lets the next take its place - which on the floor
+   * reads as a machine that will not stop. So the card leads on the oldest,
+   * which is the run the crew watched start, and the cancel sheet clears the
+   * whole set at once.
+   */
+  const openByMachine = useMemo(() => {
+    const map = new Map<string, Run[]>();
+    for (const r of active) {
+      const list = map.get(r.machine_id);
+      if (list) list.push(r);
+      else map.set(r.machine_id, [r]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => String(a.started_at ?? '').localeCompare(String(b.started_at ?? '')));
+    }
+    return map;
+  }, [active]);
+
+  const runByMachine = useMemo(() => {
+    const map = new Map<string, Run>();
+    for (const [machineId, list] of openByMachine) {
+      const oldest = list[0];
+      if (oldest) map.set(machineId, oldest);
+    }
+    return map;
+  }, [openByMachine]);
+  /** How many rows the cancel sheet is about to clear - see confirmCancelLoad. */
+  const cancelOpenCount =
+    sheet?.kind === 'cancelLoad' ? (openByMachine.get(sheet.run.machine_id)?.length ?? 1) : 0;
+
   const downByMachine = useMemo(() => new Map(openDown.map((l) => [l.machine_id, l])), [openDown]);
   const dueByMachine = useMemo(() => new Map(due.map((d) => [d.machineId, d])), [due]);
   const lastByMachine = useMemo(() => {
@@ -574,6 +616,27 @@ export function MachinesPage() {
     pressMaterial != null && piecesValue != null && piecesValue > 0
       ? round2(pressMaterial / piecesValue)
       : null;
+
+  /**
+   * One sheet action at a time.
+   *
+   * The tablets are slow enough that a reply takes a visible moment, and a
+   * crew in gloves taps a button that has not answered again - seven times, on
+   * the day this was written, which is how the Cracker ended up with seven runs
+   * open at once. The server refuses the second start now and the database will
+   * refuse it after migrations/0009, but neither turns the extra taps back into
+   * one run: only not sending them does that.
+   */
+  const [busy, setBusy] = useState(false);
+  const once = (action: () => Promise<unknown>) => async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await action();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /**
    * Every write goes through here so a failure always says so out loud. The
@@ -970,14 +1033,33 @@ export function MachinesPage() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   };
 
+  /**
+   * Throws the run away - and every other row left open on the same machine.
+   *
+   * One tap that was recorded several times is one mistake, not seven, and it
+   * is cancelled once: cancelling only the row on the card would hand the card
+   * to the next duplicate and leave the crew tapping until the machine finally
+   * goes idle, with no way of knowing how many taps that is. See
+   * openByMachine.
+   */
   const confirmCancelLoad = async () => {
     if (sheet?.kind !== 'cancelLoad') return;
     const label = sheet.run.machine ?? sheet.run.machine_id;
-    await run(
-      dispatch(cancelRun(sheet.run.id)),
-      `${label} load cancelled — nothing logged`,
-      'Could not cancel the load',
+    const open = openByMachine.get(sheet.run.machine_id) ?? [sheet.run];
+    const results = await Promise.all(open.map((r) => dispatch(cancelRun(r.id))));
+    const cancelled = results.filter((r) => r.meta.requestStatus === 'fulfilled').length;
+    const okay = cancelled === open.length;
+    notify(
+      okay
+        ? open.length > 1
+          ? `${label}: ${open.length} open runs cancelled — nothing logged`
+          : `${label} load cancelled — nothing logged`
+        : cancelled > 0
+          ? `${label}: ${cancelled} of ${open.length} cancelled — try again for the rest`
+          : 'Could not cancel the load',
+      okay ? 'ok' : 'err',
     );
+    if (okay) closeSheet();
   };
 
   const confirmBreakdown = async () => {
@@ -1306,7 +1388,7 @@ export function MachinesPage() {
               <Button variant="ghost" onClick={closeSheet}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={confirmStart}>
+              <Button variant="primary" onClick={once(confirmStart)} disabled={busy}>
                 {startIsAutoclave ? 'Load ▸' : 'Start ▸'}
               </Button>
             </>
@@ -1881,12 +1963,6 @@ export function MachinesPage() {
             )}
           </>
         )}
-
-        {/* Both halves of this sheet - the autoclave load and every other
-            start - file the run against a name, so the pick sits under both. */}
-        {sheet?.kind === 'start' && !startNothingReady && !startNoProducts && (
-          <SupervisorPick fieldClassName="mt-4" note={startIsAutoclave ? '— signs this load' : '— signs this run'} />
-        )}
       </BottomSheet>
 
       {/* ---- stop a run ---- */}
@@ -1936,7 +2012,7 @@ export function MachinesPage() {
             <Button variant="ghost" onClick={closeSheet}>
               {stopIsAutoclave ? 'Cancel' : 'Keep running'}
             </Button>
-            <Button variant="primary" onClick={confirmStop} disabled={stopIssues.length > 0}>
+            <Button variant="primary" onClick={once(confirmStop)} disabled={busy || stopIssues.length > 0}>
               {stopIsAutoclave
                 ? 'Log & unload'
                 : stopsWithMeters || stopCountsPieces
@@ -2465,8 +2541,8 @@ export function MachinesPage() {
             <Button variant="ghost" onClick={() => sheet?.kind === 'cancelLoad' && setSheet({ kind: 'stop', run: sheet.run })}>
               Keep loaded
             </Button>
-            <Button variant="danger" onClick={confirmCancelLoad}>
-              Yes, cancel load
+            <Button variant="danger" onClick={once(confirmCancelLoad)} disabled={busy}>
+              {cancelOpenCount > 1 ? `Yes, cancel all ${cancelOpenCount}` : 'Yes, cancel load'}
             </Button>
           </>
         }
@@ -2475,6 +2551,15 @@ export function MachinesPage() {
           Removes the run from{' '}
           {sheet?.kind === 'cancelLoad' ? (sheet.run.machine ?? sheet.run.machine_id) : 'this machine'}. Nothing is
           logged — use it only if the run was started by mistake.
+          {cancelOpenCount > 1 && (
+            <>
+              {' '}
+              <b>
+                This machine has {cancelOpenCount} runs open — one Start that was recorded{' '}
+                {cancelOpenCount} times. All {cancelOpenCount} go.
+              </b>
+            </>
+          )}
         </div>
       </BottomSheet>
 

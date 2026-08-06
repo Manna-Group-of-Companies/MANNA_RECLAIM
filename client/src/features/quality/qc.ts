@@ -1,5 +1,12 @@
 import { QUALITIES } from '@/config/constants';
-import type { Batch, Quality, QualityTest, Verdict } from '@/types/models';
+import type {
+  Batch,
+  QcStatus,
+  Quality,
+  QualityTest,
+  RemovedQualityTest,
+  Verdict,
+} from '@/types/models';
 
 /**
  * Batch QC is quality-wise: one verdict per grade, not one per batch. These are
@@ -75,3 +82,29 @@ export const batchQcChip = (qc: BatchQc): { label: string; tone: 'hold' | 'ok' |
   if (qc.pass > 0) return { label: `${qc.pass}/${qc.grades.length} done`, tone: 'part' };
   return { label: 'Untested', tone: 'none' };
 };
+
+/** Where a group is left once the test that was speaking for it is gone. */
+const QC_WORD: Record<QcStatus, string> = {
+  pass: 'QC passed',
+  fail: 'QC failed',
+  pending: 'awaiting the lab',
+};
+
+/**
+ * What taking a test off the record moved in the yard, for the toast.
+ *
+ * Here rather than in either screen because the delete is now reachable from
+ * two - the back office's lab record and the bench's list of recent verdicts -
+ * and a delete that reported itself differently depending on which one it was
+ * pressed from would be two controls wearing one name.
+ *
+ * Nothing moved is the ordinary case rather than a failure: a verdict releases
+ * stock that already exists and does not create any, so a test filed against a
+ * batch nobody bagged was never carried by a group. Said out loud, because
+ * "removed" with no more to it is indistinguishable from a delete that left a
+ * released pallet standing.
+ */
+export const removedText = (removed: RemovedQualityTest): string =>
+  removed.stock_groups.length
+    ? removed.stock_groups.map((g) => `${g.label} → ${QC_WORD[g.qc_status]}`).join(' · ')
+    : 'no stock in the yard was standing on it';

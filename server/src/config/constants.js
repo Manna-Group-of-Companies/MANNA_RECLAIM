@@ -11,6 +11,32 @@ export const ROLES = {
 export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
 
 /**
+ * Who may delete, as opposed to who may correct.
+ *
+ * The admin account alone - deliberately narrower than ADMIN_ROLES, which is
+ * what "the back office" means everywhere else in this file. The three deletes
+ * it gates are the shop-floor tabs' destructive controls: clearing a weighing on
+ * Weigh, clearing an emptied group on Stock, and taking a verdict off the record
+ * on Quality.
+ *
+ * A manager loses nothing they can do twice. Weighing again, re-testing,
+ * re-packing and setting a QC verdict by hand are all still theirs, and each of
+ * those can be taken back by doing it again. What is behind this list is the
+ * half that cannot: no screen in this app puts a deleted verdict, a cleared
+ * weighing or a removed yard row back.
+ *
+ * It is its own name rather than an inline `authorize(ROLES.ADMIN)` at each
+ * route because who counts as the back office and who may destroy a record are
+ * two questions, and widening this again is then a one-line change here rather
+ * than a hunt through the routes.
+ *
+ * Enforced at the routes as `strictAdminOnly`; the screens mirror this list so
+ * they do not offer a tap that comes back 403. Mirrors DELETE_ROLES in
+ * client/src/config/constants.ts.
+ */
+export const DELETE_ROLES = [ROLES.ADMIN];
+
+/**
  * The lab keeps the quality record, and nobody else writes to it: a supervisor
  * has no way to sign off on a test they did not run. Admins are here because
  * they can already delete a test - being able to correct one is the lesser

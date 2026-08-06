@@ -1023,7 +1023,53 @@ export const runService = {
       // machine row is flagged.
       needs_weigh:
         !nonProduction && !isPress && !moulding && Boolean(machine.out_weight || machine.weigh),
+    }).catch((err) => {
+      // The database's own version of the rule - runs_one_open_per_machine, see
+      // migrations/0009. It fires on exactly the race the check above cannot
+      // see, and what comes back to the tablet should say which rule was
+      // broken rather than "a record with that value already exists".
+      if (err?.statusCode === 409) {
+        throw ApiError.conflict('That machine already has a run in progress');
+      }
+      throw err;
     });
+
+    /*
+     * The guard at the top is a check and then an insert with a round trip in
+     * between, so two Starts sent close enough together both pass it before
+     * either row lands and the machine is left with two runs open. That is not
+     * theoretical: a tablet double-tapped through a slow reply put seven open
+     * runs on the Cracker, and because the Machines page keys one card per
+     * machine, six of them were invisible - stopping the one on the card handed
+     * it to the next, which on the floor is a machine that will not stop.
+     *
+     * So the question is asked again now that the row exists, and the losers
+     * take themselves back out. The winner is the oldest open row - the run the
+     * crew watched appear - with the id breaking a tie, which is a rule every
+     * racer applies to the same set and so agrees on: whichever of them reads
+     * last, exactly one row is left.
+     *
+     * migrations/0009 puts the same rule in the database, where the race cannot
+     * be run at all. This stays either way: a project that has not had the
+     * migration run against it is still covered.
+     */
+    const others = await base.all({
+      machine_id: payload.machineId,
+      ended_at: op.isNull(),
+      id: op.neq(row.id),
+    });
+    const beaten = others.some((other) => {
+      const theirs = String(other.started_at ?? '');
+      const ours = String(row.started_at ?? '');
+      return theirs < ours || (theirs === ours && String(other.id) < String(row.id));
+    });
+    if (beaten) {
+      await base.remove(row.id).catch((err) => {
+        logger.warn(`Duplicate run ${row.id} on ${payload.machineId} could not be removed - ${err.message}`);
+      });
+      throw ApiError.conflict('That machine already has a run in progress');
+    }
+
     return decorate(row);
   },
 
@@ -1290,6 +1336,100 @@ export const runService = {
   },
 
   /**
+   * Undoes the packing on a run, and leaves the run standing.
+   *
+   * The Packing tab's delete, and it is deliberately not discard(). What the
+   * crew wants undone there is the bagging, not the shift: the run happened,
+   * the machine logged its hours and its power, and the reports and the costing
+   * are added up off that row. Deleting it to take twelve sacks back out of the
+   * yard would rewrite the plant's production record to fix a counting mistake.
+   * So this puts the run back to weighed-but-not-packed and nothing else, which
+   * is exactly the state it was in before somebody stood at the bench - it
+   * reappears on the packing list, ready to be entered again.
+   *
+   * Why not simply pack it as zero, which the same absolute figure would allow:
+   * packSacks() and packPieces() hand the *delta* to recordPacking(), and that
+   * has no idea what has left the yard. Packing twelve back down to zero on a
+   * group eight sacks of which are on a lorry drives it to minus eight without
+   * a word. reversePacking() is the path that knows - it refuses to take back
+   * more than is standing, and drops a group that empties completely and was
+   * never dispatched from - so the reversal goes through unfileStock(), which
+   * is the same helper a run delete uses and keys the group the same way the
+   * bench keyed it.
+   *
+   * The order is clearTraces()'s, and for its reason: the ledger is corrected
+   * before the row that claims it is, never after. If the reversal refuses, the
+   * run still says what it packed and the two still agree.
+   */
+  async unpack(id) {
+    const run = await base.findById(id);
+    const boxed = run.kind === 'press' || isMoulding(run.kind);
+    const packed = boxed ? Number(run.packed_pieces || 0) : Number(run.packed_sacks || 0);
+
+    if (packed <= 0) {
+      throw ApiError.badRequest('Nothing has been packed on this run yet');
+    }
+
+    /*
+     * Refused outright once any of it has been sold, before the yard is touched.
+     * reversePacking() would refuse a moment later on the same facts, but it can
+     * only see the group's own arithmetic - it would say "the rest has already
+     * been dispatched" about a group several runs fed. This names the run the
+     * caller actually asked about, which is the one they can do something with.
+     */
+    let sold = 0;
+    try {
+      sold = Number((await dispatchService.sacksByRun([id]))[id] ?? 0);
+    } catch (err) {
+      // A project with no `run_id` on dispatches cannot answer this. Not a
+      // blocker: the reversal below still refuses to push a group below what
+      // has gone out of it - see clearTraces(), which is guarded the same way.
+      logger.warn(`Unpacking run ${id}: the dispatches were not checked - ${err.message}`);
+    }
+    if (sold > 0) {
+      throw ApiError.conflict(
+        `${sold} of this run's packed output has already been dispatched - reverse that dispatch before undoing the packing`,
+      );
+    }
+
+    const stock = await unfileStock(run);
+
+    /*
+     * Only now the run. `leftout_out` goes with the sacks on the bagging side:
+     * it is the sub-sack remainder this packing decided on, and a run that has
+     * not been packed has not decided one. `leftout_in` stays - that was carried
+     * in from the batch before and is not this bench's to give back.
+     */
+    const saved = await base.update(
+      id,
+      boxed ? { packed_pieces: 0 } : { packed_sacks: 0, leftout_out: 0 },
+    );
+
+    return {
+      run: decorate(saved),
+      /** What came back out of the yard, in the shape a run delete reports it. */
+      stock_cleared: stock
+        ? {
+            id: stock.id,
+            label: stock.display_label ?? stock.label,
+            taken: packed,
+            left: stock.removed ? 0 : stock.available_sacks,
+            removed: Boolean(stock.removed),
+          }
+        : null,
+      /*
+       * Packed output no group could be found for. Not an error and not silence
+       * either - the run has been put back to unpacked either way, so if this is
+       * not said the yard is holding sacks nothing on any screen accounts for.
+       */
+      stock_note:
+        stock === null
+          ? `${packed} packed ${boxed ? 'pieces' : 'sacks'} could not be traced to a stock group - check the yard for ${run.batch_no ?? 'this period'}`
+          : null,
+    };
+  },
+
+  /**
    * Records the out-weight of an already finished run (the Weigh tab), and
    * corrects one that is already weighed - the shop floor puts its own scale
    * right, so this is the same call rather than the back office's edit().
@@ -1311,6 +1451,55 @@ export const runService = {
       patch.weigh_entries = Array.isArray(entries) && entries.length ? entries.map(Number) : null;
     }
     return decorate(await base.update(id, patch));
+  },
+
+  /**
+   * Takes the weighing back off a run and puts it back on the scale.
+   *
+   * The Weigh tab's delete, and it stands to weigh() the way unpack() stands to
+   * pack(): the run itself is left alone. The shift happened, the machine logged
+   * its hours and its power, and the reports are added up off that row - so a
+   * figure put against the wrong run is corrected by clearing the figure, not by
+   * deleting the shift. That is what History's delete is for, and it is a
+   * different act.
+   *
+   * A correction is not this. The floor puts its own scale right all day through
+   * weigh(), which is an absolute figure and needs nobody's permission. This is
+   * for the case a correction cannot reach - a weight recorded against a run
+   * that was never on the scale at all - so the row goes back to owing one and
+   * reappears on the queue, which is exactly where listPendingWeigh() finds it
+   * again: it filters on `weight_kg is null`.
+   *
+   * Refused once anything has been packed off that weight, and it names the
+   * Packing tab rather than merely saying no. The sacks in the yard were bagged
+   * against this figure and reversing the packing is what puts them back;
+   * clearing the weight underneath them would leave a run claiming output it no
+   * longer says it made, with the yard still holding it.
+   */
+  async unweigh(id) {
+    const run = await base.findById(id);
+    const onRecord = run.weight_kg == null ? null : Number(run.weight_kg);
+    const entries = entriesOf(run);
+
+    if (onRecord == null && !entries.length) {
+      throw ApiError.badRequest('Nothing has been weighed on this run yet');
+    }
+
+    const boxed = run.kind === 'press' || isMoulding(run.kind);
+    const packed = boxed ? Number(run.packed_pieces || 0) : Number(run.packed_sacks || 0);
+    if (packed > 0) {
+      throw ApiError.conflict(
+        `${packed} ${boxed ? 'pieces' : 'sacks'} were packed off this weight - undo the packing on the Packing tab before clearing it`,
+      );
+    }
+
+    const saved = await base.update(id, { weight_kg: null, weigh_entries: null });
+    return {
+      run: decorate(saved),
+      /** What was cleared, so the screen can name the figure it removed. */
+      weight_kg: onRecord,
+      entries_cleared: entries.length,
+    };
   },
 
   /**

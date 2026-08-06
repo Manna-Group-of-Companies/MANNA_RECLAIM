@@ -50,6 +50,31 @@ export const stockService = {
     });
     return res.data.data;
   },
+
+  /**
+   * Clears an emptied group off the yard's list.
+   *
+   * Only an emptied one. The server refuses a group still holding stock and
+   * points at the Packing tab, which is where stock actually comes back from -
+   * a group is the running total of the packing filed against a label, and
+   * nothing records which runs fed it, so deleting a full one would leave every
+   * one of those runs claiming output that is nowhere. A group with a dispatch
+   * behind it is refused for good.
+   */
+  async remove(id: string): Promise<RemovedStockGroup> {
+    const res = await axiosClient.delete<ApiEnvelope<RemovedStockGroup>>(
+      endpoints.stock.byId(id),
+    );
+    return res.data.data;
+  },
 };
+
+/** The group that went, named as the yard read it. */
+export interface RemovedStockGroup {
+  id: string;
+  label: string;
+  kind?: string | null;
+  quality?: string | null;
+}
 
 export default stockService;

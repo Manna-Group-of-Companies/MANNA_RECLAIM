@@ -28,6 +28,11 @@ export const adminPaths = {
   login: '/admin/login',
   dashboard: '/admin/dashboard',
   history: '/admin/history',
+  /**
+   * The lab record, and the yard's verdicts beside it - the page carries both
+   * views and switches between them, so there is one address for the question
+   * "may this be sold" whichever end it is asked from.
+   */
   quality: '/admin/quality',
   efficiency: '/admin/efficiency',
   rates: '/admin/rates',

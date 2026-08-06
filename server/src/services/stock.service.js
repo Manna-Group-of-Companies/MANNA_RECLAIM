@@ -1094,6 +1094,67 @@ export const stockService = {
    * is the path with no test row behind it, so without the signature there is
    * nothing at all to say who released the goods.
    */
+  /**
+   * Takes a stock group off the yard's list altogether.
+   *
+   * Narrow on purpose, and the narrowness is the design rather than a first cut
+   * of it. A group is not a thing somebody made; it is the running total of the
+   * packing filed against one label, and nothing records which runs fed it -
+   * reversePacking() finds a group by rebuilding its label from a run, not by
+   * following a stored tie. So a group with sacks in it cannot be deleted
+   * without stranding every run that says it packed them: the runs would go on
+   * claiming output that no longer exists anywhere in the yard, and no screen
+   * would ever show the difference.
+   *
+   * What that leaves this for is the residue - a group standing at zero that
+   * nothing ever left by. Those are real and they are why the option is asked
+   * for: a mis-keyed batch number bags twelve sacks into `C-2891-Fine`, the
+   * packing is undone from the Packing tab, and what is left behind is an empty
+   * row in the yard that reads as stock which exists and happens to be finished.
+   * reversePacking() already drops such a group when it is the one taking the
+   * last sack out; this is the same delete reachable by hand for the ones that
+   * got there some other way.
+   *
+   * The two refusals are the whole of it, and each names where the work
+   * actually is:
+   *
+   *   still holding stock  is undone at the bench, not here. Take the packing
+   *                        back off the run on the Packing tab and the group
+   *                        empties - and empties itself if it was the only one.
+   *   ever dispatched      is never undone at all. `dispatch_lines.stock_group_id`
+   *                        points here with no cascade, so the row is what a
+   *                        loaded lorry's paperwork hangs off; a dispatch is
+   *                        corrected by a reversal document, which is the rule
+   *                        the whole dispatch side already runs on.
+   */
+  async removeGroup(id) {
+    const group = await base.findById(id);
+
+    const dispatched = int(group.dispatched_sacks);
+    if (dispatched > 0) {
+      const unit = group.unit ?? 'sacks';
+      throw ApiError.conflict(
+        `${displayLabel(group.label)} has ${dispatched} ${unit} dispatched off it - a dispatch is corrected by a reversal, so this group has to stay`,
+      );
+    }
+
+    const available = int(group.available_sacks ?? int(group.packed_sacks) - dispatched);
+    if (available > 0) {
+      const unit = group.unit ?? 'sacks';
+      throw ApiError.conflict(
+        `${displayLabel(group.label)} still holds ${available} ${unit} - take the packing back off the run on the Packing tab, which is what puts the stock back`,
+      );
+    }
+
+    await base.remove(id);
+    return {
+      id,
+      label: displayLabel(group.label),
+      kind: group.kind ?? null,
+      quality: group.quality ?? group.product_id ?? null,
+    };
+  },
+
   async setQcStatus(id, qcStatus, by = null) {
     if (!QC_STATUSES.includes(qcStatus)) {
       throw ApiError.badRequest(`QC status must be one of: ${QC_STATUSES.join(', ')}`);

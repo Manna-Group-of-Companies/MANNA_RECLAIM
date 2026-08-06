@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as quality from '../controllers/quality.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { adminOnly, authorize } from '../middlewares/role.middleware.js';
+import { authorize, strictAdminOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam, listQuery, dateRange } from '../validations/common.validation.js';
 import { qualityTestSchema, qualityReportSchema } from '../validations/batch.validation.js';
@@ -23,6 +23,16 @@ router.post(
   validate({ params: idParam, body: qualityReportSchema }),
   quality.attachReport,
 );
-router.delete('/:id', adminOnly, validate({ params: idParam }), quality.remove);
+/*
+ * Taking a verdict off the record: the admin account's alone.
+ *
+ * The lab writes here and corrects itself by writing again - tests are
+ * append-only and the newest verdict standing is the one the yard reads - so
+ * nothing the bench does is touched by this. What this is for is the one edit a
+ * re-test cannot make, a verdict filed against the wrong batch or the wrong
+ * grade, and it moves stock in the yard on its way out. The manager who wants a
+ * pallet released has PATCH /stock/:id/qc, which is reversible; this is not.
+ */
+router.delete('/:id', strictAdminOnly, validate({ params: idParam }), quality.remove);
 
 export default router;

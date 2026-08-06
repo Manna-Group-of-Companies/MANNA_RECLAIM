@@ -114,8 +114,26 @@ export const weigh = asyncHandler(async (req, res) =>
   ),
 );
 
+/**
+ * Clears the weighing off a run and puts it back on the scale queue, leaving the
+ * run itself standing (the Weigh tab's delete). Not the same act as deleting the
+ * run, which also takes the shift off the plant's record.
+ */
+export const unweigh = asyncHandler(async (req, res) =>
+  ok(res, await runService.unweigh(req.params.id), 'Weight cleared'),
+);
+
 export const pack = asyncHandler(async (req, res) =>
   ok(res, await runService.pack(req.params.id, req.body), 'Packing recorded'),
+);
+
+/**
+ * Takes the packing back off a run and the stock back out of the yard, leaving
+ * the run itself standing (the Packing tab's delete). Not the same act as
+ * deleting the run, which also takes the shift off the plant's record.
+ */
+export const unpack = asyncHandler(async (req, res) =>
+  ok(res, await runService.unpack(req.params.id), 'Packing removed'),
 );
 
 /** Corrects a run already on record (the back office's History tab). */

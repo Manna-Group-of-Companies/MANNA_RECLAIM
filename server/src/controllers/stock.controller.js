@@ -38,6 +38,15 @@ export const getOne = asyncHandler(async (req, res) =>
 );
 
 /**
+ * Clears an empty group off the yard's list. Refused while it still holds
+ * anything, and refused for good once a dispatch has been raised against it -
+ * see stockService.removeGroup(), which says why in each case.
+ */
+export const remove = asyncHandler(async (req, res) =>
+  ok(res, await stockService.removeGroup(req.params.id), 'Stock group deleted'),
+);
+
+/**
  * The back office setting a verdict directly.
  *
  * Signed with the authenticated account rather than with anything in the body.

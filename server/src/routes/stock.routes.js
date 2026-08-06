@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as stock from '../controllers/stock.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { authorize } from '../middlewares/role.middleware.js';
+import { authorize, strictAdminOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam } from '../validations/common.validation.js';
 import { stockQuery, qcStatusSchema } from '../validations/stock.validation.js';
@@ -70,5 +70,18 @@ router.patch(
   validate({ params: idParam, body: qcStatusSchema }),
   stock.setQc,
 );
+
+/**
+ * Clearing an emptied group off the list, and it is narrower than everything
+ * above it: the admin account's, not the back office's.
+ *
+ * The verdict above is a manager's because it is a decision that can be taken
+ * again - PATCH it back and the goods move back. This takes a yard row off the
+ * record and there is no screen that puts it back, which is the line DELETE_ROLES
+ * draws. What it will and will not delete is still the service's business: it
+ * refuses a group holding stock and refuses one with a dispatch behind it
+ * outright.
+ */
+router.delete('/:id', strictAdminOnly, validate({ params: idParam }), stock.remove);
 
 export default router;

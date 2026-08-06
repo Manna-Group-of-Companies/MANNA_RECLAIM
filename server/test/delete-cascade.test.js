@@ -514,3 +514,41 @@ test('a verdict the back office set by hand is not undone by a delete at the ben
   assert.equal(stock.qc_status, 'pass', 'a person decided this, and a test delete is not that person');
   assert.equal(stock.qc_by, 'Manager');
 });
+
+test('removing a verdict is the admin account’s, and a manager is refused with the bench', async (t) => {
+  const api = await bootWith({
+    quality_tests: [
+      {
+        id: 'test-1',
+        kind: 'batch',
+        batch_no: 'B1041',
+        quality: 'Fine',
+        verdict: 'pass',
+        ts: '2026-08-07T09:00:00Z',
+      },
+    ],
+  });
+  t.after(() => api.stop());
+
+  /*
+   * The lab is on this list, which is the part worth saying out loud: the bench
+   * writes every verdict on file and cannot take one off. That is not a
+   * restriction on the lab so much as what append-only means - it corrects
+   * itself by filing again, and the newest verdict standing is the one the yard
+   * reads.
+   *
+   * The manager is the new half. Deleting a verdict moves stock in the yard on
+   * its way out and no screen puts it back, so it sits behind DELETE_ROLES with
+   * the other two irreversible ones. A manager who wants goods released still
+   * has PATCH /stock/:id/qc, which can be set again.
+   */
+  for (const role of ['worker', 'supervisor', 'lab', 'manager']) {
+    const res = await api.call('/quality-tests/test-1', { role, method: 'DELETE' });
+    assert.equal(res.status, 403, `${role} may not remove a verdict`);
+  }
+  assert.equal(api.tables.quality_tests.length, 1, 'and the row is still on file');
+
+  const allowed = await api.call('/quality-tests/test-1', { role: 'admin', method: 'DELETE' });
+  assert.equal(allowed.status, 200);
+  assert.equal(api.tables.quality_tests.length, 0);
+});

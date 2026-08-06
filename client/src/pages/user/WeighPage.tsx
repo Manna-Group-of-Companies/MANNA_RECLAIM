@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchPendingWeigh, fetchWeighed, weighRun } from '@/features/machines/runsSlice';
+import {
+  fetchPendingWeigh,
+  fetchWeighed,
+  unweighRun,
+  weighRun,
+} from '@/features/machines/runsSlice';
 import {
   BatchRef,
   BottomSheet,
@@ -13,7 +18,7 @@ import {
   TextField,
   ViewHead,
 } from '@/components/ui';
-import { TYRES, WEIGHED_PAGE, type TyreType } from '@/config/constants';
+import { DELETE_ROLES, TYRES, WEIGHED_PAGE, type TyreType } from '@/config/constants';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { duration } from '@/utils/format';
@@ -71,6 +76,21 @@ function subtitleOf(run: Run) {
 }
 
 /**
+ * Why the weighing on a run cannot be cleared, in the words to say it in.
+ *
+ * The same refusal the server makes, said before the tap rather than after it.
+ * The sacks in the yard were bagged against this figure, and the way to put them
+ * back is on the Packing tab - which is what the sentence names, because "cannot
+ * be cleared" on its own is a wall with no door in it.
+ */
+const clearBlock = (run: Run): string | null => {
+  const packed = Number(run.packed_pieces || 0) || Number(run.packed_sacks || 0);
+  return packed > 0
+    ? `${packed} packed off this weight — undo the packing on the Packing tab first`
+    : null;
+};
+
+/**
  * The weigh queue: runs that finished on a machine whose output is weighed
  * (the grinders, R2, R4) and that nobody has put on the scale yet.
  *
@@ -87,12 +107,33 @@ export function WeighPage() {
   const notify = useToast();
   const { pendingWeigh, weighed, weighedTotal, weighedAll, loading } = useAppSelector((s) => s.runs);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+  /**
+   * Whether this account may clear a weighing off a run altogether.
+   *
+   * The admin account and nobody else, manager included - see DELETE_ROLES.
+   * Correcting a figure is the crew's and always has been - the button beside
+   * this one - because the scale is theirs and a mistyped number is found at
+   * the bench, and doing it again undoes it. Clearing one is a different act:
+   * the run goes back to owing a weight, moves between two tabs, and no screen
+   * puts it back. DELETE /runs/:id/weigh is gated the same way on the server,
+   * so drawing this any wider would be offering a tap that comes back 403.
+   */
+  const mayClear = useAppSelector((s) =>
+    s.auth.user ? DELETE_ROLES.includes(s.auth.user.role) : false,
+  );
   const [target, setTarget] = useState<Run | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [entries, setEntries] = useState<number[]>([]);
   const [weight, setWeight] = useState('');
   /** The figure of record a correction will save; blank on a first weighing. */
   const [total, setTotal] = useState('');
+  /**
+   * Which weighing is one tap from being cleared, and which is going. One id, so
+   * arming a second disarms the first - the same two-step every destructive
+   * control in the app uses.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<string | null>(null);
 
   /*
    * On mount, and whenever anything asks for a refresh.
@@ -192,6 +233,33 @@ export function WeighPage() {
     if (okay) setTarget(null);
   };
 
+  /**
+   * Clear the weighing off a run and put it back on the queue above.
+   *
+   * The run is not deleted and the toast says so - what somebody has just done
+   * is send a card from the bottom list to the top one, and a message that only
+   * said "removed" would leave them looking for a row that is still there, one
+   * list up. The server's refusals come through unchanged: each names where the
+   * work actually is, and rewording that would throw the answer away.
+   */
+  const clearWeight = async (run: Run) => {
+    setClearing(run.id);
+    const done = await dispatch(unweighRun(run.id));
+    setClearing(null);
+    if (!unweighRun.fulfilled.match(done)) {
+      notify(String(done.payload ?? 'Could not clear the weight'), 'err');
+      return;
+    }
+    setConfirming(null);
+    const cleared = done.payload.weight_kg;
+    notify(
+      `${cleared != null ? `${cleared} kg` : 'The weight'} cleared — ${
+        run.batch_no ?? run.machine ?? run.machine_id
+      } is back on the weigh queue`,
+      'ok',
+    );
+  };
+
   const showAll = () => void dispatch(fetchWeighed({ all: !weighedAll }));
 
   if (loading && !pendingWeigh.length && !weighed.length) return <PageLoader label="Loading runs" />;
@@ -276,6 +344,8 @@ export function WeighPage() {
           <div className="stack">
             {weighed.map((run) => {
               const count = entriesOf(run).length;
+              const blocked = clearBlock(run);
+              const armed = confirming === run.id;
               return (
                 <div key={run.id} className="wcard">
                   <div className="info">
@@ -293,8 +363,60 @@ export function WeighPage() {
                       {sourceOf(run)}
                       {count > 0 ? ` · ${count} weighing${count > 1 ? 's' : ''}` : ''}
                     </small>
+                    {/* Said beside the armed button rather than left to the
+                        toast afterwards: the run does not go anywhere, it goes
+                        back to the queue at the top of this screen, and that is
+                        the part somebody pressing Delete is least likely to
+                        have in mind. */}
+                    {/* Allowed to wrap, unlike the lines above it. A card's
+                        smalls are one ellipsised line on a phone, which is
+                        right for a figure and a source and wrong for a sentence
+                        whose whole job is to say where the work is - and a
+                        disabled button has no tooltip a thumb can reach. */}
+                    {armed && (
+                      <small className="muted whitespace-normal">
+                        The run stays — it goes back to the weigh queue above, owing a weight.
+                      </small>
+                    )}
+                    {mayClear && blocked && (
+                      <small className="muted whitespace-normal">{blocked}</small>
+                    )}
                   </div>
-                  <Button onClick={() => openCorrection(run)}>Correct ▸</Button>
+                  <div className="flex flex-none items-center gap-2">
+                    {/*
+                      Back office only, and drawn dead rather than hidden once
+                      the weight has been packed against - a button that is not
+                      there is a question, and this one already knows the answer.
+                    */}
+                    {mayClear &&
+                      (armed ? (
+                        <>
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            loading={clearing === run.id}
+                            onClick={() => void clearWeight(run)}
+                          >
+                            Yes, clear it
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={Boolean(blocked)}
+                          title={blocked ?? 'Clear this weighing and put the run back on the queue'}
+                          aria-label={`Delete the weighing on ${run.batch_no ?? run.machine ?? run.machine_id}`}
+                          onClick={() => setConfirming(run.id)}
+                        >
+                          Delete
+                        </Button>
+                      ))}
+                    {!armed && <Button onClick={() => openCorrection(run)}>Correct ▸</Button>}
+                  </div>
                 </div>
               );
             })}

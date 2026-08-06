@@ -280,6 +280,46 @@ create unique index if not exists runs_moulding_lot_key
   on public.runs (product, shift_date, shift)
   where kind in ('sleeve', 'loop') and ended_at is not null;
 
+-- One run open per machine. The server checks before it starts one, but a check
+-- and then an insert is not a rule: two Starts sent close enough together both
+-- pass it before either row lands. A double-tapped tablet put seven open runs on
+-- the Cracker that way, and since the Machines page keys one card per machine,
+-- six were invisible - the crew stopped the machine and it went on running,
+-- because the next open row took the card. See migrations/0009.
+--
+-- Duplicates already open are cleared first, oldest kept, and only where nothing
+-- was logged against them; one carrying output is left for a person to look at
+-- and holds the index back until they have.
+with ranked as (
+  select id,
+         row_number() over (partition by machine_id order by started_at, id) as rn
+    from public.runs
+   where ended_at is null
+)
+delete from public.runs r
+ using ranked
+ where r.id = ranked.id
+   and ranked.rn > 1
+   and coalesce(r.packed_sacks, 0) = 0
+   and coalesce(r.packed_pieces, 0) = 0
+   and r.weight_kg is null;
+
+do $$
+begin
+  create unique index if not exists runs_one_open_per_machine
+    on public.runs (machine_id)
+    where ended_at is null;
+exception
+  when unique_violation then
+    raise warning 'runs_one_open_per_machine was NOT created: these machines still have more than one run open - %',
+      (select string_agg(machine_id || ' (' || n || ')', ', ')
+         from (select machine_id, count(*) as n
+                 from public.runs
+                where ended_at is null
+             group by machine_id
+               having count(*) > 1) doubled);
+end $$;
+
 -- The picking gang on a cracker run: how many hands were put on pulling scrap
 -- tyres out of the yard, and roughly how long they were at it. The two columns
 -- are the tablets' own - "pick and cut" - and were written by nothing and read

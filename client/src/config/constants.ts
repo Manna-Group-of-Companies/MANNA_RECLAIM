@@ -12,6 +12,26 @@ export const ROLES: Record<string, Role> = {
 export const ADMIN_ROLES: Role[] = ['manager', 'admin'];
 
 /**
+ * Who may delete, as opposed to who may correct.
+ *
+ * The admin account alone - deliberately narrower than ADMIN_ROLES, which is
+ * what "the back office" means everywhere else in this file. It gates the three
+ * destructive controls on the shop-floor tabs: clearing a weighing on Weigh,
+ * clearing an emptied group on Stock, and taking a verdict off the record on
+ * Quality.
+ *
+ * A manager loses nothing they can do twice. Weighing again, re-testing,
+ * re-packing and setting a QC verdict by hand are all still theirs, and each of
+ * those can be taken back by doing it again. What is behind this list is the
+ * half that cannot: no screen in this app puts a deleted verdict, a cleared
+ * weighing or a removed yard row back.
+ *
+ * Mirrors DELETE_ROLES on the server, which is where it is actually enforced.
+ * This one only keeps a screen from offering a tap that comes back 403.
+ */
+export const DELETE_ROLES: Role[] = ['admin'];
+
+/**
  * Who may issue a dispatch, and therefore who is shown the customer list.
  *
  * The yard as well as the back office. The vehicle is loaded at the yard and
@@ -32,15 +52,21 @@ export const DISPATCH_ROLES: Role[] = ['supervisor', 'manager', 'admin'];
 /**
  * Who gets which half of the shop-floor app.
  *
- * Quality is the lab's page and the lab's only page: the lab bench tests what
- * the plant made and signs the batch off, and a supervisor has no business
- * either recording that verdict or seeing an untested batch as their problem.
- * So the two lists do not overlap - a lab account signs in to Quality alone,
- * and everyone else gets the floor without it. A manager reads the same record
- * from the back office instead, at adminPaths.quality, which is admin-only.
- * Settings sits outside both lists, because every account needs a way back out.
+ * Quality is the bench's page: the lab tests what the plant made and signs the
+ * batch off. A supervisor and a worker have no business either recording that
+ * verdict or seeing an untested batch as their problem, so it is not in their
+ * half - and a lab account gets Quality and nothing else, because the floor's
+ * work is not theirs either. Settings sits outside both lists, because every
+ * account needs a way back out.
+ *
+ * The two lists therefore overlap in exactly one place: manager and admin are
+ * on both. They are the accounts the server already trusts to write a verdict -
+ * QUALITY_WRITE_ROLES is lab plus these two - so hiding the page from them was
+ * hiding a page they were entitled to, and they arrived at it through the back
+ * office or not at all. The back office keeps the lab record, which is the
+ * reading; this is the writing, and it is the bench's own screen either way.
  */
-export const LAB_ROLES: Role[] = ['lab'];
+export const LAB_ROLES: Role[] = ['lab', 'manager', 'admin'];
 
 export const FLOOR_ROLES: Role[] = ['worker', 'supervisor', 'manager', 'admin'];
 
