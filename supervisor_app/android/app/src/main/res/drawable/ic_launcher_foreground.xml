@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The foreground layer of the adaptive launcher icon: the reclaim loop, the same
+  24-unit outline the app draws in lib/widgets/brand_mark.dart and the website
+  inlines in client/src/components/layout/Header.tsx.
+
+  Adaptive icons are drawn on a 108x108 canvas of which only the centre 72x72 is
+  guaranteed to survive the launcher's mask, and a circular mask eats further in
+  than that. So the glyph is scaled 2x to 48 units and centred at (30,30),
+  leaving it comfortably inside the safe zone on a circle, a squircle or a
+  teardrop - and leaving room for the parallax the launcher applies when the
+  layers shift against each other.
+
+  Note the group's scale multiplies the stroke as well, so 2.2 here lands at 4.4
+  on the canvas. That is deliberate: at icon sizes the website's hairline closes
+  up into a green blob.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:pathData="M23,4 L23,10 L17,10 M1,20 L1,14 L7,14 M3.51,9 a9,9 0 0 1 14.85,-3.36 L23,10 M1,14 l4.64,4.36 a9,9 0 0 0 14.85,-3.36"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

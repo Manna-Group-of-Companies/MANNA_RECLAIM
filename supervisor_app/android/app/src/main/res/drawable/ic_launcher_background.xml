@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The background layer of the adaptive launcher icon: Manna's green, corner to
+  corner. Full-bleed on the 108dp canvas and square, because the launcher masks
+  this into whatever shape the device uses - drawing our own rounded corner here
+  would only leave transparent notches inside the mask.
+
+  Same two greens as `_brandGreen` in lib/widgets/brand_mark.dart and the web
+  client's `mannaLogo` gradient. Change one, change all three.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0" android:color="#FF6CB83F" />
+                <item android:offset="1" android:color="#FF3F8A22" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>
