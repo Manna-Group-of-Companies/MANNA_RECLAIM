@@ -1,16 +1,29 @@
 /// Single place that reads build-time configuration, so nothing else has to.
 ///
-/// Mirrors client/src/config/env.ts. The API base URL is passed with
-/// `--dart-define=API_URL=...` at build time and defaults to the same
-/// development address the React client falls back to.
+/// Mirrors client/src/config/env.ts. The API base URL is passed at build time
+/// with `--dart-define-from-file=.env`, and falls back to the deployed API.
 class AppConfig {
   const AppConfig._();
 
   /// The Node/Express API this app talks to. Unchanged from the web client:
   /// every route below it is the same one the React app calls.
+  ///
+  /// The fallback is the deployed API, not a development address, because a
+  /// missing define is invisible until the app is in somebody's hands. This
+  /// defaulted to `http://10.0.2.2:4000/api/v1` - the Android emulator's alias
+  /// for its host machine, on a port nothing serves - and a release APK built
+  /// without the define carried it onto a real phone, where 10.0.2.2 addresses
+  /// nothing at all. What the crew saw was "network unreachable, working
+  /// offline", which reads as a phone with no signal rather than as a build
+  /// that was never told where the server is.
+  ///
+  /// Pointing the fallback at production inverts that: forget the define and
+  /// the app still works on the floor, while a developer who wants the local
+  /// server says so in .env and gets it. The wrong build is then the one that
+  /// is obviously wrong, not the one that is quietly useless.
   static const String apiUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://10.0.2.2:4000/api/v1',
+    defaultValue: 'https://mannareclaim-production.up.railway.app/api/v1',
   );
 
   static const String appName = String.fromEnvironment(
