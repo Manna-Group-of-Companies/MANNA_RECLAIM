@@ -6,6 +6,12 @@ import type { Role, User } from '@/types/models';
 export const userService = {
   list: (params?: ListQuery) => requestPaged<User>(endpoints.users.root, params),
 
+  /** Who may sign a record, by name. Readable by the shop floor, unlike list(). */
+  async signers(): Promise<string[]> {
+    const res = await axiosClient.get<ApiEnvelope<string[]>>(endpoints.users.signers);
+    return res.data.data;
+  },
+
   async create(payload: { name: string; pin: string; role?: Role }): Promise<User> {
     const res = await axiosClient.post<ApiEnvelope<User>>(endpoints.users.root, payload);
     return res.data.data;

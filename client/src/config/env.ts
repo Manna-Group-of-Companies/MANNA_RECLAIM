@@ -22,6 +22,13 @@ export const storageKeys = {
   offlineQueue: 'manna.offlineQueue',
   /** The name the tablet is signing records with - see hooks/useSupervisor. */
   supervisor: 'manna.supervisor',
+  /**
+   * The names that may sign, as last read from the server. Kept so a tablet
+   * that opens a sheet before the fetch lands - or with no signal at all - still
+   * offers the crew the list it had yesterday rather than three compiled-in
+   * names. See hooks/useSupervisor.
+   */
+  signers: 'manna.signers',
 } as const;
 
 export default appEnv;

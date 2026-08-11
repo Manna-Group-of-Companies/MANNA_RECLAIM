@@ -6,6 +6,9 @@ export const list = asyncHandler(async (req, res) =>
   paginated(res, await userService.list(req.query, { role: req.query.role })),
 );
 
+/** Names only, for the Supervisor pick on the sheets - see userService.listSigners. */
+export const signers = asyncHandler(async (_req, res) => ok(res, await userService.listSigners()));
+
 export const getOne = asyncHandler(async (req, res) =>
   ok(res, await userService.findById(req.params.id)),
 );

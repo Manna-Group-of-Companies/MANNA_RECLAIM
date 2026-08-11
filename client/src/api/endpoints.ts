@@ -9,6 +9,12 @@ export const endpoints = {
   },
   users: {
     root: '/users',
+    /**
+     * The names that may sign a record, for the Supervisor pick. The one route
+     * here the shop floor can reach - everything else under /users is the back
+     * office's. Names only; see the server's userService.listSigners.
+     */
+    signers: '/users/signers',
     byId: (id: string) => `/users/${id}`,
     pin: (id: string) => `/users/${id}/pin`,
   },

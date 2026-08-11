@@ -323,7 +323,14 @@ export const defaultWorkers = (machineId: string, shift: Shift, shiftwise: boole
 /** Soorya is metered on one phase only - see the note on both its sheets. */
 export const TOD_MACHINE_ID = 'GRD_O';
 
-/** Supervisors who sign for a shift. Mirrors the prototype's SUPERVISORS. */
+/**
+ * Supervisors who sign for a shift, as the prototype hard-coded them.
+ *
+ * Only the fallback now: the pick reads the plant's own accounts from
+ * GET /users/signers, so a supervisor renamed or added in the back office
+ * reaches the floor instead of drifting from this list. This is what a device
+ * that has never reached the server is left with - see hooks/useSupervisor.
+ */
 export const SUPERVISORS = ['Mathai', 'Rahul', 'Devanand'];
 
 /** Customers on the reclaim price list, in the prototype's order. */

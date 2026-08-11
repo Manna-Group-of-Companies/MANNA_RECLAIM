@@ -76,6 +76,21 @@ export const QUALITY_WRITE_ROLES = [ROLES.LAB, ...ADMIN_ROLES];
  */
 export const DISPATCH_ROLES = [ROLES.SUPERVISOR, ...ADMIN_ROLES];
 
+/**
+ * Whose name may sign a record on the shop floor.
+ *
+ * The list behind the Supervisor pick on the sheets, which used to be three
+ * names hard-coded into the web client and copied again into the Flutter app.
+ * A supervisor renamed or added in the back office never reached either copy,
+ * so the pick and the account list drifted apart - and the name that lands on a
+ * run is the name the plant reads back off it months later.
+ *
+ * Deliberately not floorRoles: a worker holding the tablet signs with whoever
+ * is supervising, which is what the pick is for, and lab accounts are not on
+ * the floor at all. Mirrors SIGNER_ROLES in client/src/config/constants.ts.
+ */
+export const SIGNER_ROLES = [ROLES.SUPERVISOR, ...ADMIN_ROLES];
+
 export const SHIFTS = { DAY: 'Day', NIGHT: 'Night' };
 
 /** Day 08:30-20:30, Night 20:30-08:30 (minutes from midnight). */

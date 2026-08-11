@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { crud, op } from './base.service.js';
-import { TABLES, ROLES } from '../config/constants.js';
+import { TABLES, ROLES, SIGNER_ROLES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { DEV_USERS, devSeedActive } from '../config/devSeed.js';
 
@@ -38,6 +38,25 @@ export const userService = {
       return { rows, total: rows.length, page: 1, limit: rows.length };
     }
     return base.list(query, filters);
+  },
+
+  /**
+   * The names the shop floor may sign a record with - see SIGNER_ROLES.
+   *
+   * Names and nothing else, and the only route under /users the floor can
+   * reach: the tablets need to know who may sign, not who exists, what their
+   * role is or whether their account is switched off. That is the same amount
+   * the hard-coded list already told every tablet, now kept in step with the
+   * accounts instead of drifting from them.
+   */
+  async listSigners() {
+    const signing = (u) => u.active !== false && SIGNER_ROLES.includes(u.role);
+    if (await devSeedActive()) return DEV_USERS.filter(signing).map((u) => u.name);
+    const { rows } = await base.list(
+      { limit: 200, sort: 'name', order: 'asc' },
+      { role: op.oneOf(SIGNER_ROLES), active: true },
+    );
+    return rows.map((u) => u.name);
   },
 
   async create({ name, role = ROLES.SUPERVISOR, pin, active = true }) {

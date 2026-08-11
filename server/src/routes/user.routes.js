@@ -8,6 +8,13 @@ import { registerSchema, updateUserSchema, pinSchema } from '../validations/auth
 
 const router = Router();
 
+/**
+ * Before the back-office gate below, and the only route here that is not behind
+ * it: the shop floor has to know which names may sign a record. Signed in is
+ * enough, and the answer is a list of names - see userService.listSigners.
+ */
+router.get('/signers', authenticate, users.signers);
+
 router.use(authenticate, adminOnly);
 
 router.get('/', validate({ query: listQuery }), users.list);

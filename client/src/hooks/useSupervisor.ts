@@ -1,7 +1,20 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { setSupervisor } from '@/features/ui/uiSlice';
-import { SUPERVISORS } from '@/config/constants';
+import { setSigners, setSupervisor } from '@/features/ui/uiSlice';
+import { userService } from '@/api/services/user.service';
+
+/**
+ * Read the signing names once per signed-in account, however many sheets ask.
+ *
+ * A rename in the back office reaches the floor the next time a sheet is
+ * opened, which is the granularity this needs - the alternative is every sheet
+ * re-reading the account list on mount for a list that changes a few times a
+ * year. A failure clears the mark rather than raising anything: the stored list
+ * from last time stands, the next sheet tries again, and a tablet on a dropped
+ * connection keeps a working pick instead of an error about something the crew
+ * did not ask for.
+ */
+let loadedFor: string | null = null;
 
 /**
  * Who the record is signed by, and how to switch it.
@@ -18,11 +31,24 @@ export function useSupervisor() {
   const dispatch = useAppDispatch();
   const chosen = useAppSelector((s) => s.ui.supervisor);
   const account = useAppSelector((s) => s.auth.user?.name ?? '');
+  const signers = useAppSelector((s) => s.ui.signers);
+  const authed = useAppSelector((s) => s.auth.status === 'authenticated');
+
+  useEffect(() => {
+    if (!authed || !account || loadedFor === account) return;
+    loadedFor = account;
+    void userService
+      .signers()
+      .then((names) => dispatch(setSigners(names)))
+      .catch(() => {
+        if (loadedFor === account) loadedFor = null;
+      });
+  }, [authed, account, dispatch]);
 
   /** The account first - it is the default - then the plant's supervisors. */
   const options = useMemo(
-    () => [...new Set([account, ...SUPERVISORS, chosen ?? ''].filter(Boolean))],
-    [account, chosen],
+    () => [...new Set([account, ...signers, chosen ?? ''].filter(Boolean))],
+    [account, signers, chosen],
   );
 
   const name = chosen || account || options[0] || '';

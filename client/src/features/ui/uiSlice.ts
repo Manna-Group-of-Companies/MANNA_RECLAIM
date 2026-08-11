@@ -1,5 +1,6 @@
 import { createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit';
 import { storageKeys } from '@/config/env';
+import { SUPERVISORS } from '@/config/constants';
 import { storage } from '@/utils/storage';
 
 export type ToastKind = 'ok' | 'err' | 'warn';
@@ -38,6 +39,16 @@ interface UiState {
    * shift and re-picking would be the crew's job to remember.
    */
   supervisor: string | null;
+  /**
+   * Who the plant's accounts say may sign a record, last read from the server.
+   *
+   * Was a list of three names in config/constants, copied again into the
+   * Flutter app - so a supervisor renamed or added in the back office reached
+   * neither, and the pick drifted from the accounts. The constant is now only
+   * the fallback for a tablet that has never reached the server. See
+   * hooks/useSupervisor.
+   */
+  signers: string[];
 }
 
 const initialState: UiState = {
@@ -47,6 +58,7 @@ const initialState: UiState = {
   refreshTick: 0,
   costingUnlocked: false,
   supervisor: storage.get<string | null>(storageKeys.supervisor, null),
+  signers: storage.get<string[]>(storageKeys.signers, SUPERVISORS),
 };
 
 const uiSlice = createSlice({
@@ -83,6 +95,17 @@ const uiSlice = createSlice({
       if (name) storage.set(storageKeys.supervisor, name);
       else storage.remove(storageKeys.supervisor);
     },
+    /**
+     * The names that may sign, as the server has them. An empty answer is
+     * ignored: a plant with no supervisors on it is a bad read, not a reason to
+     * leave the crew a pick with nothing in it.
+     */
+    setSigners: (state, action: PayloadAction<string[]>) => {
+      const names = action.payload.map((n) => n.trim()).filter(Boolean);
+      if (!names.length) return;
+      state.signers = names;
+      storage.set(storageKeys.signers, names);
+    },
     unlockCosting: (state) => {
       state.costingUnlocked = true;
     },
@@ -100,6 +123,7 @@ export const {
   setOnline,
   requestRefresh,
   setSupervisor,
+  setSigners,
   unlockCosting,
   lockCosting,
 } = uiSlice.actions;
