@@ -63,6 +63,29 @@ const refOf = (raw) => String(raw?.no ?? raw?.batchNo ?? raw?.id ?? '').trim();
  */
 const sameRef = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 
+/**
+ * Why a batch number is not free, said in the terms the crew is standing in.
+ *
+ * "Batch 3077 already exists" is true and useless at a charged vessel: it does
+ * not separate a mistyped number from a charge somebody has already logged, and
+ * those are opposite next moves. The vessel and the shift it was charged on say
+ * which - and a closed batch is called closed, because a number that belongs to
+ * last month's charge is not a number anyone is about to load against.
+ *
+ * The vessel is named by its id (`AC_M`), not its name: the batch blob keeps the
+ * id and this service has no machine list to look one up in. The tablet turns
+ * the id into the name it is painted with - see MachinesPage - and this message
+ * is the fallback for the case only the server can catch.
+ */
+const clashMessage = (clash) => {
+  const parts = [];
+  if (clash?.autoclaveId) parts.push('on ' + clash.autoclaveId);
+  if (clash?.shiftDate) parts.push(clash.shiftDate + (clash.shift ? ' ' + clash.shift : ''));
+  const where = parts.length ? ' (' + parts.join(', ') + ')' : '';
+  const state = clash?.closed ? 'a closed batch' : 'already open';
+  return 'Batch ' + refOf(clash) + ' is ' + state + where;
+};
+
 /** A pass that yields nothing to weigh never counts towards a grade's stages. */
 const producing = (run) => run.non_production !== true;
 
@@ -446,7 +469,7 @@ export const batchService = {
     // and the write.
     await mutateBatches((batches) => {
       const clash = batches.find((b) => sameRef(refOf(b), ref));
-      if (clash) throw ApiError.conflict('Batch ' + refOf(clash) + ' already exists');
+      if (clash) throw ApiError.conflict(clashMessage(clash));
       return [...batches, row];
     });
     return toBatch(row, undefined, []);
@@ -495,7 +518,7 @@ export const batchService = {
       // every batch but itself.
       if (fields.no) {
         const clash = batches.find((b) => b.id !== id && sameRef(refOf(b), fields.no));
-        if (clash) throw ApiError.conflict('Batch ' + refOf(clash) + ' already exists');
+        if (clash) throw ApiError.conflict(clashMessage(clash));
       }
       const next = [...batches];
       next[index] = { ...next[index], ...fields };

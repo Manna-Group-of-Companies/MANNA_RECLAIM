@@ -21,7 +21,10 @@ let started = null;
 async function boot() {
   const { startPostgrest } = await import('./postgrestStub.js');
   const functions = {};
-  const db = await startPostgrest({ tables: {}, functions });
+  // Shared bags rather than values, so re-seeding a test can refill them
+  // without standing another listener up.
+  const missingColumns = {};
+  const db = await startPostgrest({ tables: {}, functions, missingColumns });
 
   const { createApp } = await import('../../src/app.js');
   const { signAccessToken } = await import('../../src/utils/jwt.js');
@@ -40,7 +43,7 @@ async function boot() {
   server.unref();
   const base = `http://127.0.0.1:${server.address().port}${env.apiPrefix}`;
 
-  return { db, functions, server, base, signAccessToken };
+  return { db, functions, missingColumns, server, base, signAccessToken };
 }
 
 /**
@@ -48,7 +51,7 @@ async function boot() {
  * Re-seeds rather than restarts, so every test in a file starts from a known
  * store without paying for another listener.
  */
-export async function startApi({ tables = {}, functions = {} } = {}) {
+export async function startApi({ tables = {}, functions = {}, missingColumns = {} } = {}) {
   started ??= await boot();
   const api = started;
 
@@ -56,6 +59,10 @@ export async function startApi({ tables = {}, functions = {} } = {}) {
   Object.assign(api.db.tables, tables);
   for (const key of Object.keys(api.functions)) delete api.functions[key];
   Object.assign(api.functions, functions);
+  // `{ users: ['last_login_at'] }` - a project running behind the code, which
+  // is what the select pruning in config/supabase.js exists for.
+  for (const key of Object.keys(api.missingColumns)) delete api.missingColumns[key];
+  Object.assign(api.missingColumns, missingColumns);
 
   /** A signed-in account of the given role, as a bearer token. */
   const tokenFor = (role, name = role) => api.signAccessToken({ id: `user-${role}`, role, name });

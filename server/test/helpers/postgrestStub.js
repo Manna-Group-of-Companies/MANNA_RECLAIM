@@ -88,7 +88,7 @@ const readBody = (req) =>
  * so an assertion about "what the database ended up holding" is an assertion
  * about the same array the requests moved.
  */
-export async function startPostgrest({ tables = {}, functions = {} } = {}) {
+export async function startPostgrest({ tables = {}, functions = {}, missingColumns = {} } = {}) {
   const store = { ...tables };
 
   const server = http.createServer(async (req, res) => {
@@ -111,6 +111,27 @@ export async function startPostgrest({ tables = {}, functions = {} } = {}) {
 
     const table = tableMatch[1];
     const rows = (store[table] ||= []);
+
+    /*
+     * A column the project does not have, named in a select.
+     *
+     * Opt-in per test, because the stub otherwise ignores `select` entirely and
+     * answers with whole rows. What it models is the one case that matters: the
+     * database is behind the code, and Postgres refuses the whole read rather
+     * than returning the rest of the columns. Wording and code are Postgres's
+     * own - the server matches on both.
+     */
+    const absent = missingColumns[table] ?? [];
+    if (absent.length) {
+      const asked = (url.searchParams.get('select') ?? '').split(',').map((c) => c.trim());
+      const bad = absent.find((column) => asked.includes(column));
+      if (bad) {
+        return json(res, 400, {
+          code: '42703',
+          message: `column ${table}.${bad} does not exist`,
+        });
+      }
+    }
 
     if (req.method === 'GET') {
       const matched = rows.filter(predicateFor(url.searchParams));

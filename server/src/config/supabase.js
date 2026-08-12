@@ -172,8 +172,47 @@ function pruneBody(table, body) {
   return Array.isArray(body) ? body.map(strip) : strip(body);
 }
 
+/**
+ * The same treatment for what a read asks *for*.
+ *
+ * A write that names a missing column is pruned and goes through; a read that
+ * names one used to take the whole screen down with it, which is the wrong way
+ * round - the back office cannot record anything on a page that will not load,
+ * and the column it is missing is by definition one with nothing in it yet. So
+ * the select drops it too, and the page comes up with that field blank.
+ *
+ * Only a plain column list is touched. A select carrying an embedded resource
+ * or an alias - `runs(id,name)`, `total:count` - is handed over untouched
+ * rather than half understood, and `*` never names a column to begin with.
+ */
+function pruneSelect(table, select) {
+  const absent = absentColumns.get(table);
+  if (!absent?.size || !select || select === '*' || /[(:*]/.test(select)) return select;
+  const kept = select.split(',').filter((column) => !absent.has(column.trim()));
+  if (kept.length === select.split(',').length) return select;
+  // Everything it asked for is missing. `*` is the honest answer - the row as
+  // the project actually has it - and an empty select is not a request at all.
+  return kept.length ? kept.join(',') : '*';
+}
+
 /** `Could not find the 'needs_weigh' column of 'runs' ...` -> needs_weigh */
 const missingColumnFrom = (message) => /'([^']+)' column/.exec(String(message ?? ''))?.[1] ?? null;
+
+/**
+ * `column users.last_login_at does not exist` -> last_login_at
+ *
+ * Postgres's own wording rather than PostgREST's, because a column named in a
+ * select reaches the database and comes back as 42703 - a different code and a
+ * different sentence from the PGRST204 a write gets.
+ */
+const missingSelectFrom = (message) =>
+  /column\s+(?:[\w$]+\.)?"?([\w$]+)"?\s+does not exist/i.exec(String(message ?? ''))?.[1] ?? null;
+
+/** Whether a select asks for a column by name - `*` asks for none of them. */
+const selectCarries = (select, column) =>
+  Boolean(select) &&
+  select !== '*' &&
+  select.split(',').some((part) => part.trim() === column);
 
 /**
  * One PostgREST call.
@@ -199,24 +238,33 @@ export async function request(
 ) {
   if (!isDbReady()) throw ApiError.unavailable('Supabase is not configured');
 
-  const params = new URLSearchParams();
-  if (select) params.set('select', select);
-  applyFilters(params, filters);
-  if (order) {
-    // Rows with no value sort last either way; otherwise a null shift_date
-    // would head up a "newest first" list.
-    params.set('order', `${order}.${ascending ? 'asc' : 'desc'}.nullslast`);
-  }
-  if (limit != null) params.set('limit', String(limit));
-  if (offset) params.set('offset', String(offset));
-  if (onConflict) params.set('on_conflict', onConflict);
+  /*
+   * Built per attempt rather than once, so a select repaired below is what the
+   * retry actually sends. verifySchema() is unaffected by the pruning here: it
+   * runs at boot with nothing yet marked absent, which is what lets its probe
+   * still fail and report the column instead of quietly dropping it.
+   */
+  const buildUrl = () => {
+    const params = new URLSearchParams();
+    const wanted = pruneSelect(table, select);
+    if (wanted) params.set('select', wanted);
+    applyFilters(params, filters);
+    if (order) {
+      // Rows with no value sort last either way; otherwise a null shift_date
+      // would head up a "newest first" list.
+      params.set('order', `${order}.${ascending ? 'asc' : 'desc'}.nullslast`);
+    }
+    if (limit != null) params.set('limit', String(limit));
+    if (offset) params.set('offset', String(offset));
+    if (onConflict) params.set('on_conflict', onConflict);
+    return `${env.supabase.url}/rest/v1/${table}?${params}`;
+  };
 
   const prefer = [];
   if (count) prefer.push('count=exact');
   if (method !== 'GET') prefer.push(returning ? 'return=representation' : 'return=minimal');
   if (onConflict) prefer.push('resolution=merge-duplicates');
 
-  const url = `${env.supabase.url}/rest/v1/${table}?${params}`;
   // Written columns the project is known to be without are dropped up front;
   // anything that only shows up as a PGRST204 below is dropped and retried.
   let sending = pruneBody(table, body);
@@ -244,7 +292,7 @@ export async function request(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     let res;
     try {
-      res = await fetch(url, buildInit());
+      res = await fetch(buildUrl(), buildInit());
     } catch (err) {
       // Network-level failure: DNS, TLS, the connection dropped mid-flight.
       lastError = new ApiError(503, `Supabase unreachable: ${err.message}`);
@@ -277,6 +325,29 @@ export async function request(
       if (column && carriesColumn(sending, column)) {
         markAbsent(table, column);
         sending = pruneBody(table, sending);
+        repairs += 1;
+        attempt -= 1;
+        continue;
+      }
+    }
+
+    /*
+     * The read half of the same repair: a column named in the select that the
+     * project does not have. Marked and asked for again without it, so the page
+     * comes up with that field blank rather than not at all.
+     *
+     * The boot check normally marks these first and this never fires. It is
+     * what covers a project running with SUPABASE_VERIFY_SCHEMA off, and the
+     * window between a column being added to the code and being added to the
+     * database - which is exactly when a screen would otherwise go dark.
+     */
+    if (payload?.code === '42703' && repairs < MAX_REPAIRS) {
+      const column = missingSelectFrom(payload.message);
+      // Against what was actually sent, not against `select` as it came in:
+      // once a column is marked, the next build leaves it out, so the same
+      // column cannot be repaired twice and the loop cannot spin on it.
+      if (column && selectCarries(pruneSelect(table, select), column)) {
+        markAbsent(table, column);
         repairs += 1;
         attempt -= 1;
         continue;
