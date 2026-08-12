@@ -46,12 +46,27 @@ export const authService = {
     return { user: publicUser(user), tokens: issueTokens(user) };
   },
 
-  /** Signing out ends the session itself, not just the cookie holding it. */
+  /**
+   * Signing out ends the session itself, not just the cookie holding it.
+   *
+   * It is also what takes the name off the manager's nav bar. That has to
+   * happen here rather than by letting the presence window run out, because the
+   * window is a quarter of an hour and the person has left the plant - so the
+   * stamp is written from the claims on the token being spent, which is the
+   * only place the account is named on this route.
+   *
+   * The write is not waited for and cannot fail the sign-out: the session is
+   * already revoked by then, and refusing to sign somebody out because a column
+   * would not take a timestamp is the wrong way round.
+   */
   signOut(refreshToken) {
     if (!refreshToken) return;
     try {
       const claims = verifyRefreshToken(refreshToken);
       revoke(claims.jti, claims.exp);
+      userService
+        .touchLogout(claims.sub)
+        .catch((err) => logger.warn(`Sign-out by ${claims.sub} was not stamped - ${err.message}`));
     } catch {
       // Already expired, forged or revoked - nothing left to end.
     }

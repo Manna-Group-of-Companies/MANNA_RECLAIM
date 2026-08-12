@@ -80,6 +80,8 @@ export async function startApi({ tables = {}, functions = {}, missingColumns = {
   return {
     call,
     tokenFor,
+    /** The API root, for the few tests that need to call it without a token. */
+    base: api.base,
     tables: api.db.tables,
     /** The listener outlives the test; the process ending is what closes it. */
     stop: async () => {},

@@ -138,11 +138,30 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 const absentColumns = new Map();
 
+/**
+ * How long the server keeps believing a column is missing before it tries once
+ * more.
+ *
+ * Being missing is a temporary state by definition - it is the gap between the
+ * code wanting a column and someone running the SQL - and the marking used to
+ * outlive the fix. Add the column to the project and the running API went on
+ * pruning it from every query until it was restarted, so the migration looked
+ * like it had done nothing. On the plant's deployment that means an SSH and a
+ * bounce, and until then a screen with a blank field and no clue why.
+ *
+ * Half a minute costs one failed query per column per interval in the state
+ * that is meant to be temporary anyway, and buys a migration that takes effect
+ * on its own. Nothing forgets a column that really is absent for long - it is
+ * simply re-learned.
+ */
+const ABSENT_TTL_MS = 30_000;
+
 function markAbsent(table, column, announce = true) {
   let absent = absentColumns.get(table);
-  if (!absent) absentColumns.set(table, (absent = new Set()));
-  if (absent.has(column)) return;
-  absent.add(column);
+  if (!absent) absentColumns.set(table, (absent = new Map()));
+  const known = absent.has(column);
+  absent.set(column, Date.now());
+  if (known) return;
   // The boot check prints its own summary line, so it marks these quietly.
   if (announce) {
     logger.warn(
@@ -151,9 +170,24 @@ function markAbsent(table, column, announce = true) {
   }
 }
 
+/**
+ * The columns this table is currently being treated as not having.
+ *
+ * Anything marked longer ago than the TTL is dropped here rather than on a
+ * timer: the next query is the only moment the answer is wanted, and it is also
+ * the moment that finds out whether the column has since been added.
+ */
+function absentIn(table) {
+  const absent = absentColumns.get(table);
+  if (!absent?.size) return null;
+  const stale = Date.now() - ABSENT_TTL_MS;
+  for (const [column, at] of absent) if (at < stale) absent.delete(column);
+  return absent.size ? absent : null;
+}
+
 /** What the server has given up on writing, for /health and the tests. */
 export const absentSchema = () =>
-  Object.fromEntries([...absentColumns].map(([table, cols]) => [table, [...cols]]));
+  Object.fromEntries([...absentColumns].map(([table, cols]) => [table, [...cols.keys()]]));
 
 const carriesColumn = (body, column) =>
   Array.isArray(body)
@@ -162,8 +196,8 @@ const carriesColumn = (body, column) =>
 
 /** A write body with the project's missing columns taken out of it. */
 function pruneBody(table, body) {
-  const absent = absentColumns.get(table);
-  if (!absent?.size || !body || typeof body !== 'object') return body;
+  const absent = absentIn(table);
+  if (!absent || !body || typeof body !== 'object') return body;
   const strip = (row) => {
     if (!row || typeof row !== 'object') return row;
     const kept = Object.entries(row).filter(([column]) => !absent.has(column));
@@ -186,8 +220,8 @@ function pruneBody(table, body) {
  * rather than half understood, and `*` never names a column to begin with.
  */
 function pruneSelect(table, select) {
-  const absent = absentColumns.get(table);
-  if (!absent?.size || !select || select === '*' || /[(:*]/.test(select)) return select;
+  const absent = absentIn(table);
+  if (!absent || !select || select === '*' || /[(:*]/.test(select)) return select;
   const kept = select.split(',').filter((column) => !absent.has(column.trim()));
   if (kept.length === select.split(',').length) return select;
   // Everything it asked for is missing. `*` is the honest answer - the row as
@@ -244,9 +278,18 @@ export async function request(
    * runs at boot with nothing yet marked absent, which is what lets its probe
    * still fail and report the column instead of quietly dropping it.
    */
+  /*
+   * What the select had been narrowed to on the attempt that is in flight. The
+   * repair below is judged against this rather than against a fresh pruning,
+   * because between building the URL and reading the answer another request may
+   * have marked the very column this one is about to be told about - see there.
+   */
+  let sentSelect = select;
+
   const buildUrl = () => {
     const params = new URLSearchParams();
     const wanted = pruneSelect(table, select);
+    sentSelect = wanted;
     if (wanted) params.set('select', wanted);
     applyFilters(params, filters);
     if (order) {
@@ -343,10 +386,23 @@ export async function request(
      */
     if (payload?.code === '42703' && repairs < MAX_REPAIRS) {
       const column = missingSelectFrom(payload.message);
-      // Against what was actually sent, not against `select` as it came in:
-      // once a column is marked, the next build leaves it out, so the same
-      // column cannot be repaired twice and the loop cannot spin on it.
-      if (column && selectCarries(pruneSelect(table, select), column)) {
+      /*
+       * Against the select this attempt actually sent, not against a fresh
+       * pruning of the original.
+       *
+       * The two differ exactly when a second request discovered the same
+       * missing column while this one was in flight - two screens opened
+       * together on the morning a column is added, or, more reliably, the
+       * last-seen stamp that now rides along with every authenticated read. A
+       * fresh pruning would already have the column removed, so this request
+       * would decide the error was not about anything it asked for and hand the
+       * caller a 400 - the page going dark for the one reason the repair exists
+       * to prevent, and only ever under concurrency.
+       *
+       * It still cannot spin: the next build prunes against a set that now
+       * holds the column, so it goes out without it and cannot come back.
+       */
+      if (column && selectCarries(sentSelect, column)) {
         markAbsent(table, column);
         repairs += 1;
         attempt -= 1;

@@ -27,7 +27,8 @@ const AUDIT = ['device', 'created_at'];
 export const registry = {
   // ---- accounts and the machine list (created by supabase/schema.sql) ----
   [TABLES.users]: table('id', [
-    'id', 'name', 'role', 'active', 'pin_hash', 'last_login_at', 'created_at', 'updated_at',
+    'id', 'name', 'role', 'active', 'pin_hash',
+    'last_login_at', 'last_seen_at', 'last_logout_at', 'created_at', 'updated_at',
   ]),
 
   [TABLES.machines]: table('id', [

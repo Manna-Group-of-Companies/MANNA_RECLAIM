@@ -32,6 +32,44 @@ const behind = () => ({
   missingColumns: { users: ['last_login_at'] },
 });
 
+/*
+ * First in the file on purpose, and it has to stay first.
+ *
+ * A repair is a discovery, and the discovery is process-wide: once any request
+ * has been told the column is missing, it is marked for good and no later test
+ * in this file can race to find it again. So this is the only place the racing
+ * case can be reached at all.
+ *
+ * What it guards: the requests that lose the race are holding an error about a
+ * column that, by the time they read it, their own select no longer appears to
+ * name - because the winner has already marked it. An earlier version of the
+ * repair concluded from that the error was about nothing it had asked for, and
+ * handed the caller a 400: the page going dark for precisely the reason the
+ * repair exists to prevent.
+ *
+ * Not hypothetical, and not rare any more. Every authenticated request now
+ * stamps last_seen_at on its way past, so on the first read after a column is
+ * added there are reliably two calls in the air rather than one - on the
+ * morning of a deploy, which is the worst day for it and the hardest to
+ * reproduce by hand.
+ */
+test('two reads racing to discover the same missing column both come up', async (t) => {
+  const api = await startApi(behind());
+  t.after(() => api.stop());
+
+  const all = await Promise.all([
+    api.call('/users', { role: 'manager' }),
+    api.call('/users', { role: 'admin' }),
+    api.call('/users', { role: 'manager' }),
+  ]);
+
+  assert.deepEqual(
+    all.map((res) => res.status),
+    [200, 200, 200],
+    'the ones that lost the race are served too, not 400ed',
+  );
+});
+
 test('the users list still comes up when the project has no last_login_at', async (t) => {
   const api = await startApi(behind());
   t.after(() => api.stop());

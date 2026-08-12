@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { crud, op } from './base.service.js';
+import { request } from '../config/supabase.js';
 import { TABLES, ROLES, SIGNER_ROLES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
 import { DEV_USERS, devSeedActive } from '../config/devSeed.js';
@@ -10,9 +11,20 @@ import { DEV_USERS, devSeedActive } from '../config/devSeed.js';
  */
 const base = crud(TABLES.users, {
   defaultSort: 'name',
-  select: 'id,name,role,active,last_login_at,created_at',
+  select: 'id,name,role,active,last_login_at,last_seen_at,last_logout_at,created_at',
 });
 const withPin = crud(TABLES.users, { defaultSort: 'name', select: 'id,name,role,active,pin_hash' });
+
+/**
+ * How often an account in continuous use is written down as still there.
+ * One row per person per five minutes, against a floor of maybe a dozen
+ * accounts - and the screen reading it wants "in the last quarter hour", so
+ * anything finer is precision nobody looks at.
+ */
+export const SEEN_EVERY_MS = 5 * 60 * 1000;
+
+/** id -> when it was last stamped, so a busy tablet is not one write per tap. */
+const seenAt = new Map();
 
 export const userService = {
   ...base,
@@ -82,7 +94,80 @@ export const userService = {
    */
   async touchLogin(id) {
     if (!id || (await devSeedActive())) return null;
-    return base.update(id, { last_login_at: new Date().toISOString() });
+    const now = new Date();
+    // Somebody standing at the phone typing a PIN is as present as anyone gets,
+    // so the sign-in is a sighting too - written in the same update rather than
+    // waiting for the first request after it. Seeding the throttle here is what
+    // stops the burst of calls a freshly opened app makes from rewriting it.
+    seenAt.set(id, now.getTime());
+    return base.update(id, {
+      last_login_at: now.toISOString(),
+      last_seen_at: now.toISOString(),
+    });
+  },
+
+  /**
+   * Note that this account is using the app right now.
+   *
+   * touchLogin above answers "has anybody signed in with this account", which
+   * turned out not to be the question the office was asking. The supervisor app
+   * holds a 30-day session, so a phone in use on every shift signs in once and
+   * then refreshes itself in silence for a month: last_login_at stayed empty on
+   * a floor full of people working. This is stamped by any authenticated
+   * request instead - see the authenticate middleware - so it fills in for
+   * whoever is actually holding a phone.
+   *
+   * Throttled to one write per account per SEEN_EVERY_MS. A tablet makes a
+   * request every few seconds while a sheet is open and none of them is worth
+   * an update; what the screen needs is the difference between minutes ago and
+   * yesterday, and the throttle is well inside that. `seenAt` is marked before
+   * the write rather than after, so the requests that arrive while it is in
+   * flight are skipped instead of all firing the same update.
+   *
+   * Written straight through `request` rather than through the crud helper, and
+   * with `returning: false`: this is the only write in the server that happens
+   * on the way past somebody else's request, so it asks for no row back and
+   * names no column in a select. A filter that matches nothing - an id from a
+   * token whose account has since been deleted - is then simply a write that
+   * touched nothing, rather than the not-found the keyed update would raise
+   * into a caller that is only here to note a timestamp.
+   */
+  async touchSeen(id) {
+    if (!id || (await devSeedActive())) return null;
+    const now = Date.now();
+    if (now - (seenAt.get(id) ?? 0) < SEEN_EVERY_MS) return null;
+    seenAt.set(id, now);
+    return request(TABLES.users, {
+      method: 'PATCH',
+      filters: { id },
+      body: { last_seen_at: new Date(now).toISOString() },
+      returning: false,
+    });
+  },
+
+  /**
+   * Note that this account has signed out, so the screens stop showing it.
+   *
+   * Without this, presence could only decay: a supervisor who signs out at the
+   * end of a shift would sit on the manager's nav bar for the rest of the
+   * window, and a name up there for somebody who has gone home is worse than no
+   * name at all - it is the one reading of that bar nobody can correct by
+   * looking harder.
+   *
+   * The throttle entry goes with it. It is keyed on the account, so leaving it
+   * behind would mean the sign-in a minute later - the same person picking the
+   * phone back up, or the next shift on the same handset - found the window
+   * still closed and did not stamp.
+   */
+  async touchLogout(id) {
+    if (!id || (await devSeedActive())) return null;
+    seenAt.delete(id);
+    return request(TABLES.users, {
+      method: 'PATCH',
+      filters: { id },
+      body: { last_logout_at: new Date().toISOString() },
+      returning: false,
+    });
   },
 
   verifyPin(user, pin) {
