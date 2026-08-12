@@ -21,8 +21,20 @@
 -- is bcrypt and is never selected by the API except on the login path.
 -- Names are unique case-insensitively: "Mathai" and "mathai" are one account.
 --
--- `last_login_at` is stamped by a successful sign-in and by nothing else, so
--- the back office can see which accounts are actually in use. Null means never.
+-- Three stamps, and the differences matter on a floor whose phones stay signed
+-- in for a month:
+--
+--   `last_login_at`  - when someone last typed this name and PIN. Stamped by a
+--   successful sign-in and by nothing else.
+--   `last_seen_at`   - when this account last did anything at all. Stamped by
+--   any authenticated request, throttled in the API.
+--   `last_logout_at` - when it last signed out. Stamped by the sign-out path.
+--
+-- The first answers "is this account still used by anybody". The other two
+-- together answer "who is on the app right now": present means the later of
+-- sign-in and activity is recent AND is later than the sign-out, so a phone
+-- that signed out drops off the manager's screen at once rather than lingering
+-- for the length of the window. Null on any of them means it has not happened.
 -- -----------------------------------------------------------------------------
 create table if not exists public.users (
   id            text primary key default gen_random_uuid()::text,
@@ -31,15 +43,19 @@ create table if not exists public.users (
                   check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin')),
   active        boolean not null default true,
   pin_hash      text not null,
-  last_login_at timestamptz,
+  last_login_at  timestamptz,
+  last_seen_at   timestamptz,
+  last_logout_at timestamptz,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 
 create unique index if not exists users_name_lower_key on public.users (lower(name));
 
--- For the projects whose users table was created before the column existed.
+-- For the projects whose users table was created before the columns existed.
 alter table if exists public.users add column if not exists last_login_at timestamptz;
+alter table if exists public.users add column if not exists last_seen_at timestamptz;
+alter table if exists public.users add column if not exists last_logout_at timestamptz;
 
 
 -- -----------------------------------------------------------------------------

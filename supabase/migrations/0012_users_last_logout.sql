@@ -1,0 +1,21 @@
+-- =============================================================================
+-- MANNA RECLAIM - when each account signed out
+--
+-- The third and last of the three stamps, and the one that makes the other two
+-- safe to read as "who is on the app". 0011 records activity, which decays: a
+-- supervisor who signs out at the end of a shift would otherwise stay on the
+-- manager's screen for the length of the window, and a name on that screen that
+-- has already gone home is worse than no name at all.
+--
+-- Written by the sign-out path alone - see userService.touchLogout. Presence is
+-- then a comparison rather than a guess: an account is on the app when its last
+-- sign-in or activity is inside the window AND is later than its last sign-out.
+-- Signing back in moves the sign-in past the sign-out and the name returns.
+--
+-- Null means the account has never signed out, which is the ordinary state of a
+-- phone that has simply been closed - that case is what the window is for.
+--
+-- Idempotent. supabase/schema.sql carries the same column.
+-- =============================================================================
+
+alter table if exists public.users add column if not exists last_logout_at timestamptz;

@@ -1,0 +1,24 @@
+-- =============================================================================
+-- MANNA RECLAIM - when each account was last actually using the app
+--
+-- 0010 added last_login_at, and on paper that answered "who is on the floor".
+-- In practice it never filled in: the supervisor app keeps a 30-day session, so
+-- a phone signed in once in March refreshes itself silently every morning and
+-- never touches the login path again. The Users page read "nobody has signed in
+-- since the shift started" on a shift where four people were working, which is
+-- worse than showing nothing - it is a screen that looks broken.
+--
+-- last_seen_at is the column that answers the question that was actually being
+-- asked. Every authenticated request stamps it, throttled to one write every
+-- few minutes per account - see SEEN_EVERY_MS in user.service.js - so it costs
+-- one small update per person per shift rather than one per tap.
+--
+-- The two say different things and both are kept: last_login_at is when someone
+-- typed a name and a PIN, last_seen_at is when that account last did anything.
+-- Null on either means it has not happened, which for existing rows is the
+-- honest answer - nothing recorded it before this ran, so nothing is guessed.
+--
+-- Idempotent. supabase/schema.sql carries the same column.
+-- =============================================================================
+
+alter table if exists public.users add column if not exists last_seen_at timestamptz;
