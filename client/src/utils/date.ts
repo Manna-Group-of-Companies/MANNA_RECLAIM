@@ -21,6 +21,24 @@ export const shiftForTime = (time?: string | null): Shift => {
   return shiftForMinutes((parseInt(h, 10) || 0) * 60 + (parseInt(m, 10) || 0));
 };
 
+/**
+ * The moment the shift in progress began.
+ *
+ * Day runs 08:30-20:30 and night the rest, the same boundary shiftForMinutes
+ * draws, so "this shift" means the same thing to a screen asking who is on it
+ * as it does to a sheet being signed. Between midnight and 08:30 the shift in
+ * progress started at 20:30 *yesterday*, which is the case worth having a
+ * function for - it is the one a subtraction gets wrong.
+ */
+export const shiftStart = (now = new Date()) => {
+  const at = (hour: number, minute: number, dayOffset = 0) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, minute, 0, 0);
+  const mins = now.getHours() * 60 + now.getMinutes();
+  if (mins >= 510 && mins < 1230) return at(8, 30);
+  if (mins >= 1230) return at(20, 30);
+  return at(20, 30, -1);
+};
+
 /** 24-hour HH:MM off a timestamp - the clock the shop floor reads. */
 export const clock24 = (iso?: string | null) => {
   if (!iso) return '—';
@@ -48,6 +66,26 @@ export const clock = (iso?: string | null) =>
 
 export const dayMonth = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '--';
+
+/**
+ * A past moment placed the way someone reading a list wants it: "Today 14:32"
+ * for this shift's, "Yesterday 22:10" for last night's, and a dated "12 Aug,
+ * 14:32" once it is old enough that the day is the point.
+ *
+ * The days are compared on the local calendar rather than by subtracting 24
+ * hours, so a 23:50 sign-in still reads as yesterday at 08:00 the next morning
+ * - which is what the person looking at it means by the word.
+ */
+export const whenLast = (iso?: string | null) => {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const day = todayISO(at);
+  const today = todayISO();
+  if (day === today) return `Today ${clock24(iso)}`;
+  if (day === todayISO(new Date(Date.now() - 86400000))) return `Yesterday ${clock24(iso)}`;
+  return `${dayMonth(iso)}, ${clock24(iso)}`;
+};
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

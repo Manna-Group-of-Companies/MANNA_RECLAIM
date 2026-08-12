@@ -36,6 +36,12 @@ export interface User {
   name: string;
   role: Role;
   active: boolean;
+  /**
+   * The last sign-in on this account, stamped by the server on the login path
+   * alone. Null on an account nobody has ever signed in with, and absent from
+   * the user the login reply carries - only the back office's list has it.
+   */
+  last_login_at?: string | null;
 }
 
 export interface Machine {

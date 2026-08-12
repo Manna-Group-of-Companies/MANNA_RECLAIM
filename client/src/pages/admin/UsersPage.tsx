@@ -1,12 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppSelector } from '@/app/hooks';
 import { userService } from '@/api/services/user.service';
 import { toRequestError } from '@/api/axiosClient';
 import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
+import { clock24, currentShift, shiftStart, whenLast } from '@/utils/date';
 import type { Role, User } from '@/types/models';
 
 const roles: Role[] = ['worker', 'supervisor', 'lab', 'manager', 'admin'];
+
+/**
+ * The badge beside each name, toned by how far the account reaches rather than
+ * by rank: the back office is the pair that can change what the plant records,
+ * the floor roles are the tablets, and the lab sits between the two. A manager
+ * scanning the list is looking for who holds which door, and the colour says it
+ * before the word is read - the word is there too, so the colour is never the
+ * only thing carrying it.
+ */
+const roleTone: Record<Role, string> = {
+  worker: 'none',
+  supervisor: '',
+  lab: '',
+  manager: 'hot',
+  admin: 'hot',
+};
+
+/** The last sign-in, or the plain fact that none has been recorded. */
+const lastSeen = (user: User) =>
+  user.last_login_at ? `Last signed in ${whenLast(user.last_login_at)}` : 'No sign-in recorded';
 
 /** What each role reaches, shown under the picker so the choice is not a guess. */
 const roleNote: Record<Role, string> = {
@@ -59,6 +80,28 @@ export function UsersPage() {
   useEffect(() => {
     void load();
   }, [load, refreshTick]);
+
+  /**
+   * Who signed in on the shift that is running, most recent first.
+   *
+   * This is the nearest honest answer to "who is on the floor now", and it is
+   * worth being plain about why it is not the exact one: the server hands out a
+   * token and keeps no list of who holds one, so nothing anywhere knows who is
+   * signed in at this moment. What it does know is when each account last
+   * signed in, and an account that signed in since the shift bell is somebody
+   * who picked up a tablet this shift.
+   *
+   * It reads late rather than early - a tablet signed in on Monday and left on
+   * the line all week is in use and will not appear here - which is the right
+   * way round for a list a manager acts on: a name here was definitely used
+   * this shift, rather than probably.
+   */
+  const onShift = useMemo(() => {
+    const since = shiftStart().getTime();
+    return rows
+      .filter((u) => u.last_login_at && new Date(u.last_login_at).getTime() >= since)
+      .sort((a, b) => String(b.last_login_at).localeCompare(String(a.last_login_at)));
+  }, [rows]);
 
   const toggle = async (user: User) => {
     try {
@@ -139,7 +182,8 @@ export function UsersPage() {
         <h1 className="text-lg">Users</h1>
         <div className="sub">
           Who can sign in, and what they reach. Manager and admin also get this back office;
-          a lab account gets the Quality tab and nothing else.
+          a lab account gets the Quality tab and nothing else. The time under each name is that
+          account's last sign-in, so an account nobody uses says so.
         </div>
       </div>
 
@@ -147,12 +191,50 @@ export function UsersPage() {
 
       {!loading && !rows.length && <div className="empty">No accounts yet.</div>}
 
+      {!loading && Boolean(rows.length) && (
+        <>
+          <div className="grouphead">
+            Signed in this shift · {currentShift()}, since {clock24(shiftStart().toISOString())}
+          </div>
+
+          {onShift.length ? (
+            onShift.map((user) => (
+              <div key={`shift-${user.id}`} className="mrow">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="mn truncate">{user.name}</span>
+                    <span className={`badge shrink-0 capitalize ${roleTone[user.role]}`}>
+                      {user.role}
+                    </span>
+                  </div>
+                </div>
+                <span className="badge ok">{clock24(user.last_login_at)}</span>
+              </div>
+            ))
+          ) : (
+            <div className="empty">Nobody has signed in since the shift started.</div>
+          )}
+
+          <div className="sub mx-0.5">
+            The sign-in itself, not a live session: a tablet signed in days ago and left on the
+            line is in use and is not listed here.
+          </div>
+
+          <div className="grouphead">All accounts</div>
+        </>
+      )}
+
       {!loading &&
         rows.map((user) => (
-          <div key={user.id} className="mrow">
-            <div>
-              <div className="mn">{user.name}</div>
-              <div className="mk capitalize">{user.role}</div>
+          <div key={user.id} className="mrow flex-wrap">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="mn truncate">{user.name}</span>
+                <span className={`badge shrink-0 capitalize ${roleTone[user.role]}`}>
+                  {user.role}
+                </span>
+              </div>
+              <div className="mk mt-1">{lastSeen(user)}</div>
             </div>
             <div className="row gap-2">
               <span className={`badge ${user.active ? 'ok' : 'none'}`}>
