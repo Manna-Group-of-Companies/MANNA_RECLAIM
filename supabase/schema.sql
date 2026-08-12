@@ -20,19 +20,26 @@
 -- Name + PIN, matching the PIN gate the tablets have always used. `pin_hash`
 -- is bcrypt and is never selected by the API except on the login path.
 -- Names are unique case-insensitively: "Mathai" and "mathai" are one account.
+--
+-- `last_login_at` is stamped by a successful sign-in and by nothing else, so
+-- the back office can see which accounts are actually in use. Null means never.
 -- -----------------------------------------------------------------------------
 create table if not exists public.users (
-  id          text primary key default gen_random_uuid()::text,
-  name        text not null,
-  role        text not null default 'supervisor'
-                check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin')),
-  active      boolean not null default true,
-  pin_hash    text not null,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  id            text primary key default gen_random_uuid()::text,
+  name          text not null,
+  role          text not null default 'supervisor'
+                  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin')),
+  active        boolean not null default true,
+  pin_hash      text not null,
+  last_login_at timestamptz,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
 );
 
 create unique index if not exists users_name_lower_key on public.users (lower(name));
+
+-- For the projects whose users table was created before the column existed.
+alter table if exists public.users add column if not exists last_login_at timestamptz;
 
 
 -- -----------------------------------------------------------------------------
