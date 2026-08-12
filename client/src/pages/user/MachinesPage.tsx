@@ -72,6 +72,7 @@ import {
   atLocal,
   clock24,
   currentShift,
+  dayLong,
   dayMonth,
   monthLetter,
   monthShort,
@@ -235,6 +236,21 @@ export function MachinesPage() {
     () => openBatches.filter((b) => b.autoclave_done),
     [openBatches],
   );
+  /**
+   * A vessel's name from its id, for the messages that have to name one.
+   *
+   * A card knows the machine it is drawn for. A refusal about a batch number
+   * only has the id the clashing charge was loaded on, and `AC_M` is not what
+   * is painted on the side of the vessel the crew would have to go and look at.
+   */
+  const machineName = useMemo(() => {
+    const named = new Map(
+      Object.values(groups)
+        .flat()
+        .map((m) => [m.id, m.name] as const),
+    );
+    return (id?: string | null) => (id && named.get(id)) || id || 'another machine';
+  }, [groups]);
   // The account signed in signs the record unless the crew switches the name -
   // one tablet is shared, so the two are not always the same person.
   const { name: supervisor } = useSupervisor();
@@ -682,11 +698,27 @@ export function MachinesPage() {
       notify(loadIsCoarse ? 'Enter a coarse batch number' : 'Enter a batch number', 'warn');
       return;
     }
-    // A quick answer for the number the crew can already see on this tablet.
-    // The server checks it against every batch on record, open or closed, and
-    // is the one that has the last word - see the message it sends back below.
-    if (openBatches.some((b) => b.ref.toLowerCase() === ref.toLowerCase())) {
-      notify(`Batch ${ref} already exists`, 'warn');
+    /*
+     * A quick answer for the number the crew can already see on this tablet.
+     * The server checks it against every batch on record, open or closed, and
+     * is the one that has the last word - see the message it sends back below.
+     *
+     * It says where the number went, not only that it is gone. "Batch 3077
+     * already exists" leaves the crew standing at a charged vessel with no way
+     * to tell which of two things happened: they keyed the wrong number, or the
+     * charge is already logged and somebody has done this once already. Naming
+     * the vessel and the shift settles it without leaving the sheet - and those
+     * are two different next moves, one of them being to walk away.
+     */
+    const clash = openBatches.find((b) => b.ref.toLowerCase() === ref.toLowerCase());
+    if (clash) {
+      const where = machineName(clash.machine_id);
+      // dayLong, not dayMonth: `shift_date` is a plain 'YYYY-MM-DD' and reading
+      // it through Date would call it UTC midnight - see the note on dayLong.
+      const when = clash.shift_date
+        ? `, ${dayLong(clash.shift_date)} ${clash.shift ?? ''}`.trimEnd()
+        : '';
+      notify(`Batch ${ref} is already open on ${where}${when}`, 'warn');
       return;
     }
 
