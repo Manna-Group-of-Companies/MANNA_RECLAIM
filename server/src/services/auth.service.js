@@ -2,6 +2,7 @@ import { userService } from './user.service.js';
 import { issueTokens, verifyRefreshToken } from '../utils/jwt.js';
 import { revoke } from '../utils/tokenDenylist.js';
 import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 import { ApiError } from '../utils/ApiError.js';
 
 const publicUser = (u) => ({ id: u.id, name: u.name, role: u.role, active: u.active });
@@ -12,6 +13,22 @@ export const authService = {
     const user = await userService.findByName(name);
     if (!user || !user.active) throw ApiError.unauthorized('Unknown or disabled account');
     if (!userService.verifyPin(user, pin)) throw ApiError.unauthorized('Wrong PIN');
+
+    /**
+     * Note the sign-in for the back office's Users page. Only here, and not on
+     * refresh(): a tablet left signed in refreshes by itself all week, so
+     * counting that would report a person at a machine who has not touched it.
+     *
+     * A stamp that fails is logged and swallowed. The crew is standing at the
+     * tablet with the right PIN, and a column the office reads is no reason to
+     * refuse them the shift.
+     */
+    try {
+      await userService.touchLogin(user.id);
+    } catch (err) {
+      logger.warn(`Sign-in by ${user.name} was not stamped - ${err.message}`);
+    }
+
     return { user: publicUser(user), tokens: issueTokens(user) };
   },
 

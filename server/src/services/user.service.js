@@ -8,7 +8,10 @@ import { DEV_USERS, devSeedActive } from '../config/devSeed.js';
  * `pin_hash` is deliberately outside the default select, so it never rides
  * along on GET /users. The login path asks for it by name through `withPin`.
  */
-const base = crud(TABLES.users, { defaultSort: 'name', select: 'id,name,role,active,created_at' });
+const base = crud(TABLES.users, {
+  defaultSort: 'name',
+  select: 'id,name,role,active,last_login_at,created_at',
+});
 const withPin = crud(TABLES.users, { defaultSort: 'name', select: 'id,name,role,active,pin_hash' });
 
 export const userService = {
@@ -66,6 +69,20 @@ export const userService = {
 
   async setPin(id, pin) {
     return base.update(id, { pin_hash: await bcrypt.hash(String(pin), 10) });
+  },
+
+  /**
+   * Stamp a sign-in that just succeeded, so the back office can tell an account
+   * in daily use from one nobody has touched since the person left.
+   *
+   * Only the login path calls this - it is deliberately not a field on the
+   * patch route, because a column the account holder could write is not a
+   * record of anything. The dev seed has no table to write to, so it says so
+   * by answering null rather than pretending it wrote.
+   */
+  async touchLogin(id) {
+    if (!id || (await devSeedActive())) return null;
+    return base.update(id, { last_login_at: new Date().toISOString() });
   },
 
   verifyPin(user, pin) {
