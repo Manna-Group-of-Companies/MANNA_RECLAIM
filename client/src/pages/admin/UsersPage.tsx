@@ -4,7 +4,9 @@ import { userService } from '@/api/services/user.service';
 import { toRequestError } from '@/api/axiosClient';
 import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
-import { clock24, currentShift, shiftStart, whenLast } from '@/utils/date';
+import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
+import { clock24, whenLast } from '@/utils/date';
+import { minsAgo, onAppNow } from '@/utils/presence';
 import type { Role, User } from '@/types/models';
 
 const roles: Role[] = ['worker', 'supervisor', 'lab', 'manager', 'admin'];
@@ -25,9 +27,25 @@ const roleTone: Record<Role, string> = {
   admin: 'hot',
 };
 
-/** The last sign-in, or the plain fact that none has been recorded. */
-const lastSeen = (user: User) =>
-  user.last_login_at ? `Last signed in ${whenLast(user.last_login_at)}` : 'No sign-in recorded';
+/**
+ * How recently an account has to have done something to count as being on the
+ * app. Comfortably wider than the server's stamping interval, so somebody
+ * working steadily never blinks out of the list between two of their own
+ * writes - see SEEN_EVERY_MS in the API.
+ */
+/**
+ * The two dates on an account, said plainly. They answer different questions
+ * and a floor whose phones stay signed in for a month can show a long gap
+ * between them: last used is when this account last did anything, last signed
+ * in is when somebody last actually typed the name and the PIN.
+ */
+const activity = (user: User) => {
+  const used = user.last_seen_at ? `Last used ${whenLast(user.last_seen_at)}` : 'Never used';
+  const login = user.last_login_at
+    ? `signed in ${whenLast(user.last_login_at)}`
+    : 'no sign-in recorded';
+  return `${used} · ${login}`;
+};
 
 /** What each role reaches, shown under the picker so the choice is not a guess. */
 const roleNote: Record<Role, string> = {
@@ -81,27 +99,17 @@ export function UsersPage() {
     void load();
   }, [load, refreshTick]);
 
+  // The block at the top is a "right now" answer, so it has to keep up on a
+  // screen left open. A minute is well inside the fifteen the window allows.
+  useRefreshOnFocus(load, { intervalMs: 60_000 });
+
   /**
-   * Who signed in on the shift that is running, most recent first.
-   *
-   * This is the nearest honest answer to "who is on the floor now", and it is
-   * worth being plain about why it is not the exact one: the server hands out a
-   * token and keeps no list of who holds one, so nothing anywhere knows who is
-   * signed in at this moment. What it does know is when each account last
-   * signed in, and an account that signed in since the shift bell is somebody
-   * who picked up a tablet this shift.
-   *
-   * It reads late rather than early - a tablet signed in on Monday and left on
-   * the line all week is in use and will not appear here - which is the right
-   * way round for a list a manager acts on: a name here was definitely used
-   * this shift, rather than probably.
+   * Which supervisor is on the app, most recently present first - the same
+   * answer, off the same rules, that the nav bar above is showing. Both read
+   * utils/presence, because a floor where those two screens disagreed about who
+   * is working would be worse than either of them alone.
    */
-  const onShift = useMemo(() => {
-    const since = shiftStart().getTime();
-    return rows
-      .filter((u) => u.last_login_at && new Date(u.last_login_at).getTime() >= since)
-      .sort((a, b) => String(b.last_login_at).localeCompare(String(a.last_login_at)));
-  }, [rows]);
+  const onApp = useMemo(() => onAppNow(rows), [rows]);
 
   const toggle = async (user: User) => {
     try {
@@ -181,9 +189,9 @@ export function UsersPage() {
       <div className="mx-0.5 mt-3">
         <h1 className="text-lg">Users</h1>
         <div className="sub">
-          Who can sign in, and what they reach. Manager and admin also get this back office;
-          a lab account gets the Quality tab and nothing else. The time under each name is that
-          account's last sign-in, so an account nobody uses says so.
+          Which supervisor is on the app and when, and underneath, everyone who can sign in and
+          what they reach. Manager and admin also get this back office; a lab account gets the
+          Quality tab and nothing else.
         </div>
       </div>
 
@@ -193,13 +201,11 @@ export function UsersPage() {
 
       {!loading && Boolean(rows.length) && (
         <>
-          <div className="grouphead">
-            Signed in this shift · {currentShift()}, since {clock24(shiftStart().toISOString())}
-          </div>
+          <div className="grouphead">On the supervisor app · last 15 minutes</div>
 
-          {onShift.length ? (
-            onShift.map((user) => (
-              <div key={`shift-${user.id}`} className="mrow">
+          {onApp.length ? (
+            onApp.map(({ user, at }) => (
+              <div key={`on-app-${user.id}`} className="mrow">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="mn truncate">{user.name}</span>
@@ -207,17 +213,26 @@ export function UsersPage() {
                       {user.role}
                     </span>
                   </div>
+                  <div className="mk mt-1">
+                    {user.last_login_at
+                      ? `Signed in ${whenLast(user.last_login_at)}`
+                      : 'Signed in before this was recorded'}
+                  </div>
                 </div>
-                <span className="badge ok">{clock24(user.last_login_at)}</span>
+                <div className="text-right">
+                  <span className="badge ok">{clock24(new Date(at).toISOString())}</span>
+                  <div className="mk mt-1">{minsAgo(at)}</div>
+                </div>
               </div>
             ))
           ) : (
-            <div className="empty">Nobody has signed in since the shift started.</div>
+            <div className="empty">No supervisor has used the app in the last 15 minutes.</div>
           )}
 
           <div className="sub mx-0.5">
-            The sign-in itself, not a live session: a tablet signed in days ago and left on the
-            line is in use and is not listed here.
+            The floor only - a manager reading this page is not on the app, so the back office
+            does not list itself here. It is recent use rather than a live session: a phone in
+            somebody's pocket with the screen off stops counting after fifteen minutes.
           </div>
 
           <div className="grouphead">All accounts</div>
@@ -234,7 +249,7 @@ export function UsersPage() {
                   {user.role}
                 </span>
               </div>
-              <div className="mk mt-1">{lastSeen(user)}</div>
+              <div className="mk mt-1">{activity(user)}</div>
             </div>
             <div className="row gap-2">
               <span className={`badge ${user.active ? 'ok' : 'none'}`}>

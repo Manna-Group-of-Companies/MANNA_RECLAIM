@@ -42,6 +42,22 @@ export interface User {
    * the user the login reply carries - only the back office's list has it.
    */
   last_login_at?: string | null;
+  /**
+   * The last time this account did anything, stamped by the server on any
+   * authenticated request. This is the one that answers "who is on the app",
+   * because the phones hold a month-long session and so hardly ever sign in -
+   * see the Users page. Null on an account that has not been used since the
+   * column was added.
+   */
+  last_seen_at?: string | null;
+  /**
+   * When this account last signed out, stamped by the server on the sign-out
+   * path. What takes a name off the manager's nav bar the moment somebody goes
+   * home, rather than leaving it there until the presence window runs out -
+   * see utils/presence. Null on an account that has never signed out, which is
+   * the ordinary state of a phone that is simply closed.
+   */
+  last_logout_at?: string | null;
 }
 
 export interface Machine {

@@ -5,6 +5,9 @@ import { requestRefresh } from '@/features/ui/uiSlice';
 import { logout } from '@/features/auth/authSlice';
 import { adminPaths, userPaths } from '@/config/paths';
 import { cn } from '@/utils/cn';
+import { useOnApp } from '@/hooks/useOnApp';
+import { minsAgo } from '@/utils/presence';
+import { clock24 } from '@/utils/date';
 
 /** The six back.html tabs, plus the seven this port adds. */
 const tabs = [
@@ -31,6 +34,14 @@ export function AdminTopbar() {
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
   const online = useAppSelector((s) => s.ui.online);
+  /*
+   * Who is on the shop floor, up here rather than only on Users, because it is
+   * the thing a manager wants to know without going to look for it - and it is
+   * the answer that changes while they are reading something else. The crew
+   * only: this bar is being read by the back office, and the back office is not
+   * on the app.
+   */
+  const onApp = useOnApp();
   /*
    * Every tab fetches from a different slice, and the header has no way of
    * knowing which one the current page is using - so it watches all of them.
@@ -69,6 +80,31 @@ export function AdminTopbar() {
             Reclaim plant
             {user?.name ? ` · ${user.name}` : ''}
             {online ? '' : ' · offline'}
+          </div>
+          {/*
+           * Names, and the time each was last heard from. The time is the point
+           * as much as the name is: "Mathai 14:32" at 14:35 is somebody at a
+           * machine, and the same line at 16:00 would be somebody who has gone
+           * - which is why the row empties itself rather than holding the last
+           * name it saw. Each one goes to Users, where the same list is shown
+           * with what it means written out.
+           */}
+          <div className="sub mt-1 flex flex-wrap items-center gap-1.5">
+            <span>Shop floor</span>
+            {onApp.length ? (
+              onApp.map(({ user: hand, at }) => (
+                <NavLink
+                  key={hand.id}
+                  to={adminPaths.users}
+                  className="badge ok"
+                  title={`${hand.name} - last heard from ${minsAgo(at)}`}
+                >
+                  {hand.name} · {clock24(new Date(at).toISOString())}
+                </NavLink>
+              ))
+            ) : (
+              <span className="badge none">nobody signed in</span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
