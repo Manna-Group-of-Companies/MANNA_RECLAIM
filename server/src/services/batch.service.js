@@ -106,12 +106,17 @@ const autoclaveRunsOf = (batchRuns) =>
  *
  * Read off the load run's own line where there is one, and off the formulation
  * name otherwise - for the older records that is all there is to go on.
+ *
+ * DRC is matched anywhere in the name rather than only at the front, because
+ * `Special DRC 2200` is a DRC charge that happens to lead with the word this
+ * function's fallback treats as the special line. Anchored, it would have been
+ * read as a special charge and opened a batch with no grade it could ever mark.
  */
 const lineOf = (raw, batchRuns) => {
   if (autoclaveRunsOf(batchRuns).some((r) => r.line === 'coarse')) return 'coarse';
   const formulation = String(raw.formulation ?? '');
   if (/^\s*coarse/i.test(formulation)) return 'coarse';
-  if (/^\s*drc/i.test(formulation)) return 'drc';
+  if (/\bdrc\b/i.test(formulation)) return 'drc';
   return 'special';
 };
 
@@ -380,6 +385,24 @@ export const batchService = {
       .filter((b) => b.status === 'open' && b.line === 'special')
       .sort((a, b) => String(a.opened_at ?? '').localeCompare(String(b.opened_at ?? '')));
     return page(rows, query);
+  },
+
+  /**
+   * Just the numbers, newest first - for the pickers that offer a batch to
+   * filter by rather than a batch to work on.
+   *
+   * Deliberately not list(): that folds in the costing view and every run
+   * logged against every batch to build the grid and the state chip, none of
+   * which a dropdown of numbers has any use for. This is the one blob read and
+   * nothing else, so a picker can carry the whole history without the History
+   * tab paying for it on the way in.
+   */
+  async refs() {
+    const doc = await plantDoc();
+    return (doc?.batches ?? [])
+      .map(refOf)
+      .filter(Boolean)
+      .reverse();
   },
 
   async findById(id) {

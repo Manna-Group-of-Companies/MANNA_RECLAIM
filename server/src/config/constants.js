@@ -96,15 +96,16 @@ export const SHIFTS = { DAY: 'Day', NIGHT: 'Night' };
 /** Day 08:30-20:30, Night 20:30-08:30 (minutes from midnight). */
 export const SHIFT_WINDOW = { dayStart: 510, dayEnd: 1230 };
 
-export const QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC'];
+export const QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC', 'Special DRC'];
 
 /**
  * The grades a batch is tracked as yielding: the rows of the batch card's grid,
  * what the supervisor may mark, and what the close rule counts.
  *
- * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
- * else - a run can be logged as DRC, the lab can test it, and it keeps its own
- * quality chip - so nothing but the batch card and its rules leaves it alone.
+ * Both DRC grades are left out of the batch lifecycle on purpose. They stay
+ * grades everywhere else - a run can be logged as DRC or Special DRC, the lab
+ * can test either, and each keeps its own quality chip - so nothing but the
+ * batch card and its rules leaves them alone.
  *
  * Kept as a list of its own rather than as a filter at each use, because the grid
  * the crew reads, the marked count the chip shows and the close rule all have to

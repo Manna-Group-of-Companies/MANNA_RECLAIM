@@ -31,7 +31,7 @@ export const dateRange = z.object({
 }).passthrough();
 
 export const shiftEnum = z.enum(['Day', 'Night']);
-export const qualityEnum = z.enum(['Special', 'SuperFine', 'Fine', 'Medium', 'DRC']);
-/** The grades a batch is tracked in - DRC is not one. See BATCH_QUALITIES. */
+export const qualityEnum = z.enum(['Special', 'SuperFine', 'Fine', 'Medium', 'DRC', 'Special DRC']);
+/** The grades a batch is tracked in - neither DRC is one. See BATCH_QUALITIES. */
 export const batchQualityEnum = z.enum(['Special', 'SuperFine', 'Fine', 'Medium']);
 export const gradeEnum = z.enum(['Special', 'SuperFine', 'Fine', 'Medium', 'Coarse', 'Sillsheet']);

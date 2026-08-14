@@ -3,6 +3,7 @@ import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD, isMoulding } from '../config/const
 import { rateService } from './rate.service.js';
 import { crumbCost, autoclaveCharge } from './crumb.service.js';
 import { fromRow as dispatchFromRow } from './dispatch.service.js';
+import { batchService } from './batch.service.js';
 
 /**
  * Everything here reads the columns the tablets actually write.
@@ -20,6 +21,39 @@ const shiftCosting = crud(VIEWS.shiftCosting, { defaultSort: 'shift_date' });
 const specialBatches = crud(VIEWS.specialBatchDetail, { defaultSort: 'shift_date' });
 const coarseShifts = crud(VIEWS.coarseShiftDetail, { defaultSort: 'shift_date' });
 const dispatches = crud(TABLES.dispatches, { defaultSort: 'dispatched_at' });
+
+/**
+ * The count inside a batch number, whatever is written around it.
+ *
+ * The crews count batches up, so the newest is the highest and that is the end
+ * of the picker they want to open on. Reading it with parseFloat got that right
+ * only for a bare number: 'H-3077' came back NaN, so every prefixed reference
+ * fell into the string branch and the whole set of them was hoisted above the
+ * lot. The plant's picker opened on sixteen H- numbers and the batch charged
+ * this morning was seventeenth, which reads as the list not having it.
+ */
+const batchNumberOf = (ref) => {
+  const digits = /\d+/.exec(String(ref ?? ''));
+  return digits ? Number(digits[0]) : Number.NaN;
+};
+
+/**
+ * Newest first, with a prefixed number sitting beside the bare one it matches -
+ * 'H-3077' belongs next to '3077', not in a block of its own. Anything with no
+ * number in it at all goes to the bottom rather than to the top, where it would
+ * be the first thing read.
+ */
+const byBatchNumber = (a, b) => {
+  const na = batchNumberOf(a);
+  const nb = batchNumberOf(b);
+  if (Number.isNaN(na) && Number.isNaN(nb)) return a < b ? -1 : a > b ? 1 : 0;
+  if (Number.isNaN(na)) return 1;
+  if (Number.isNaN(nb)) return -1;
+  if (na !== nb) return nb - na;
+  // Same count, different way of writing it. The bare number first: it is the
+  // one the runs are filed under.
+  return a < b ? -1 : a > b ? 1 : 0;
+};
 
 const round = (n, d = 2) => +Number(n || 0).toFixed(d);
 const sum = (rows, field) => rows.reduce((s, r) => s + Number(r[field] || 0), 0);
@@ -51,7 +85,13 @@ export const reportService = {
    * find out what months exist.
    */
   async runFilters() {
-    const rows = await runs.all({}, { sort: 'shift_date' });
+    const [rows, refs] = await Promise.all([
+      runs.all({}, { sort: 'shift_date' }),
+      // Quietly: the pickers are worth having with one list missing from them,
+      // and a blob that would not read is not a reason to refuse the History
+      // tab its days, shifts and machines as well.
+      batchService.refs().catch(() => []),
+    ]);
     const days = new Set();
     const machines = new Map();
     const shifts = new Set();
@@ -64,18 +104,31 @@ export const reportService = {
         machines.set(r.machine_id, r.machine ?? r.machine_id);
       }
     }
+
+    /*
+     * The batches the plant has opened, on top of the ones its runs mention.
+     *
+     * Those two are not the same list, and the gap is exactly the batch
+     * somebody goes looking for: a charge opened this morning has no run
+     * against it yet, so it was missing from the picker until the first pass
+     * was logged - and so was every orphan, which is the case where the whole
+     * question is "why is there nothing under this number".
+     *
+     * Compared case-insensitively, because the plant reads "b-104" and "B-104"
+     * as one batch and offering both would be offering the same charge twice.
+     */
+    const seen = new Set([...batches].map((b) => b.toLowerCase()));
+    for (const ref of refs) {
+      const key = ref.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      batches.add(ref);
+    }
     return {
       days: [...days].sort().reverse(),
       shifts: [...shifts].sort(),
       machines: [...machines].map(([id, name]) => ({ id, name })).sort((a, b) => (a.id < b.id ? -1 : 1)),
-      // Newest batch first, numerically where the number is one - the crews
-      // count batches up, so #128 belongs above #99 rather than under it.
-      batches: [...batches].sort((a, b) => {
-        const na = parseFloat(a);
-        const nb = parseFloat(b);
-        if (!Number.isNaN(na) && !Number.isNaN(nb)) return nb - na;
-        return a < b ? 1 : -1;
-      }),
+      batches: [...batches].sort(byBatchNumber),
     };
   },
 
