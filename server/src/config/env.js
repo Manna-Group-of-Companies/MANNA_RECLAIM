@@ -28,7 +28,6 @@ const unique = (arr) => [...new Set(arr)];
 const ALWAYS_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'https://manna-reclaim.pages.dev',
-  'https://manna-reclaim.odd-wind-70a0.workers.dev',
 ];
 
 export const env = {
