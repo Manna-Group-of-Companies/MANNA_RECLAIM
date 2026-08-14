@@ -50,8 +50,28 @@ export const getOne = asyncHandler(async (req, res) =>
   ok(res, await runService.findById(req.params.id)),
 );
 
+/**
+ * Starting a run records two names, not one.
+ *
+ * `supervisor` is what the record is signed with: the sheet's pick, which the
+ * crew may switch to whoever is actually on the floor, falling back to the
+ * account when they have not. `enteredBy` is who was signed in - read off the
+ * verified token and spread last so a body that sends one of its own is
+ * overwritten rather than believed.
+ *
+ * They are usually the same name. When they are not, History says so, which is
+ * the only way a shift signed with a stale pick can be spotted at all.
+ */
 export const start = asyncHandler(async (req, res) =>
-  created(res, await runService.start({ ...req.body, supervisor: req.body.supervisor ?? req.user?.name }), 'Run started'),
+  created(
+    res,
+    await runService.start({
+      ...req.body,
+      supervisor: req.body.supervisor ?? req.user?.name,
+      enteredBy: req.user?.name ?? null,
+    }),
+    'Run started',
+  ),
 );
 
 /**

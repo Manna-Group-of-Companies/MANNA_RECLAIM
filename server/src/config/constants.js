@@ -102,18 +102,66 @@ export const QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC', 'Spec
  * The grades a batch is tracked as yielding: the rows of the batch card's grid,
  * what the supervisor may mark, and what the close rule counts.
  *
- * Both DRC grades are left out of the batch lifecycle on purpose. They stay
- * grades everywhere else - a run can be logged as DRC or Special DRC, the lab
- * can test either, and each keeps its own quality chip - so nothing but the
- * batch card and its rules leaves them alone.
+ * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
+ * else - a run can be logged as DRC, the lab can test it, and it keeps its own
+ * quality chip - so nothing but the batch card and its rules leaves it alone.
+ *
+ * Special DRC is NOT the same case, despite the name. It is worked out of a
+ * special charge the refiners take grades off, so it is marked, staged, weighed
+ * and closed like any other grade, and a batch is exactly what it is tracked as.
+ * The plant was writing it into the batch number by hand - "3084 special drc" -
+ * to get it onto a screen at all, which put a grade in the one field every
+ * record is keyed on.
  *
  * Kept as a list of its own rather than as a filter at each use, because the grid
  * the crew reads, the marked count the chip shows and the close rule all have to
  * be counting the same set. Mirrors BATCH_QUALITIES in the client's constants.
  */
-export const BATCH_QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium'];
+export const BATCH_QUALITIES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Special DRC'];
 
-export const DISPATCH_GRADES = ['Special', 'SuperFine', 'Fine', 'Medium', 'Coarse', 'Sillsheet'];
+/**
+ * The grades a particular charge is tracked in, where that is narrower than the
+ * whole list above.
+ *
+ * A Special DRC charge comes off as Special DRC or as Special and as nothing
+ * else, so its card offers those two rows and no others. Left as the full list
+ * it offered three grades the charge cannot yield, which is not a harmless
+ * extra row: a grade ticked by mistake has to be weighed before the batch will
+ * close, and un-ticking it is refused once a refiner has run against it.
+ *
+ * Keyed on the grade the vessel was charged for - the quality on the load run,
+ * not whatever has since been marked, or ticking the first row would rewrite
+ * which rows exist. Anything not named here gets the full list, which is every
+ * ordinary Special charge.
+ */
+export const BATCH_QUALITIES_BY_CHARGE = {
+  'Special DRC': ['Special', 'Special DRC'],
+};
+
+/** The grid rows for a charge. Mirrors batchQualitiesFor in both clients. */
+export const batchQualitiesFor = (chargeGrade) =>
+  BATCH_QUALITIES_BY_CHARGE[chargeGrade] ?? BATCH_QUALITIES;
+
+/**
+ * What may go on a dispatch line - and, through isGrade() in stock.service, what
+ * the server reads as a grade of rubber rather than a moulded product.
+ *
+ * Special DRC is here because it is a batch grade: a grade that can be packed
+ * and cannot be dispatched is a dead end in the yard, and a lab verdict on one
+ * would be filed as a press verdict by isGrade(). Plain DRC is still absent -
+ * it never becomes a packed lot to sell. It carries no entry in PRICE_LIST
+ * either, deliberately: the rate against a grade is the plant's to set on the
+ * rate card, not this file's to invent.
+ */
+export const DISPATCH_GRADES = [
+  'Special',
+  'SuperFine',
+  'Fine',
+  'Medium',
+  'Special DRC',
+  'Coarse',
+  'Sillsheet',
+];
 
 /**
  * Where a stock group stands with the lab. Only `pass` may be dispatched - the

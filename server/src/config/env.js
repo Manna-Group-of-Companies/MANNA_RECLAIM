@@ -15,12 +15,19 @@ const unique = (arr) => [...new Set(arr)];
 /**
  * Browser origins this API answers to whatever the environment says.
  *
- * The dev server and the deployed client - the two that are ours and are not
+ * The dev server and the deployed client - the ones that are ours and are not
  * going to change without this file changing with them. Anything else (a
  * custom domain, a preview deployment) belongs in CLIENT_URL, not here.
+ *
+ * The client has two Cloudflare targets and both are live: Pages serves the
+ * production URL the plant actually opens, Workers is what wrangler.jsonc
+ * deploys. Listing only one refuses the other at the preflight, which reaches
+ * the browser as "No 'Access-Control-Allow-Origin' header" and nothing else -
+ * the request never gets far enough to say why.
  */
 const ALWAYS_ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  'https://manna-reclaim.pages.dev',
   'https://manna-reclaim.odd-wind-70a0.workers.dev',
 ];
 

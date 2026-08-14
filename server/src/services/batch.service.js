@@ -7,6 +7,7 @@ import {
   TABLES,
   VIEWS,
   BATCH_QUALITIES,
+  batchQualitiesFor,
   PRE_REFINER_IDS,
   REFINE_STAGE_IDS,
   FINAL_REFINER_IDS,
@@ -107,18 +108,22 @@ const autoclaveRunsOf = (batchRuns) =>
  * Read off the load run's own line where there is one, and off the formulation
  * name otherwise - for the older records that is all there is to go on.
  *
- * DRC is matched anywhere in the name rather than only at the front, because
- * `Special DRC 2200` is a DRC charge that happens to lead with the word this
- * function's fallback treats as the special line. Anchored, it would have been
- * read as a special charge and opened a batch with no grade it could ever mark.
+ * Both tests are anchored at the front of the name, and that is what separates
+ * `DRC 2200` from `Special DRC 2200`. The first is a DRC charge counted by its
+ * runs; the second is a special charge that yields the Special DRC grade, so it
+ * opens a batch the refiners work through like any other. Matching `drc`
+ * anywhere in the name would refuse to open that batch at the vessel.
  */
 const lineOf = (raw, batchRuns) => {
   if (autoclaveRunsOf(batchRuns).some((r) => r.line === 'coarse')) return 'coarse';
   const formulation = String(raw.formulation ?? '');
   if (/^\s*coarse/i.test(formulation)) return 'coarse';
-  if (/\bdrc\b/i.test(formulation)) return 'drc';
+  if (/^\s*drc/i.test(formulation)) return 'drc';
   return 'special';
 };
+
+/** The grade the vessel was charged for, as the load run recorded it. */
+const chargeGradeOf = (batchRuns) => autoclaveRunsOf(batchRuns)[0]?.quality ?? null;
 
 /**
  * One row of the batch card's grade x stage grid.
@@ -127,13 +132,16 @@ const lineOf = (raw, batchRuns) => {
  * ticked for them. The three stages are read off the runs: refined on R3 (or R1
  * standing in for it), finished on R4, and weighed once a figure is against it.
  *
- * One row per BATCH_QUALITIES, which is where DRC drops out of the lifecycle: a
- * DRC mark left on an older batch is simply not a grade this grid has a row for,
- * so it counts towards neither the chip nor the close rule.
+ * One row per grade this charge is tracked in, which is where DRC drops out of
+ * the lifecycle: a DRC mark left on an older batch is simply not a grade this
+ * grid has a row for, so it counts towards neither the chip nor the close rule.
+ * A Special DRC charge is narrower again - see BATCH_QUALITIES_BY_CHARGE - so
+ * the same rule covers both, and the client draws whatever rows come back
+ * rather than deciding for itself.
  */
 function gradesFor(raw, batchRuns) {
   const marked = new Set((raw.qualities ?? []).map(String));
-  return BATCH_QUALITIES.map((quality) => {
+  return batchQualitiesFor(chargeGradeOf(batchRuns)).map((quality) => {
     const mine = batchRuns.filter((r) => r.quality === quality && producing(r));
     const on = (ids) => mine.some((r) => ids.includes(r.machine_id));
     const kg = mine.reduce((sum, r) => sum + Number(r.weight_kg ?? 0), 0);
@@ -148,6 +156,30 @@ function gradesFor(raw, batchRuns) {
       kg: kg > 0 ? round2(kg) : null,
     };
   });
+}
+
+/**
+ * When each machine first opened this batch, keyed on machine id.
+ *
+ * The batch pick at the refiners reads PR2 and R1 off this. A charge is broken
+ * down at a pre-refiner before a refiner has anything to work through, so "has
+ * PR2 had this one, and when" is the question the crew is actually asking when
+ * they choose a batch off the list - and they were answering it by walking over
+ * to the machine or by reading it back off the History tab afterwards.
+ *
+ * First start per machine rather than last: a batch that goes back through R1
+ * for a second grade was still opened at R1 when it first went on. Runs with no
+ * start stamp are skipped rather than counted as midnight.
+ */
+function openedOn(batchRuns) {
+  const first = {};
+  for (const run of batchRuns) {
+    const id = run.machine_id;
+    const at = iso(run.started_at);
+    if (!id || !at) continue;
+    if (!first[id] || at < first[id]) first[id] = at;
+  }
+  return first;
 }
 
 /**
@@ -171,6 +203,8 @@ function lifecycleOf(raw, batchRuns) {
     pre_refiners: [
       ...new Set(batchRuns.filter((r) => PRE_REFINER_IDS.includes(r.machine_id)).map((r) => r.machine_id)),
     ],
+    /** machine id -> when that machine first went on this batch. */
+    opened_on: openedOn(batchRuns),
     runs_count: batchRuns.length,
     marked_count: marked.length,
     weighed_count: weighed.length,
@@ -212,7 +246,28 @@ const toBatch = (raw, costing, batchRuns = []) => {
     line: lineOf(raw, batchRuns),
     /** What the vessel was charged with, in kg. */
     capacity: raw.capacity ?? null,
-    grade: raw.qualities?.[0] ?? null,
+    /**
+     * The grade this batch goes by: what the refiners have taken off it, or
+     * what it was charged for until they have taken anything.
+     *
+     * The fallback is the half that was missing. A batch's `qualities` are only
+     * what somebody has since ticked on the card, so a charge put in as Special
+     * DRC read as having no grade at all - and the window before the first tick
+     * is exactly the window the batch pick at the refiners is looked at in. The
+     * load run has carried the answer the whole time: the autoclave sheet asks
+     * for a quality, which is the chip the machine card already draws.
+     *
+     * Marked grades still lead, because a batch yielding SuperFine is a
+     * SuperFine batch to anyone reading it, whatever went into the vessel.
+     */
+    grade: raw.qualities?.[0] ?? load?.quality ?? null,
+    /**
+     * The grade the vessel was charged for, on its own. Kept apart from `grade`
+     * above because the two answer different questions and only this one is
+     * stable: `grade` moves to whatever the refiners mark, while this is what
+     * went in - and it is what decides the rows the card offers.
+     */
+    charge_grade: load?.quality ?? null,
     /** The load was shared with the twin vessel rather than charged alone. */
     paired: Boolean(raw.paired),
     workers: load?.workers ?? null,
@@ -619,12 +674,16 @@ export const batchService = {
    * describing a grade the batch says it never made.
    */
   async setQuality(id, quality, marked) {
-    if (!BATCH_QUALITIES.includes(quality)) {
+    const batch = await batchService.findById(id);
+    // Against this batch's own rows rather than the whole list: a Special DRC
+    // charge is tracked in two grades, and the card that offers two would
+    // otherwise sit in front of an API that accepts five.
+    const tracked = batch.grades?.map((g) => g.quality) ?? BATCH_QUALITIES;
+    if (!tracked.includes(quality)) {
       throw ApiError.badRequest(
-        `${quality} is not a grade a batch is tracked in - the batch grid covers ${BATCH_QUALITIES.join(', ')}`,
+        `${quality} is not a grade batch ${batch.ref} is tracked in - its card covers ${tracked.join(', ')}`,
       );
     }
-    const batch = await batchService.findById(id);
     if (batch.status === 'closed') {
       throw ApiError.conflict('Batch ' + batch.ref + ' is closed - reopen it to change its grades');
     }

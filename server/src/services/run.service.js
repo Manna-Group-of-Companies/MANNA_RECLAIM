@@ -990,6 +990,11 @@ export const runService = {
       shift_date: shiftDate,
       shift: shift,
       supervisor: payload.supervisor ?? null,
+      // Who keyed it, as against who it is signed by. The controller takes this
+      // off the access token rather than off the body - a tablet cannot send it
+      // and a switched signing name does not move it, which is the whole point
+      // of keeping the two apart. See migrations/0013.
+      entered_by: payload.enteredBy ?? null,
       workers: payload.workers ?? null,
       // An autoclave run belongs to the vessel it was charged in, and says
       // whether that charge was shared with the twin autoclave. It is timed by

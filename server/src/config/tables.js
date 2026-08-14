@@ -66,6 +66,10 @@ export const registry = {
     'capacity', 'formulation', 'autoclave_id', 'paired', 'quality', 'tyre_type',
     'mesh', 'passes', 'started_at', 'ended_at', 'runtime_min', 'hours_run',
     'kwh', 'firewood_kg', 'workers', 'weight_kg', 'supervisor', 'supervisor_shift',
+    // The account the start was authenticated as. `supervisor` above is the name
+    // the record is signed with and the crew may switch it; this one they cannot
+    // - see migrations/0013.
+    'entered_by',
     'src1', 'src2', 'src3', 'src4',
     'elec_start', 'elec_end', 'hour_start', 'hour_end',
     'conv_out_kg', 'conv_in_kg', 'leftout_in', 'leftout_out', 'packed_sacks',
