@@ -274,6 +274,15 @@ export function MachinesPage() {
   // something the start sheet has to say out loud - see startNoProducts.
   const products = useAppSelector((s) => s.products.items);
   const productsLoaded = useAppSelector((s) => s.products.loaded);
+  /*
+   * Re-read on a bump as well as on mount. The "last run" line under an idle
+   * machine and the meter readings a refiner start sheet pre-fills from both
+   * come off `fetchShiftRuns`, so a reading corrected on the History tab leaves
+   * this screen offering the old one - and pre-filling the next start from a
+   * meter figure that has since been corrected is how the wrong number gets
+   * written down twice.
+   */
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   /**
    * The batches a refiner may be pointed at: open, and out of the autoclave.
    * A charge still cooking has nothing to refine yet, so it cannot be mixed into
@@ -363,7 +372,7 @@ export function MachinesPage() {
     void dispatch(fetchOpenBatches());
     // And what the presses mould.
     void dispatch(fetchProducts());
-  }, [dispatch]);
+  }, [dispatch, refreshTick]);
 
   /**
    * Every open run a machine has, oldest first - and the one its card shows.

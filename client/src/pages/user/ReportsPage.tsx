@@ -11,12 +11,19 @@ export function ReportsPage() {
   const dispatch = useAppDispatch();
   const production = useAppSelector((s) => s.reports.production);
   const summary = useAppSelector((s) => s.quality.summary);
+  /*
+   * Every figure on this page is added up from run rows, so a correction made on
+   * the History tab makes all of them wrong at once - and this tab is usually
+   * already mounted when that happens. Without this it goes on showing the
+   * seven-day output it totalled before the correction until the app reloads.
+   */
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
 
   useEffect(() => {
     const window = lastNDays(7);
     void dispatch(fetchProduction(window));
     void dispatch(fetchQualitySummary(window));
-  }, [dispatch]);
+  }, [dispatch, refreshTick]);
 
   if (!production) return <PageLoader label="Building report" />;
 

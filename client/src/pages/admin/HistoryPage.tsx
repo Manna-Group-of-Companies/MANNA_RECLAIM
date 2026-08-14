@@ -90,6 +90,10 @@ function RunDetail({
     setError('');
     try {
       onSaved(await runService.update(run.id, payload));
+      // The reports, the costing and the dashboard are all added up from this
+      // row, and `onSaved` only swaps it in the table behind this modal - the
+      // same gap the delete below closes, and the same fix.
+      dispatch(requestRefresh());
       onClose();
     } catch (err) {
       setError(toRequestError(err).message);
@@ -229,6 +233,15 @@ function RunDetail({
           </select>,
         )}
         {field('Supervisor', <input value={draft.supervisor} onChange={(e) => set('supervisor', e.target.value)} />)}
+        {/* Who was signed in when the machine was started. Read-only where the
+            signed name above is not: it comes off the access token, so nothing
+            on the floor sets it and nothing in the back office corrects it -
+            which is the only reason it is worth reading beside the other. Blank
+            on a run started before the column existed. */}
+        <div className="roRow">
+          <span className="k">Logged by</span>
+          <span className="v">{run.entered_by ?? '—'}</span>
+        </div>
         {field('Crew', numberInput('workers'))}
 
         {/* No meters on a press, and no energy or hours to correct against them. */}
@@ -610,13 +623,16 @@ export function AdminHistoryPage() {
                       <td>
                         <b>{dayLong(r.shift_date)}</b>
                         {r.shift && <div className="muted text-[10px]">{r.shift} shift</div>}
-                        {r.supervisor && <div className="muted text-[10px]">{r.supervisor}</div>}
-                        {/* Who keyed it, where that is not who it is signed by.
-                            The sheet's signing name is switchable, so the two
-                            can differ - and the back office is where that is
-                            worth knowing. */}
-                        {r.entered_by && r.entered_by !== r.supervisor && (
-                          <div className="muted text-[10px]">entered by {r.entered_by}</div>
+                        {/* Who was signed in when the machine was started, which
+                            the floor cannot switch, and under it the name the
+                            record was signed with where that is somebody else.
+                            The signed name stands alone on a run from before the
+                            account was recorded. */}
+                        {(r.entered_by ?? r.supervisor) && (
+                          <div className="muted text-[10px]">{r.entered_by ?? r.supervisor}</div>
+                        )}
+                        {r.entered_by && r.supervisor && r.supervisor !== r.entered_by && (
+                          <div className="muted text-[10px]">signed as {r.supervisor}</div>
                         )}
                       </td>
                       <td>

@@ -143,6 +143,17 @@ function RunSheet({
     setError('');
     try {
       onSaved(await runService.update(run.id, payload));
+      /*
+       * And tell the rest of the app to re-read itself, for the same reason the
+       * delete below does.
+       *
+       * `onSaved` swaps this one row in this one table and nothing else. What a
+       * correction moves is added up from these rows elsewhere - the shift's
+       * output on Reports, the energy and the cost on the dashboard, the hours
+       * behind Efficiency - so a tab that is already mounted goes on showing the
+       * figure it added up before the correction until somebody reloads the app.
+       */
+      dispatch(requestRefresh());
       notify('Entry updated', 'ok');
       close();
     } catch (err) {
@@ -479,7 +490,9 @@ function RunSheet({
         )}
         {run.non_production ? <Det k="Non-production" v="Yes" /> : null}
         <Det k="Status" v={run.status === 'running' ? 'Running' : 'Logged'} />
-        <Det k="Logged by" v={null} />
+        {/* The account the start was authenticated as. Blank on a run started
+            before the column existed - see migrations/0013. */}
+        <Det k="Logged by" v={run.entered_by} />
         <Det k="Record id" v={run.id} />
       </>
     );
@@ -848,15 +861,17 @@ export function HistoryPage() {
                       </div>
                     )}
                   </td>
-                  {/* The name the record is signed with, and - only when it is
-                      not the same person - the account that keyed it. Both are
-                      on the row because either one alone can mislead: the pick
-                      is switchable, and the account is whoever the browser
-                      happened to be signed in as. */}
+                  {/* Who was signed in when the machine was started. That name
+                      comes off the access token, so it is the one thing on the
+                      row nobody on the floor can switch - which is why it leads
+                      rather than the sheet's pick. The pick is printed under it
+                      on the one occasion it is news: when the record was signed
+                      with somebody else's name. A run from before the account
+                      was recorded has only the signed name to fall back on. */}
                   <td>
-                    {r.supervisor ?? <span className="muted">—</span>}
-                    {r.entered_by && r.entered_by !== r.supervisor && (
-                      <div className="muted text-[10px]">entered by {r.entered_by}</div>
+                    {r.entered_by ?? r.supervisor ?? <span className="muted">—</span>}
+                    {r.entered_by && r.supervisor && r.supervisor !== r.entered_by && (
+                      <div className="muted text-[10px]">signed as {r.supervisor}</div>
                     )}
                   </td>
                   <td className="tnum">

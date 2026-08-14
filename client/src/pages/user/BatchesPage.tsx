@@ -94,6 +94,9 @@ export function BatchesPage() {
   const notify = useToast();
   const { items, loading, detail, detailLoading } = useAppSelector((s) => s.batches);
   const held = useAppSelector((s) => s.quality.held);
+  // Correcting a run's batch number or grade on History moves which batch it
+  // counts towards, so the open register is stale the moment that is saved.
+  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const [closing, setClosing] = useState<Batch | null>(null);
   const [deleting, setDeleting] = useState<Batch | null>(null);
   /** The grade whose toggle is in flight, so its box cannot be double-tapped. */
@@ -101,7 +104,7 @@ export function BatchesPage() {
 
   useEffect(() => {
     void dispatch(fetchOpenBatches());
-  }, [dispatch]);
+  }, [dispatch, refreshTick]);
 
   const toggle = async (batch: Batch, row: BatchGrade) => {
     const locked = lockedReason(row);
