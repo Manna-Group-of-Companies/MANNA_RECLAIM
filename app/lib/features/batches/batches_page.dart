@@ -576,7 +576,15 @@ class _GradeGrid extends StatelessWidget {
         ],
       ),
       const SizedBox(height: 4),
-      for (final quality in batchQualities)
+      // The rows come off the API's answer rather than off [batchQualities]:
+      // which grades a charge is tracked in is not the same question for every
+      // charge - a Special DRC one comes off as Special DRC or Special and as
+      // nothing else - and the server has already worked it out. The constant
+      // stands in only for a batch that arrived without the field.
+      for (final quality
+          in batch.grades.isEmpty
+              ? batchQualities
+              : batch.grades.map((g) => g.quality))
         Builder(
           builder: (_) {
             final row = batch.gradeRow(quality);

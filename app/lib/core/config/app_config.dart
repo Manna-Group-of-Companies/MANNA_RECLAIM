@@ -51,6 +51,12 @@ class StorageKeys {
   /// The name the tablet is signing records with - see SupervisorName.
   static const supervisor = 'manna.supervisor';
 
+  /// The account that made that pick. A switched name belongs to the person who
+  /// switched it, not to the tablet: without this the pick outlives the session
+  /// it was made in and quietly signs the next account's shift with the last
+  /// one's name. See UiStore.supervisorName.
+  static const supervisorFor = 'manna.supervisorFor';
+
   /// The names that may sign, as last read from the server. Kept so a tablet
   /// opening a sheet before the fetch lands - or with no signal at all - still
   /// offers the list it had yesterday rather than three compiled-in names.

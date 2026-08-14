@@ -114,11 +114,13 @@ Future<bool?> showStartSheet({
     led: T.brand,
     body: (context, setSheetState) {
       final refinable = batches.refinable;
+      final pickable = batches.pickable;
 
-      /// The special line needs a real batch to refine, and one only exists
-      /// once the autoclave it was cooked in has been discharged. With none out
-      /// of the vessel the sheet says so and offers nothing to fill in.
-      final nothingReady = special && refinable.isEmpty;
+      /// The special line needs a batch to work through. With none open at all
+      /// the sheet says so and offers nothing to fill in - a charge still in
+      /// the vessel is offered, marked as such, so this is empty only when
+      /// there is no batch on the floor.
+      final nothingReady = special && pickable.isEmpty;
 
       /// Neither a press nor a sleeve bench can be started with nothing to
       /// make. The list has to have been read first: a connection that dropped
@@ -170,7 +172,10 @@ Future<bool?> showStartSheet({
         return const EmptyState(
           icon: Icons.layers_rounded,
           title: 'Nothing to refine',
-          hint: 'Unload the autoclave first to make a batch selectable.',
+          hint:
+              'No batch is open. Charge an autoclave on this tab to open one '
+              '— a charge still cooking is offered here too, so this is empty '
+              'only when there is no batch at all.',
         );
       }
 
@@ -419,15 +424,16 @@ Future<bool?> showStartSheet({
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (picksBatch && refinable.isNotEmpty) ...[
+          if (picksBatch && pickable.isNotEmpty) ...[
             const SheetLabel('Batch'),
             PickGrid(
               children: [
-                for (final b in refinable)
+                for (final b in pickable)
                   Pick(
                     title: b.ref,
                     mono: true,
-                    sub: b.formulation,
+                    dot: b.grade == null ? null : qualityColour[b.grade],
+                    subWidget: _BatchPickSub(b),
                     selected: batchNo == b.ref,
                     onTap: () => setSheetState(() {
                       final next = batchNo == b.ref ? '' : b.ref;
@@ -602,8 +608,7 @@ Future<bool?> showStartSheet({
       );
     },
     actions: (context, setSheetState) {
-      final refinable = batches.refinable;
-      final nothingReady = special && refinable.isEmpty;
+      final nothingReady = special && batches.pickable.isEmpty;
       final noProducts =
           picksProduct && products.loaded && products.items.isEmpty;
 
@@ -949,6 +954,60 @@ Future<bool> _confirmStart({
     '${shiftwise ? ' · $startShift${tyre != null ? ' · ${tyres[tyre]!.label}' : ''}' : special ? ' · special line${nonProd ? ' · non-production' : ''}${mix.isNotEmpty ? ' · mixed with ${mix.length}' : ''}' : isMouldingBench ? ' · $startBatchNo · ${product?.name ?? productId}' : picksProduct ? ' · ${product?.name ?? productId}' : ''}',
   );
   return true;
+}
+
+/// The two lines under a batch number on the Batch pick.
+///
+/// The first says what the charge is - the formulation it was cooked to and the
+/// grade that has come off it so far. The crew used to type the grade into the
+/// batch number itself to get it onto this tile ("3084 special drc"), which put
+/// it in the one field the whole record is keyed on.
+///
+/// The second says where the batch has got to: when PR2 broke it down and when
+/// R1 first went on it. A stage that has not run reads the dash [clock24] gives
+/// back rather than being left off, because the gap IS the answer - it is how
+/// the pick says this one has not been through the pre-refiner yet. A charge
+/// still in the vessel has no stage times to give and says so instead.
+class _BatchPickSub extends StatelessWidget {
+  const _BatchPickSub(this.batch);
+
+  final Batch batch;
+
+  @override
+  Widget build(BuildContext context) {
+    final what = [
+      batch.formulation,
+      batch.grade,
+    ].where((s) => s != null && s.isNotEmpty).join(' · ');
+    final stages = batchPickStages
+        .map((id) => '$id ${clock24(batch.openedOn[id])}')
+        .join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          what.isEmpty ? 'no grade marked yet' : what,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 10.5, color: T.inkFaint),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          batch.autoclaveDone ? stages : 'in autoclave',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 10.5,
+            // Monospaced so the times line up down the grid rather than
+            // jittering with the width of each number.
+            fontFamily: batch.autoclaveDone ? 'monospace' : null,
+            color: T.inkDim,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// A batch-number field with an optional month-letter prefix already in it.

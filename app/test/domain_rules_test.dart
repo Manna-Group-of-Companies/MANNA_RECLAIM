@@ -139,13 +139,15 @@ void main() {
       ).firstWhere((f) => f.name == 'Special DRC 2200');
 
       expect(opensBatch(special), isTrue);
-      // None is worked through in grades, so all are counted by their runs.
+      // Neither is worked through in grades, so both are counted by their runs.
       expect(opensBatch(coarse), isFalse);
       expect(opensBatch(drc), isFalse);
-      // The one that reads like a special charge and is not: it rides a special
-      // vessel and its name starts with the word, but the grid has no row it
-      // could ever mark, so a batch opened for it would never close.
-      expect(opensBatch(specialDrc), isFalse);
+      // The pair that has to be told apart: `DRC 2200` is counted by its runs,
+      // `Special DRC 2200` is a special charge the refiners take a grade off,
+      // so it opens a batch like any other. The names differ by one word.
+      expect(opensBatch(specialDrc), isTrue);
+      expect(batchQualities.contains('Special DRC'), isTrue,
+          reason: 'a batch it opens needs a row it can be marked on');
     });
 
     test('every grade a charge can carry has a colour of its own', () {

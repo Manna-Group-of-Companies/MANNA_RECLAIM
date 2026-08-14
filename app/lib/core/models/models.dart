@@ -30,6 +30,17 @@ List<double> _numList(dynamic v) => v is List
     ? v.map(_dbl).whereType<double>().toList()
     : const [];
 
+/// A JSON object of plain string values - a keyed lookup the API hands over as
+/// one field, like the stage times against a batch. Entries with no value are
+/// dropped rather than kept as an empty string, so a caller can ask `[id] ==
+/// null` and mean "that machine has not had it".
+Map<String, String> _strMap(dynamic v) => v is Map
+    ? {
+        for (final e in v.entries)
+          if (e.value != null) e.key.toString(): e.value.toString(),
+      }
+    : const {};
+
 Map<String, dynamic> _map(dynamic v) =>
     v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
@@ -281,6 +292,7 @@ class Batch {
     this.unloadedAt,
     this.grades = const [],
     this.preRefiners = const [],
+    this.openedOn = const {},
     this.runsCount,
     this.markedCount,
     this.weighedCount,
@@ -316,6 +328,10 @@ class Batch {
 
   /// Which pre-refiners broke this charge down.
   final List<String> preRefiners;
+
+  /// Machine id -> when that machine first went on this batch, so a picker can
+  /// say whether PR2 has had it and at what time without loading its runs.
+  final Map<String, String> openedOn;
   final int? runsCount;
   final int? markedCount;
   final int? weighedCount;
@@ -424,6 +440,7 @@ class Batch {
       unloadedAt: unloadedAt,
       grades: next,
       preRefiners: preRefiners,
+      openedOn: openedOn,
       runsCount: runsCount,
       markedCount: markedRows.length,
       weighedCount: weighedRows,
@@ -457,6 +474,7 @@ class Batch {
         .map((g) => BatchGrade.fromJson(_map(g)))
         .toList(),
     preRefiners: _strList(j['pre_refiners']),
+    openedOn: _strMap(j['opened_on']),
     runsCount: _int(j['runs_count']),
     markedCount: _int(j['marked_count']),
     weighedCount: _int(j['weighed_count']),
@@ -494,6 +512,7 @@ class BatchDetail extends Batch {
          unloadedAt: base.unloadedAt,
          grades: base.grades,
          preRefiners: base.preRefiners,
+         openedOn: base.openedOn,
          runsCount: base.runsCount,
          markedCount: base.markedCount,
          weighedCount: base.weighedCount,
@@ -564,6 +583,7 @@ class Run {
     this.mesh,
     this.tyreType,
     this.supervisor,
+    this.enteredBy,
     this.workers,
     this.passes,
     this.mergedFrom,
@@ -634,7 +654,15 @@ class Run {
   final List<String> sources;
   final String? mesh;
   final String? tyreType;
+
+  /// The name the record is signed with - the sheet's pick, switchable.
   final String? supervisor;
+
+  /// The account that keyed the start, written by the server off the access
+  /// token. Not switchable and not sendable, which is what makes it worth
+  /// showing beside [supervisor] when the two disagree. Null on every run
+  /// started before the column existed - see supabase/migrations/0013.
+  final String? enteredBy;
   final int? workers;
 
   /// How many start/stops this record combines.
@@ -728,6 +756,7 @@ class Run {
     mesh: _str(j['mesh']),
     tyreType: _str(j['tyre_type']),
     supervisor: _str(j['supervisor']),
+    enteredBy: _str(j['entered_by']),
     workers: _int(j['workers']),
     passes: _int(j['passes']),
     mergedFrom: _str(j['merged_from']),
@@ -797,6 +826,7 @@ class Run {
     mesh: mesh,
     tyreType: tyreType,
     supervisor: supervisor,
+    enteredBy: enteredBy,
     workers: workers,
     passes: passes,
     mergedFrom: mergedFrom,

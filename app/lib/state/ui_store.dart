@@ -18,6 +18,7 @@ class Toast {
 class UiStore extends ChangeNotifier {
   UiStore(this._prefs, {String? accountName})
     : _supervisor = _prefs.getString(StorageKeys.supervisor),
+      _supervisorFor = _prefs.getString(StorageKeys.supervisorFor),
       _account = accountName ?? '',
       _signers =
           _prefs.getStringList(StorageKeys.signers) ?? const <String>[];
@@ -47,7 +48,28 @@ class UiStore extends ChangeNotifier {
   /// stands. Persisted, because the tablet gets reloaded mid-shift and
   /// re-picking would be the crew's job to remember.
   String? _supervisor;
+
+  /// The account that made that pick, and the reason the pick is not simply
+  /// trusted: it is remembered for the *tablet*, and a tablet outlives a
+  /// session. A name switched on one shift went on signing every record after
+  /// it - through a sign-out, through the next person signing in as themselves
+  /// - so History read back a supervisor who had not been near the machine.
+  ///
+  /// Null on a tablet that picked before this was recorded, which is read as
+  /// "belongs to nobody" and ignored - once, on the next start.
+  String? _supervisorFor;
   String _account;
+
+  /// The pick, but only while it is still this account's. Anything else - a
+  /// name switched by whoever was signed in before, or one from before owners
+  /// were recorded - is not this session's and does not sign its records.
+  String? get _chosen {
+    final chosen = _supervisor;
+    if (chosen == null || chosen.isEmpty) return null;
+    final owner = _supervisorFor;
+    if (owner == null || owner.isEmpty || owner != _account) return null;
+    return chosen;
+  }
 
   /// Who the plant's accounts say may sign a record, last read from the server.
   ///
@@ -64,20 +86,24 @@ class UiStore extends ChangeNotifier {
   /// signed in once, and the supervisor who actually loaded the autoclave or
   /// took the bearing temperatures is whoever is holding it.
   String get supervisorName {
-    final chosen = _supervisor;
-    if (chosen != null && chosen.isNotEmpty) return chosen;
+    final chosen = _chosen;
+    if (chosen != null) return chosen;
     if (_account.isNotEmpty) return _account;
     return supervisorOptions.isNotEmpty ? supervisorOptions.first : '';
   }
 
+  /// Who is signed in on this tablet, whatever the records are being signed
+  /// with. Empty before anyone is.
+  String get accountName => _account;
+
   /// True while the name is the account's own, so a sheet can say "you".
-  bool get supervisorIsAccount => _supervisor == null || _supervisor == _account;
+  bool get supervisorIsAccount => _chosen == null || _chosen == _account;
 
   /// The account first - it is the default - then the plant's supervisors.
   List<String> get supervisorOptions {
     final plant = _signers.isEmpty ? supervisorNames : _signers;
     final seen = <String>{};
-    for (final name in [_account, ...plant, _supervisor ?? '']) {
+    for (final name in [_account, ...plant, _chosen ?? '']) {
       if (name.isNotEmpty) seen.add(name);
     }
     return seen.toList();
@@ -108,13 +134,23 @@ class UiStore extends ChangeNotifier {
   }
 
   /// Switch who is signing. Blank hands the record back to the account.
+  ///
+  /// The account doing the switching is stored with the choice, so the choice
+  /// is dropped when somebody else signs in rather than inherited by them - see
+  /// [_supervisorFor].
   Future<void> setSupervisor(String value) async {
     final name = value.trim();
     _supervisor = name.isEmpty ? null : name;
+    _supervisorFor = _supervisor == null || _account.isEmpty ? null : _account;
     if (_supervisor == null) {
       await _prefs.remove(StorageKeys.supervisor);
     } else {
       await _prefs.setString(StorageKeys.supervisor, _supervisor!);
+    }
+    if (_supervisorFor == null) {
+      await _prefs.remove(StorageKeys.supervisorFor);
+    } else {
+      await _prefs.setString(StorageKeys.supervisorFor, _supervisorFor!);
     }
     notifyListeners();
   }

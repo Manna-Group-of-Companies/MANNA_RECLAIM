@@ -120,7 +120,11 @@ class _HistoryPageState extends State<HistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tick = context.watch<UiStore>().refreshTick;
+    final ui = context.watch<UiStore>();
+    final signedInAs = ui.accountName;
+    final signingAs = ui.supervisorName;
+
+    final tick = ui.refreshTick;
     if (tick != _seenTick) {
       _seenTick = tick;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -155,7 +159,26 @@ class _HistoryPageState extends State<HistoryPage> {
       children: [
         ViewHead(
           title: 'History',
-          meta: Text('${sorted.length} shown · tap a row to edit'),
+          meta: Column(
+            // Right-aligned and only as tall as its lines: the head lays this
+            // out beside the title in a row, which gives it no height to fill.
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${sorted.length} shown · tap a row to edit'),
+              // Who anything logged from this tablet right now would be signed
+              // by, said over the log rather than left to be discovered in it.
+              // The two names are the same on an ordinary shift and part when
+              // the sheet's pick has been switched - which is exactly when the
+              // crew reading History needs to be told.
+              if (signedInAs.isNotEmpty)
+                Text(
+                  signingAs.isNotEmpty && signingAs != signedInAs
+                      ? 'Signed in as $signedInAs · signing records as $signingAs'
+                      : 'Signed in as $signedInAs · records are signed with this name',
+                ),
+            ],
+          ),
         ),
 
         if (_dispatches.isNotEmpty) _RecentDispatches(rows: _dispatches),
@@ -350,10 +373,14 @@ class _HistoryRow extends StatelessWidget {
                           color: T.ink,
                         ),
                       ),
+                      // The day, the shift, the name it is signed with - and
+                      // the account that keyed it, on the one occasion that is
+                      // news: when the sheet's pick was somebody else's name.
                       Text(
                         '${dayMonth(run.shiftDate)}'
                         '${run.shift.isNotEmpty ? ' · ${run.shift}' : ''}'
-                        '${run.supervisor != null ? ' · ${run.supervisor}' : ''}',
+                        '${run.supervisor != null ? ' · ${run.supervisor}' : ''}'
+                        '${run.enteredBy != null && run.enteredBy != run.supervisor ? ' · entered by ${run.enteredBy}' : ''}',
                         style: const TextStyle(
                           fontSize: 10.5,
                           color: T.inkFaint,

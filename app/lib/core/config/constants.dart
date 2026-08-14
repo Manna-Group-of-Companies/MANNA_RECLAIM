@@ -55,15 +55,33 @@ const qualities = <String>[
 ];
 
 /// The grades a batch is tracked as yielding - the rows of the batch card's
-/// grid. Both DRC grades are left out of the batch lifecycle on purpose; they
-/// stay grades everywhere else. The API counts the same set.
-const batchQualities = <String>['Special', 'SuperFine', 'Fine', 'Medium'];
+/// grid. DRC is left out of the batch lifecycle on purpose; it stays a grade
+/// everywhere else. Special DRC is not that case despite the name: it is worked
+/// out of a special charge, so it is marked, staged and weighed like any other
+/// grade. The API counts the same set.
+const batchQualities = <String>[
+  'Special',
+  'SuperFine',
+  'Fine',
+  'Medium',
+  'Special DRC',
+];
 
+/// The stages the Batch pick reports a time against, in the order the charge
+/// meets them. PR2 breaks it down and R1 works what comes off, so between them
+/// they answer what the crew is asking at the pick: has this been through the
+/// stage before mine, and when. Mirrors BATCH_PICK_STAGES in the web client.
+const batchPickStages = <String>['PR2', 'R1'];
+
+/// Special DRC is here because it is a batch grade - a grade that can be packed
+/// and not dispatched is a dead end in the yard. Plain DRC never becomes a
+/// packed lot to sell, so it stays off.
 const dispatchGrades = <String>[
   'Special',
   'SuperFine',
   'Fine',
   'Medium',
+  'Special DRC',
   'Coarse',
   'Sillsheet',
 ];
@@ -200,15 +218,15 @@ List<AutoclaveForm> autoclaveFormsFor(num? capacity) => capacity == null
     ? const []
     : autoclaveForms.where((f) => f.capacity == capacity).toList();
 
-/// The grades that ride the special vessels but are counted by their runs - a
-/// list rather than a `!= 'DRC'` because there are two of them now.
-const runCountedGrades = <String>['DRC', 'Special DRC'];
+/// The grades that ride the special vessels but are counted by their runs.
+/// DRC alone: Special DRC is a grade the refiners work out of the charge, so its
+/// load opens a batch and the grid has a row for it.
+const runCountedGrades = <String>['DRC'];
 
 /// Whether charging this formulation opens a batch the refiners work through.
 /// Only a special charge does, and not every special-vessel charge is one: a
-/// coarse charge feeds the coarse line for the shift and a DRC charge - either
-/// grade - is counted by its runs. The API applies the same rule and refuses
-/// them.
+/// coarse charge feeds the coarse line for the shift and a DRC charge is
+/// counted by its runs. The API applies the same rule and refuses them.
 bool opensBatch(AutoclaveForm? form) =>
     form?.type == 'special' && !runCountedGrades.contains(form?.grade);
 

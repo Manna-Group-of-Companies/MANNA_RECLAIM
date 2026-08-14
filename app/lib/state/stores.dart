@@ -77,14 +77,23 @@ class BatchesStore extends ChangeNotifier {
   Set<String> held = const {};
 
   /// The batches a refiner may be pointed at: open, and out of the autoclave.
-  /// A charge still cooking has nothing to refine yet, so it is kept off the
-  /// picker rather than offered and then rejected.
+  /// A charge still cooking has nothing to refine yet, so it cannot be mixed
+  /// into another batch's tailings.
   ///
   /// Off [items] and deliberately never off [archive]: the archive holds closed
   /// batches and the coarse and DRC charges too, and not one of those is
   /// something a refiner may be pointed at.
   List<Batch> get refinable =>
       items.where((b) => b.autoclaveDone).toList(growable: false);
+
+  /// What the Batch pick offers: every open batch, cooking ones included.
+  ///
+  /// It used to be [refinable], which read as "these are all the batches there
+  /// are" and hid a charge the crew could see through the vessel door. One
+  /// still in the autoclave now shows with its state where its stage times
+  /// would be, so the pick says why it is not ready rather than leaving the
+  /// number off the screen.
+  List<Batch> get pickable => items;
 
   /// Every batch on record, for the Batches tab's All and Closed filters.
   ///
