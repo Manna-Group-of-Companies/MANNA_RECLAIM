@@ -1,0 +1,24 @@
+-- =============================================================================
+-- MANNA RECLAIM - the account that actually keyed the run
+--
+-- `supervisor` is the name a record is *signed* with, and the sheets deliberately
+-- let the crew switch it: a tablet is signed in once and whoever is holding it
+-- picks their own name. That makes it the right field to sign with and the wrong
+-- one to read as "who was on this shift" - a pick left over from last week signs
+-- today's runs to somebody who was not here, and nothing else on the row can
+-- contradict it.
+--
+-- This is that other thing: the account the request was authenticated as, taken
+-- off the token by the server and never off the request body, so no tablet can
+-- type it and no pick can move it. History shows the two side by side - the name
+-- on the record, and who entered it - and they only differ when the pick was
+-- switched, which is exactly the case worth seeing.
+--
+-- Null on every run entered before the column existed, and on a project that has
+-- not been migrated: the server prunes columns the database does not have, so a
+-- run still starts and this field simply stays empty.
+--
+-- Idempotent. supabase/schema.sql carries the same column.
+-- =============================================================================
+
+alter table if exists public.runs add column if not exists entered_by text;

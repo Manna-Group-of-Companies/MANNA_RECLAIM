@@ -242,6 +242,13 @@ alter table public.runs add column if not exists src2 text;
 alter table public.runs add column if not exists src3 text;
 alter table public.runs add column if not exists src4 text;
 
+-- Who keyed the run, as against who it is signed by. `supervisor` is switchable
+-- at the sheet - the crew sign with the name of whoever is on the floor - so it
+-- cannot double as the audit trail. This is written by the server off the access
+-- token and never off the request, and the two are shown together in History.
+-- See migrations/0013.
+alter table public.runs add column if not exists entered_by text;
+
 -- What a moulding press run recorded. A press has no meters and no run hours to
 -- speak of: what it produced is a count of pieces, the weight that came off it
 -- and the flash trimmed away, against the product it was set up for. The curing
