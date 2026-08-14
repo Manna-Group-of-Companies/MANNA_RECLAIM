@@ -1,6 +1,6 @@
 export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin';
 export type Shift = 'Day' | 'Night';
-export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC';
+export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC' | 'Special DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
 export type MachineKind =
   | 'grind'

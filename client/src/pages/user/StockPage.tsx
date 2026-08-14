@@ -3,7 +3,15 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { requestRefresh } from '@/features/ui/uiSlice';
 import { stockService } from '@/api/services/stock.service';
 import { toRequestError } from '@/api/axiosClient';
-import { Badge, Button, EmptyState, PageLoader, QualityChip, ViewHead } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  PageLoader,
+  QualityChip,
+  ViewHead,
+  gradeClass,
+} from '@/components/ui';
 import { NewDispatchSheet, type DispatchableStock } from '@/features/dispatch/NewDispatchSheet';
 import { ADMIN_ROLES, DELETE_ROLES, DISPATCH_ROLES, UNIT_NOUN, counted } from '@/config/constants';
 import { icons } from '@/config/icons';
@@ -823,7 +831,7 @@ export function StockPage() {
             <div className="gradebar" role="group" aria-label="Filter by quality">
               {chip('All', cards.length, !grade, 'all-grades', () => setGrade(''))}
               {grades.map((g) =>
-                chip(g, gradeCounts[g] ?? 0, grade === g, `q-${g}`, () => setGrade(g)),
+                chip(g, gradeCounts[g] ?? 0, grade === g, gradeClass(g) ?? '', () => setGrade(g)),
               )}
             </div>
           )}

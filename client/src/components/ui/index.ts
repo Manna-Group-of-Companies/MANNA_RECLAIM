@@ -1,6 +1,6 @@
 export { Button } from './Button';
 export { Card, CardHeader } from './Card';
-export { Badge, QualityChip, BatchRef, FormChip } from './Badge';
+export { Badge, QualityChip, BatchRef, FormChip, gradeClass, gradeVar } from './Badge';
 export { Spinner, PageLoader } from './Spinner';
 export { EmptyState } from './EmptyState';
 export { BottomSheet } from './BottomSheet';

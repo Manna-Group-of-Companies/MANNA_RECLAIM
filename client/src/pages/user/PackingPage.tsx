@@ -13,6 +13,7 @@ import {
   Readout,
   TextField,
   ViewHead,
+  gradeClass,
 } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { ADMIN_ROLES, SACK_KG, isMoulding } from '@/config/constants';
@@ -407,10 +408,12 @@ export function PackingPage() {
             <button
               key={g}
               type="button"
-              // The selected fill is the grade's own colour, off the same
-              // `.q-<Grade>` class its chip wears on the cards below. A product
-              // has no colour of its own and falls through to the default.
-              className={cn('gradebtn', grade === g && `on q-${g}`)}
+              // The selected fill is the grade's own colour, off the same class
+              // its chip wears on the cards below - asked for by name rather
+              // than assembled, since not every grade's class is `q-` and its
+              // own name. A product has no colour and falls through to the
+              // default.
+              className={cn('gradebtn', grade === g && ['on', gradeClass(g)])}
               aria-pressed={grade === g}
               onClick={() => setGrade(g)}
             >

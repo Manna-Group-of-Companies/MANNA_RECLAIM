@@ -38,6 +38,7 @@ import {
   TextAreaField,
   TextField,
   ViewHead,
+  gradeVar,
 } from '@/components/ui';
 import { icons } from '@/config/icons';
 import { useSupervisor } from '@/hooks/useSupervisor';
@@ -1818,7 +1819,7 @@ export function MachinesPage() {
                     <Pick
                       key={q}
                       tone="q"
-                      dot={`var(--q-${q.toLowerCase()})`}
+                      dot={gradeVar(q)}
                       title={q}
                       selected={quality === q}
                       onClick={() => setQuality(q)}

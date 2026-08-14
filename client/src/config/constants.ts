@@ -72,16 +72,24 @@ export const FLOOR_ROLES: Role[] = ['worker', 'supervisor', 'manager', 'admin'];
 
 export const SHIFTS: Shift[] = ['Day', 'Night'];
 
-export const QUALITIES: Quality[] = ['Special', 'SuperFine', 'Fine', 'Medium', 'DRC'];
+export const QUALITIES: Quality[] = [
+  'Special',
+  'SuperFine',
+  'Fine',
+  'Medium',
+  'DRC',
+  'Special DRC',
+];
 
 /**
  * The grades a batch is tracked as yielding - the rows of the batch card's grid.
  *
- * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
- * else: a refiner run can be logged as DRC, the lab tests it, and it keeps its
- * own quality chip - only the batch card and its rules leave it alone. The API
- * counts the same set, so the grid, the state chip and the close rule cannot
- * disagree - mirrors BATCH_QUALITIES in server/src/config/constants.js.
+ * Both DRC grades are left out of the batch lifecycle on purpose. They stay
+ * grades everywhere else: a refiner run can be logged as DRC or Special DRC, the
+ * lab tests either, and each keeps its own quality chip - only the batch card
+ * and its rules leave them alone. The API counts the same set, so the grid, the
+ * state chip and the close rule cannot disagree - mirrors BATCH_QUALITIES in
+ * server/src/config/constants.js.
  */
 export const BATCH_QUALITIES: Quality[] = ['Special', 'SuperFine', 'Fine', 'Medium'];
 
@@ -109,6 +117,7 @@ export const QUALITY_CLASS: Record<Quality, string> = {
   Fine: 'bg-quality-fine text-quality-on',
   Medium: 'bg-quality-medium text-quality-on',
   DRC: 'bg-quality-drc text-quality-on',
+  'Special DRC': 'bg-quality-special-drc text-quality-on',
 };
 
 export const FIREWOOD_KG_PER_LOAD = 550;
@@ -134,6 +143,8 @@ export const AUTOCLAVE_FORMS: AutoclaveForm[] = [
   { name: 'Special 2500', capacity: 2500, type: 'special', grade: 'Special' },
   { name: 'DRC 2200', capacity: 2200, type: 'special', grade: 'DRC' },
   { name: 'DRC 2500', capacity: 2500, type: 'special', grade: 'DRC' },
+  { name: 'Special DRC 2200', capacity: 2200, type: 'special', grade: 'Special DRC' },
+  { name: 'Special DRC 2500', capacity: 2500, type: 'special', grade: 'Special DRC' },
   { name: 'Coarse 2200', capacity: 2200, type: 'coarse' },
   { name: 'Coarse 2500', capacity: 2500, type: 'coarse' },
 ];
@@ -143,16 +154,26 @@ export const autoclaveFormsFor = (capacity?: number | null): AutoclaveForm[] =>
   capacity == null ? [] : AUTOCLAVE_FORMS.filter((f) => f.capacity === capacity);
 
 /**
+ * The grades that ride the special vessels but are counted by their runs.
+ *
+ * A list rather than a `!== 'DRC'` at the one place that asks, because there are
+ * two of them now: adding Special DRC to the charge picks without adding it here
+ * would have opened a batch whose grid has no row it could ever mark.
+ */
+const RUN_COUNTED_GRADES: Quality[] = ['DRC', 'Special DRC'];
+
+/**
  * Whether charging this formulation opens a batch the refiners work through.
  *
- * Only a special charge does. A coarse charge feeds the coarse line for the shift
- * and a DRC charge is counted by its runs - neither is marked, staged or weighed
- * in grades, so a batch record for one would sit on the list with nothing able to
- * move it off. Both are still logged as runs, which is what dispatch, history and
- * the costing read. The API applies the same rule and refuses either.
+ * Only a special charge does, and not every special-vessel charge is one. A
+ * coarse charge feeds the coarse line for the shift and a DRC charge - either
+ * grade - is counted by its runs; none of them is marked, staged or weighed in
+ * grades, so a batch record for one would sit on the list with nothing able to
+ * move it off. All are still logged as runs, which is what dispatch, history and
+ * the costing read. The API applies the same rule and refuses them.
  */
 export const opensBatch = (form?: AutoclaveForm | null): boolean =>
-  form?.type === 'special' && form.grade !== 'DRC';
+  form?.type === 'special' && !RUN_COUNTED_GRADES.includes(form.grade as Quality);
 
 /**
  * Two hands charge two autoclaves between them, so a paired load costs one

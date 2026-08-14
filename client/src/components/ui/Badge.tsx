@@ -36,12 +36,39 @@ const GRADE_CLASS: Record<DispatchGrade, string> = {
   Fine: 'q-Fine',
   Medium: 'q-Medium',
   DRC: 'q-DRC',
+  // The grade reads `Special DRC`; the class cannot carry that space, so this
+  // is also the one entry whose class is not the grade with `q-` in front.
+  'Special DRC': 'q-SpecialDRC',
   Coarse: 'q-Coarse',
   Sillsheet: 'q-Sillsheet',
 };
 
 /**
- * Colour-coded grade chip. The five refiner qualities plus Coarse and
+ * The grade's chip class, for the screens that colour something other than a
+ * chip with it - the grade filter buttons on Pack and Stock.
+ *
+ * Those built their own `q-${grade}`, which held for as long as no grade had a
+ * space in its name: `q-Special DRC` is two classes, and the second of them is
+ * not a class at all, so the button came out in Special's cyan. They ask here
+ * now. A name with no colour of its own - a product - returns undefined and
+ * falls through to the default fill, which is what those screens already did.
+ */
+export const gradeClass = (grade: string): string | undefined =>
+  GRADE_CLASS[grade as DispatchGrade];
+
+/**
+ * The custom property carrying a grade's colour, for the dots that are a
+ * background rather than a class: `Special DRC` -> `var(--q-special-drc)`.
+ *
+ * Same trap as gradeClass, one layer down - the token names in index.css are
+ * lowercase and hyphenated, so a grade with a space in it needs the space
+ * turned into the hyphen rather than dropped into the property name as-is.
+ */
+export const gradeVar = (grade: string): string =>
+  `var(--q-${grade.toLowerCase().replace(/\s+/g, '-')})`;
+
+/**
+ * Colour-coded grade chip. The six refiner qualities plus Coarse and
  * Sillsheet, which only ever appear on a dispatch line.
  */
 export function QualityChip({

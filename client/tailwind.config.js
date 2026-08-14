@@ -44,6 +44,7 @@ export default {
           medium: 'var(--q-medium)',
           coarse: 'var(--q-coarse)',
           drc: 'var(--q-drc)',
+          'special-drc': 'var(--q-special-drc)',
           sillsheet: 'var(--q-sillsheet)',
           on: 'var(--on-fill)',
         },

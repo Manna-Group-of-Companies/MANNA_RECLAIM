@@ -92,17 +92,17 @@
     --amber-soft: var(--brand-soft);
 
     /* ---------- quality ramp ----------
-       Seven grades the crew picks by colour before they read the name. Each is
+       Eight grades the crew picks by colour before they read the name. Each is
        light enough to carry the near-black --on-fill, since on a dark theme
        these are glowing chips rather than solid ones.
 
-       The real constraint here is not contrast but separation. Nine solid
-       chips can end up on one row: the seven grades from the dispatch picker,
-       the QC-hold chip in --err, and the shift chip in --steel. So the nine
-       are laid out round the OKLCH wheel at a roughly even lightness, and no
-       two are closer than dE 12 - about twice a just-noticeable step, which is
-       what it takes to tell two chips apart at arm's length under plant light
-       rather than side by side on a desk.
+       The real constraint here is not contrast but separation. Ten solid
+       chips can end up on one row: the eight grades, the QC-hold chip in
+       --err, and the shift chip in --steel. So the ten are laid out round the
+       OKLCH wheel at a roughly even lightness, and no two are closer than
+       dE 12 - about twice a just-noticeable step, which is what it takes to
+       tell two chips apart at arm's length under plant light rather than side
+       by side on a desk.
 
        Two of them were fixed rather than chosen. Coarse used to borrow
        --ember and came out the same orange as Medium standing next to it, so
@@ -112,7 +112,14 @@
        autoclave rail, a tab badge - none of which is ever a solid chip in this
        row, which is why it is allowed to stay near Medium.
 
-       Anything added here has to be checked against the other eight, not just
+       Special DRC is the newest and took the last arc wide enough to hold one.
+       It is deliberately NOT a second purple next to DRC: every violet close
+       enough to read as DRC's sibling came out under dE 12 from DRC itself,
+       and two chips that have to be told apart matter more here than two that
+       look related. The azure is 17.6 from Special and 17.3 from the shift
+       chip, its nearest neighbours, with everything else past 20.
+
+       Anything added here has to be checked against the other nine, not just
        against the panel. */
     --q-special: #3fd2d4;
     --q-superfine: #7ae78d;
@@ -120,6 +127,7 @@
     --q-medium: #f69835;
     --q-coarse: #fb7cbd;
     --q-drc: #b994f8;
+    --q-special-drc: #33c5ff;
     --q-sillsheet: #d7dfe8;
 
     /* ---------- state tints ----------
@@ -770,6 +778,12 @@
   }
   .q-DRC {
     background: var(--q-drc);
+  }
+  /* The grade is `Special DRC`; a class cannot carry the space. Badge.tsx maps
+     it, which is the one place a chip class is not the grade with `q-` in
+     front. */
+  .q-SpecialDRC {
+    background: var(--q-special-drc);
   }
   .q-Coarse {
     background: var(--q-coarse);
