@@ -40,6 +40,19 @@ interface UiState {
    */
   supervisor: string | null;
   /**
+   * The account that made that pick, and the reason the pick is not simply
+   * trusted: it is remembered for the *device*, and a device outlives a session.
+   * A name switched on one shift went on signing every record after it - through
+   * a sign-out, through the next person signing in as themselves - so History
+   * read back a supervisor who had not been near the machine. The pick is
+   * honoured only while the account that made it is the one signed in; see
+   * hooks/useSupervisor.
+   *
+   * Null on a device that picked before this was recorded, which is read as
+   * "belongs to nobody" and ignored - once, on the next load.
+   */
+  supervisorFor: string | null;
+  /**
    * Who the plant's accounts say may sign a record, last read from the server.
    *
    * Was a list of three names in config/constants, copied again into the
@@ -58,6 +71,7 @@ const initialState: UiState = {
   refreshTick: 0,
   costingUnlocked: false,
   supervisor: storage.get<string | null>(storageKeys.supervisor, null),
+  supervisorFor: storage.get<string | null>(storageKeys.supervisorFor, null),
   signers: storage.get<string[]>(storageKeys.signers, SUPERVISORS),
 };
 
@@ -88,12 +102,26 @@ const uiSlice = createSlice({
     requestRefresh: (state) => {
       state.refreshTick += 1;
     },
-    /** Switch who is signing. Blank hands the record back to the account. */
-    setSupervisor: (state, action: PayloadAction<string>) => {
-      const name = action.payload.trim() || null;
+    /**
+     * Switch who is signing. Blank hands the record back to the account.
+     *
+     * The account doing the switching is stored with the choice, so the choice
+     * can be dropped when somebody else signs in rather than being inherited by
+     * them - see `supervisorFor`.
+     */
+    setSupervisor: (state, action: PayloadAction<{ name: string; account: string }>) => {
+      const name = action.payload.name.trim() || null;
+      const account = action.payload.account.trim() || null;
       state.supervisor = name;
-      if (name) storage.set(storageKeys.supervisor, name);
-      else storage.remove(storageKeys.supervisor);
+      state.supervisorFor = name ? account : null;
+      if (name) {
+        storage.set(storageKeys.supervisor, name);
+        if (account) storage.set(storageKeys.supervisorFor, account);
+        else storage.remove(storageKeys.supervisorFor);
+      } else {
+        storage.remove(storageKeys.supervisor);
+        storage.remove(storageKeys.supervisorFor);
+      }
     },
     /**
      * The names that may sign, as the server has them. An empty answer is

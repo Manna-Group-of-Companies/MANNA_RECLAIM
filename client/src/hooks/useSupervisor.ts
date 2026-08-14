@@ -29,10 +29,25 @@ let loadedFor: string | null = null;
  */
 export function useSupervisor() {
   const dispatch = useAppDispatch();
-  const chosen = useAppSelector((s) => s.ui.supervisor);
+  const stored = useAppSelector((s) => s.ui.supervisor);
+  const storedFor = useAppSelector((s) => s.ui.supervisorFor);
   const account = useAppSelector((s) => s.auth.user?.name ?? '');
   const signers = useAppSelector((s) => s.ui.signers);
   const authed = useAppSelector((s) => s.auth.status === 'authenticated');
+
+  /*
+   * The pick, but only while it is still this account's.
+   *
+   * It is remembered for the device and a device outlives a session: a name
+   * switched last week went on signing everything after it, so the person who
+   * signed in this morning found their runs going into History under somebody
+   * else's name and no way to tell from the screen that it had happened. A pick
+   * whose owner is not the account signed in is ignored, and so is one from
+   * before owners were recorded - the account's own name stands until whoever
+   * is holding the tablet switches it themselves, which is the state the sheets
+   * were always meant to open in.
+   */
+  const chosen = stored && storedFor && storedFor === account ? stored : null;
 
   useEffect(() => {
     if (!authed || !account || loadedFor === account) return;
@@ -53,7 +68,10 @@ export function useSupervisor() {
 
   const name = chosen || account || options[0] || '';
 
-  const setName = useCallback((value: string) => void dispatch(setSupervisor(value)), [dispatch]);
+  const setName = useCallback(
+    (value: string) => void dispatch(setSupervisor({ name: value, account })),
+    [dispatch, account],
+  );
 
   /** True while the name is the account's own, so a sheet can say "you". */
   const isAccount = !chosen || chosen === account;

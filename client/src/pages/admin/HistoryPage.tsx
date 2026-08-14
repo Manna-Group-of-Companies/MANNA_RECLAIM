@@ -611,6 +611,13 @@ export function AdminHistoryPage() {
                         <b>{dayLong(r.shift_date)}</b>
                         {r.shift && <div className="muted text-[10px]">{r.shift} shift</div>}
                         {r.supervisor && <div className="muted text-[10px]">{r.supervisor}</div>}
+                        {/* Who keyed it, where that is not who it is signed by.
+                            The sheet's signing name is switchable, so the two
+                            can differ - and the back office is where that is
+                            worth knowing. */}
+                        {r.entered_by && r.entered_by !== r.supervisor && (
+                          <div className="muted text-[10px]">entered by {r.entered_by}</div>
+                        )}
                       </td>
                       <td>
                         <b>{r.machine ?? r.machine_id}</b>

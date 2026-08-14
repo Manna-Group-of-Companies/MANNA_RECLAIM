@@ -23,6 +23,13 @@ export const storageKeys = {
   /** The name the tablet is signing records with - see hooks/useSupervisor. */
   supervisor: 'manna.supervisor',
   /**
+   * The account that made that pick. A switched name belongs to the person who
+   * switched it, not to the device: without this the pick outlives the session
+   * it was made in and quietly signs the next account's shift with the last
+   * one's name. See hooks/useSupervisor.
+   */
+  supervisorFor: 'manna.supervisorFor',
+  /**
    * The names that may sign, as last read from the server. Kept so a tablet
    * that opens a sheet before the fetch lands - or with no signal at all - still
    * offers the crew the list it had yesterday rather than three compiled-in

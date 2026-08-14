@@ -36,6 +36,7 @@ import {
   counted,
   type TyreType,
 } from '@/config/constants';
+import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { clock24, dayMonth } from '@/utils/date';
 import { hours, kwhOf, num, rupees } from '@/utils/format';
@@ -646,6 +647,13 @@ export function HistoryPage() {
   const filters = useAppSelector((s) => s.reports.filters);
   const queued = useAppSelector((s) => s.runs.queue.length);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
+  /*
+   * Who anything logged from this browser right now would be signed by, printed
+   * over the log rather than left to be discovered in it. The two names are the
+   * same on an ordinary shift; they part when the sheet's pick has been switched,
+   * and that is precisely when somebody reading History needs to be told.
+   */
+  const { name: signingAs, account } = useSupervisor();
 
   const [date, setDate] = useState('');
   const [shift, setShift] = useState('');
@@ -710,6 +718,19 @@ export function HistoryPage() {
             {sorted.length} shown · {queued} unsynced ·{' '}
             <span className="synced yes inline-block align-middle" /> = saved to cloud · tap a row
             to edit
+            {account && (
+              <div className="text-[11px]">
+                Signed in as <b>{account}</b>
+                {signingAs && signingAs !== account ? (
+                  <>
+                    {' '}
+                    · signing records as <b>{signingAs}</b>
+                  </>
+                ) : (
+                  ' · records are signed with this name'
+                )}
+              </div>
+            )}
           </>
         }
       />
@@ -827,7 +848,17 @@ export function HistoryPage() {
                       </div>
                     )}
                   </td>
-                  <td>{r.supervisor ?? <span className="muted">—</span>}</td>
+                  {/* The name the record is signed with, and - only when it is
+                      not the same person - the account that keyed it. Both are
+                      on the row because either one alone can mislead: the pick
+                      is switchable, and the account is whoever the browser
+                      happened to be signed in as. */}
+                  <td>
+                    {r.supervisor ?? <span className="muted">—</span>}
+                    {r.entered_by && r.entered_by !== r.supervisor && (
+                      <div className="muted text-[10px]">entered by {r.entered_by}</div>
+                    )}
+                  </td>
                   <td className="tnum">
                     {r.status === 'running' ? 'live' : runHours(r)}
                     {hasHourMeter && (

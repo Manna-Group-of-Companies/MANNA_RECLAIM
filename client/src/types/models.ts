@@ -232,6 +232,11 @@ export interface Batch {
   grades?: BatchGrade[];
   /** Which pre-refiners broke this charge down. */
   pre_refiners?: string[];
+  /**
+   * Machine id -> when that machine first went on this batch, so a picker can
+   * say whether PR2 has had it and at what time without loading its runs.
+   */
+  opened_on?: Record<string, string>;
   runs_count?: number;
   marked_count?: number;
   weighed_count?: number;
@@ -280,7 +285,15 @@ export interface Run {
   tyre_type?: string | null;
   shift_date: string;
   shift: Shift;
+  /** The name the record is signed with - the sheet's pick, which is switchable. */
   supervisor?: string | null;
+  /**
+   * The account that keyed the start, taken off the access token by the server.
+   * Not switchable and not sendable, which is what makes it worth showing beside
+   * `supervisor` when the two disagree. Null on every run started before the
+   * column existed - see migrations/0013.
+   */
+  entered_by?: string | null;
   workers?: number | null;
   /**
    * How many start/stops this record combines. A shiftwise machine keeps one

@@ -45,6 +45,7 @@ import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/utils/cn';
 import {
+  BATCH_PICK_STAGES,
   FIREWOOD_KG_PER_COARSE_LOAD,
   FIREWOOD_KG_PER_LOAD,
   QUALITIES,
@@ -81,7 +82,16 @@ import {
   todayISO,
 } from '@/utils/date';
 import { ago, elapsed } from '@/utils/format';
-import type { BearingDue, MaintenanceLog, Machine, Product, Quality, Run, Shift } from '@/types/models';
+import type {
+  Batch,
+  BearingDue,
+  MaintenanceLog,
+  Machine,
+  Product,
+  Quality,
+  Run,
+  Shift,
+} from '@/types/models';
 
 /** The line a run is on, for the machines that can be put on either. */
 type Line = 'coarse' | 'special';
@@ -214,6 +224,42 @@ const TOD_NOTE = (
   </>
 );
 
+/**
+ * The two lines under a batch number on the Batch pick.
+ *
+ * The first says what the charge is - the formulation it was cooked to and the
+ * grades that have come off it so far. The crew used to type the grade into the
+ * batch number itself to get it onto this tile ("3084 special drc"), which put
+ * it in the one field the whole record is keyed on.
+ *
+ * The second says where the batch has got to: when PR2 broke it down and when
+ * R1 first went on it. A stage that has not run reads `—` rather than being
+ * left off, because the gap IS the answer - it is how the pick says this one has
+ * not been through the pre-refiner yet. A charge still in the vessel has no
+ * stage times to give and says so instead.
+ */
+function BatchPickSub({ batch }: { batch: Batch }) {
+  // What the refiners have marked off it, or - until they have marked anything -
+  // the grade it was charged for, which the API reads off the load run.
+  const grades = batch.qualities?.length ? batch.qualities.join(', ') : batch.grade;
+  const what = [batch.formulation, grades].filter(Boolean).join(' · ');
+  return (
+    <>
+      {what || 'no grade marked yet'}
+      <br />
+      {batch.autoclave_done ? (
+        // Monospaced so the times line up down the grid rather than jittering
+        // with the width of each number.
+        <span className="font-mono">
+          {BATCH_PICK_STAGES.map((id) => `${id} ${clock24(batch.opened_on?.[id])}`).join(' · ')}
+        </span>
+      ) : (
+        'in autoclave'
+      )}
+    </>
+  );
+}
+
 /** Landing tab: every machine grouped by line, with the whole run lifecycle. */
 export function MachinesPage() {
   const dispatch = useAppDispatch();
@@ -230,13 +276,25 @@ export function MachinesPage() {
   const productsLoaded = useAppSelector((s) => s.products.loaded);
   /**
    * The batches a refiner may be pointed at: open, and out of the autoclave.
-   * A charge still cooking has nothing to refine yet, so it is kept off the
-   * picker rather than offered and then rejected.
+   * A charge still cooking has nothing to refine yet, so it cannot be mixed into
+   * another batch's tailings and it is not what "nothing is ready" counts.
    */
   const refinableBatches = useMemo(
     () => openBatches.filter((b) => b.autoclave_done),
     [openBatches],
   );
+  /**
+   * What the Batch pick offers: every open batch, cooking ones included.
+   *
+   * They used to be filtered down to refinableBatches, which read as "these are
+   * all the batches there are" and hid a charge the crew could see through the
+   * vessel door. A batch still in the autoclave now shows with its state where
+   * its stage times would be, so the pick says why it is not ready rather than
+   * leaving the number off the screen. Nothing is refused: the server takes a
+   * run against any open batch, and it is the shift's own record of what went
+   * on the machine.
+   */
+  const pickableBatches = openBatches;
   /**
    * A vessel's name from its id, for the messages that have to name one.
    *
@@ -385,7 +443,7 @@ export function MachinesPage() {
    * autoclave it was cooked in has been discharged. With none out of the vessel
    * the sheet says so and offers nothing to fill in.
    */
-  const startNothingReady = startSpecial && refinableBatches.length === 0;
+  const startNothingReady = startSpecial && pickableBatches.length === 0;
   /** The other batches whose tailings can go through with the one picked. */
   const mixable = useMemo(
     () => (startSpecial && batchNo.trim() ? refinableBatches.filter((b) => b.ref !== batchNo.trim()) : []),
@@ -1385,7 +1443,7 @@ export function MachinesPage() {
           sheet?.kind !== 'start'
             ? undefined
             : startNothingReady
-              ? 'No batches are ready yet.'
+              ? 'No batch is open.'
               : startNoProducts
                 ? 'Nothing on the product list yet.'
               : startIsAutoclave
@@ -1435,7 +1493,7 @@ export function MachinesPage() {
           <EmptyState
             icon={icons.batches}
             title="Nothing to refine"
-            hint="Unload the autoclave first to make a batch selectable."
+            hint="No batch is open. Charge an autoclave on this tab to open one — a charge still cooking is offered here too, so this is empty only when there is no batch at all."
           />
         )}
 
@@ -1785,15 +1843,16 @@ export function MachinesPage() {
           !startIsMoulding &&
           !startNothingReady && (
           <>
-            {startPicksBatch && refinableBatches.length > 0 && (
+            {startPicksBatch && pickableBatches.length > 0 && (
               <>
                 <SheetLabel>Batch</SheetLabel>
                 <PickGrid>
-                  {refinableBatches.map((b) => (
+                  {pickableBatches.map((b) => (
                     <Pick
                       key={b.id}
                       title={b.ref}
-                      sub={b.formulation ?? undefined}
+                      dot={b.grade ? gradeVar(b.grade) : undefined}
+                      sub={<BatchPickSub batch={b} />}
                       selected={batchNo === b.ref}
                       onClick={() => {
                         const next = batchNo === b.ref ? '' : b.ref;

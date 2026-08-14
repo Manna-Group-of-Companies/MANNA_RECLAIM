@@ -51,12 +51,25 @@ const blank: BatchGrade = {
 };
 
 /**
- * The grid row for a grade, in the plant's grade order rather than the API's.
- * Only ever asked for a BATCH_QUALITIES grade - DRC has no row here, and the API
- * leaves it out of `grades` for the same reason.
+ * The grid row for a grade. Only ever asked for a grade this batch is tracked
+ * in - DRC has no row here, and the API leaves it out of `grades` for the same
+ * reason.
  */
 const gradeRow = (batch: Batch, quality: Quality): BatchGrade =>
   batch.grades?.find((g) => g.quality === quality) ?? { ...blank, quality };
+
+/**
+ * The rows this batch's grid has, read off the API's answer rather than off
+ * BATCH_QUALITIES.
+ *
+ * Which grades a charge is tracked in is not the same question for every
+ * charge - a Special DRC one comes off as Special DRC or Special and as nothing
+ * else - and the server already worked it out to build `grades`. Deciding it
+ * again here is how the card ends up offering a row the API will refuse.
+ * BATCH_QUALITIES stands in only for a batch that arrived without the field.
+ */
+const gridRows = (batch: Batch): Quality[] =>
+  batch.grades?.length ? batch.grades.map((g) => g.quality) : BATCH_QUALITIES;
 
 /** Which way the state chip is tinted: cooking, waiting on a tick, or done. */
 function chipTone(batch: Batch) {
@@ -203,7 +216,7 @@ export function BatchesPage() {
                 <div className="hdr">R4</div>
                 <div className="hdr">Weighed</div>
 
-                {BATCH_QUALITIES.map((quality) => {
+                {gridRows(batch).map((quality) => {
                   const row = gradeRow(batch, quality);
                   const key = `${batch.id}:${quality}`;
                   const locked = Boolean(lockedReason(row));

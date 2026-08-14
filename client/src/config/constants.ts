@@ -84,20 +84,35 @@ export const QUALITIES: Quality[] = [
 /**
  * The grades a batch is tracked as yielding - the rows of the batch card's grid.
  *
- * Both DRC grades are left out of the batch lifecycle on purpose. They stay
- * grades everywhere else: a refiner run can be logged as DRC or Special DRC, the
- * lab tests either, and each keeps its own quality chip - only the batch card
- * and its rules leave them alone. The API counts the same set, so the grid, the
+ * DRC is left out of the batch lifecycle on purpose. It stays a grade everywhere
+ * else: a refiner run can be logged as DRC, the lab tests it, and it keeps its
+ * own quality chip - only the batch card and its rules leave it alone.
+ *
+ * Special DRC is not that case, despite the name: it is worked out of a special
+ * charge the refiners take grades off, so it is marked, staged, weighed and
+ * closed like any other grade. The API counts the same set, so the grid, the
  * state chip and the close rule cannot disagree - mirrors BATCH_QUALITIES in
  * server/src/config/constants.js.
  */
-export const BATCH_QUALITIES: Quality[] = ['Special', 'SuperFine', 'Fine', 'Medium'];
+export const BATCH_QUALITIES: Quality[] = [
+  'Special',
+  'SuperFine',
+  'Fine',
+  'Medium',
+  'Special DRC',
+];
 
+/**
+ * Special DRC is here because it is a batch grade - a grade that can be packed
+ * and not dispatched is a dead end in the yard. It has no PRICE_LIST entry:
+ * the rate against it is the plant's to set on the rate card.
+ */
 export const DISPATCH_GRADES: DispatchGrade[] = [
   'Special',
   'SuperFine',
   'Fine',
   'Medium',
+  'Special DRC',
   'Coarse',
   'Sillsheet',
 ];
@@ -156,21 +171,22 @@ export const autoclaveFormsFor = (capacity?: number | null): AutoclaveForm[] =>
 /**
  * The grades that ride the special vessels but are counted by their runs.
  *
- * A list rather than a `!== 'DRC'` at the one place that asks, because there are
- * two of them now: adding Special DRC to the charge picks without adding it here
- * would have opened a batch whose grid has no row it could ever mark.
+ * DRC alone. Special DRC is deliberately NOT here: it is a grade the refiners
+ * work out of the charge, so its load opens a batch and the grid has a row for
+ * it - see BATCH_QUALITIES. A list rather than a `!== 'DRC'` so that reading
+ * stays written down at the one place that asks.
  */
-const RUN_COUNTED_GRADES: Quality[] = ['DRC', 'Special DRC'];
+const RUN_COUNTED_GRADES: Quality[] = ['DRC'];
 
 /**
  * Whether charging this formulation opens a batch the refiners work through.
  *
  * Only a special charge does, and not every special-vessel charge is one. A
- * coarse charge feeds the coarse line for the shift and a DRC charge - either
- * grade - is counted by its runs; none of them is marked, staged or weighed in
- * grades, so a batch record for one would sit on the list with nothing able to
- * move it off. All are still logged as runs, which is what dispatch, history and
- * the costing read. The API applies the same rule and refuses them.
+ * coarse charge feeds the coarse line for the shift and a DRC charge is counted
+ * by its runs; neither is marked, staged or weighed in grades, so a batch record
+ * for one would sit on the list with nothing able to move it off. Both are still
+ * logged as runs, which is what dispatch, history and the costing read. The API
+ * applies the same rule and refuses them.
  */
 export const opensBatch = (form?: AutoclaveForm | null): boolean =>
   form?.type === 'special' && !RUN_COUNTED_GRADES.includes(form.grade as Quality);
@@ -294,6 +310,20 @@ export const CRACKER_IDS = ['CRK'];
 
 export const isCracker = (machineId?: string | null) =>
   Boolean(machineId) && CRACKER_IDS.includes(machineId as string);
+
+/**
+ * The stages the Batch pick reports a time against, in the order the charge
+ * meets them.
+ *
+ * PR2 breaks the charge down and R1 works what comes off it, so between them
+ * they answer the question the crew is actually asking at the pick: has this
+ * batch been through the stage before mine, and when. The rest of the line is
+ * left off deliberately - a tile with six times on it is read by nobody.
+ *
+ * Ids rather than kinds because the answer is about a machine, not a class of
+ * them: "PR2 had it at 09:12" is what the crew says to each other.
+ */
+export const BATCH_PICK_STAGES = ['PR2', 'R1'];
 
 /** The clock each shift covers, shown under the shift picks. */
 export const SHIFT_HOURS: Record<Shift, string> = {
