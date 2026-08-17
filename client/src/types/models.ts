@@ -1142,6 +1142,13 @@ export interface ShiftEfficiency {
   coarse: EfficiencyCard[];
   /** Charges per vessel per day, which is the only count that is shift-proof. */
   autoclaves: EfficiencyCard[];
+  /**
+   * kWh/kg and kg/man-hour over the whole day, per grinder and per grade of the
+   * special line. Those two benchmarks are set against the day, so this is the
+   * only place they are compared with a target - the shift cards carry the same
+   * figures against the plant's own median, which is a different question.
+   */
+  days: EfficiencyCard[];
   yields: EfficiencyCard[];
   notes: EfficiencyNote[];
   varianceReasons: VarianceReason[];

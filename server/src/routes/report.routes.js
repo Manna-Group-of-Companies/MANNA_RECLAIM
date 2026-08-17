@@ -7,6 +7,7 @@ import { dateRange } from '../validations/common.validation.js';
 import {
   efficiencyNoteSchema,
   shiftQuery,
+  varianceReasonEditSchema,
   varianceReasonSchema,
 } from '../validations/report.validation.js';
 
@@ -30,15 +31,26 @@ router.post(
   reports.addEfficiencyNote,
 );
 /**
- * Why an actual missed its ideal. Read back with the shift on
- * /shift-efficiency; written here, by the back office only - the benchmark is
- * the manager's and so is the answer for missing it.
+ * Why an actual missed its ideal. A shift's own reasons come back with it on
+ * /shift-efficiency; the GET here is the review across a window of days, which
+ * is what the record is kept for. Written and corrected by the back office only
+ * - the benchmark is the manager's and so is the answer for missing it.
+ *
+ * The PATCH takes the wording and nothing else. What a reason is *about* - the
+ * day, the shift, the parameter, the two figures - is the record itself.
  */
+router.get('/variance-reasons', adminOnly, validate({ query: dateRange }), reports.varianceReasons);
 router.post(
   '/variance-reasons',
   adminOnly,
   validate({ body: varianceReasonSchema }),
   reports.addVarianceReason,
+);
+router.patch(
+  '/variance-reasons/:id',
+  adminOnly,
+  validate({ body: varianceReasonEditSchema }),
+  reports.updateVarianceReason,
 );
 // The machine log as a spreadsheet. Admin only for the same reason /costing is:
 // it carries every run the plant has ever logged, with what each cost.

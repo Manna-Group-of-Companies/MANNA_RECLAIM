@@ -5,12 +5,14 @@ import {
   addVarianceReason,
   fetchShiftEfficiency,
   fetchShiftOptions,
+  fetchVarianceReasons,
+  updateVarianceReason,
 } from '@/features/reports/reportsSlice';
 import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
 import { cn } from '@/utils/cn';
-import type { EfficiencyCard, EfficiencyMetric, Shift } from '@/types/models';
+import type { EfficiencyCard, EfficiencyMetric, Shift, VarianceReason } from '@/types/models';
 
 type CalcTarget = EfficiencyMetric['calc'];
 type NoteTarget = { line: 'refiner' | 'grind'; metric: string } | null;
@@ -78,7 +80,9 @@ function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: Calc
 export function EfficiencyPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const { shifts, shiftEfficiency, loading, error } = useAppSelector((s) => s.reports);
+  const { shifts, shiftEfficiency, varianceReasons, loading, error } = useAppSelector(
+    (s) => s.reports,
+  );
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const user = useAppSelector((s) => s.auth.user);
 
@@ -87,6 +91,7 @@ export function EfficiencyPage() {
   const [calc, setCalc] = useState<CalcTarget>(null);
   const [noteFor, setNoteFor] = useState<NoteTarget>(null);
   const [varianceFor, setVarianceFor] = useState<VarianceTarget>(null);
+  const [editing, setEditing] = useState<VarianceReason | null>(null);
   const [reason, setReason] = useState('');
   const [enteredBy, setEnteredBy] = useState(user?.name ?? '');
   const [saving, setSaving] = useState(false);
@@ -109,6 +114,18 @@ export function EfficiencyPage() {
     void dispatch(fetchShiftEfficiency({ date, shift }));
   }, [dispatch, date, shift, refreshTick]);
 
+  /**
+   * The month the picked day falls in, for the review list underneath. Not the
+   * whole record: a plant with years of these would be scrolling past two of
+   * them to reach this month's, which is the one anybody is looking for.
+   */
+  const month = date.slice(0, 7);
+
+  useEffect(() => {
+    if (!month) return;
+    void dispatch(fetchVarianceReasons({ from: `${month}-01`, to: `${month}-31` }));
+  }, [dispatch, month, refreshTick]);
+
   const available = useMemo(
     () => shifts.find((s) => s.date === date)?.shifts ?? [],
     [shifts, date],
@@ -122,6 +139,7 @@ export function EfficiencyPage() {
       ...shiftEfficiency.grinders,
       ...(shiftEfficiency.coarse ?? []),
       ...(shiftEfficiency.autoclaves ?? []),
+      ...(shiftEfficiency.days ?? []),
     ];
     return cards.reduce((n, c) => n + c.metrics.filter((m) => m.offTarget).length, 0);
   }, [shiftEfficiency]);
@@ -191,6 +209,36 @@ export function EfficiencyPage() {
     }
   };
 
+  /** Corrects the wording of one already recorded. What it is about cannot move. */
+  const saveEditedReason = async () => {
+    if (!editing) return;
+    if (!reason.trim()) {
+      notify('A reason cannot be blank', 'warn');
+      return;
+    }
+    setSaving(true);
+    const result = await dispatch(
+      updateVarianceReason({
+        id: editing.id,
+        reason: reason.trim(),
+        enteredBy: enteredBy.trim() || null,
+      }),
+    );
+    setSaving(false);
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? 'Reason updated' : 'Could not update the reason', okay ? 'ok' : 'err');
+    if (okay) {
+      setEditing(null);
+      setReason('');
+    }
+  };
+
+  const openEdit = (row: VarianceReason) => {
+    setReason(row.reason);
+    setEnteredBy(row.entered_by ?? user?.name ?? '');
+    setEditing(row);
+  };
+
   /**
    * Refiner, grinder, coarse, autoclave and yield cards all render the same way.
    *
@@ -244,7 +292,14 @@ export function EfficiencyPage() {
                   off ideal · {m.label}
                   {r.entered_by ? ` · ${r.entered_by}` : ''}:
                 </span>{' '}
-                {r.reason}
+                {r.reason}{' '}
+                <button
+                  type="button"
+                  className="muted underline text-[11px]"
+                  onClick={() => openEdit(r)}
+                >
+                  edit
+                </button>
               </div>
             )),
           )}
@@ -337,6 +392,10 @@ export function EfficiencyPage() {
           Rates tab. Off-target values are flagged; tap one to see the arithmetic, or record why it
           missed.
         </div>
+        <div className="sub mt-1">
+          Each ideal is compared at the granularity it is set: production per shift, autoclave
+          charges and the energy and labour figures over the whole day.
+        </div>
 
         {shiftEfficiency && shiftEfficiency.idealsSet === false && (
           <div className="sub mt-2" style={{ color: 'var(--err)' }}>
@@ -412,6 +471,62 @@ export function EfficiencyPage() {
             shiftEfficiency.autoclaves.map((card) => renderCard(card, null, <b>{card.label}</b>))
           ) : (
             <div className="empty">No autoclave charges on this day.</div>
+          )}
+
+          {/*
+            Energy and labour productivity are set as day figures, so they are
+            compared as day figures. Both shifts are in each card - the shift
+            cards above show the same two against the plant's own median, which
+            is the question that is worth asking a shift at a time.
+          */}
+          <div className="grouphead">
+            Energy & labour · {dayLong(shiftEfficiency.date)} · whole day, both shifts
+          </div>
+          {shiftEfficiency.days?.length ? (
+            shiftEfficiency.days.map((card) => renderCard(card, null, <b>{card.label}</b>))
+          ) : (
+            <div className="empty">Nothing weighed on this day.</div>
+          )}
+
+          {/*
+            The month's reasons in one list. The cards above answer "why did this
+            shift miss"; a record of misses is kept for the other question, which
+            is what has been going wrong - and that one cannot be read a shift at
+            a time.
+          */}
+          <div className="grouphead">Variance reasons recorded this month</div>
+          {varianceReasons.length ? (
+            <div className="panel scroll-x mt-0 p-0">
+              <table className="tt min-w-[640px]">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Shift</th>
+                    <th>Parameter</th>
+                    <th className="tnum">Ideal</th>
+                    <th className="tnum">Actual</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {varianceReasons.map((r) => (
+                    <tr key={r.id} className="cursor-pointer" onClick={() => openEdit(r)}>
+                      <td>{dayLong(r.shift_date)}</td>
+                      <td className="muted">{r.shift ?? '—'}</td>
+                      <td>{r.label ?? r.parameter}</td>
+                      <td className="tnum">{r.ideal ?? '—'}</td>
+                      <td className="tnum">{r.actual ?? '—'}</td>
+                      <td>
+                        {r.reason}
+                        {r.entered_by && <span className="muted"> · {r.entered_by}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="empty">Nothing has been recorded off-target this month.</div>
           )}
         </>
       )}
@@ -516,6 +631,59 @@ export function EfficiencyPage() {
               <label htmlFor="var-by">Entered by</label>
               <input
                 id="var-by"
+                type="text"
+                placeholder="manager name"
+                value={enteredBy}
+                onChange={(e) => setEnteredBy(e.target.value)}
+              />
+            </div>
+          </>
+        )}
+      </BoModal>
+
+      {/* correcting the wording of one already recorded */}
+      <BoModal
+        open={Boolean(editing)}
+        title="Edit the reason"
+        subtitle={
+          editing
+            ? `${editing.label ?? editing.parameter} · ${dayLong(editing.shift_date)}${editing.shift ? ` · ${editing.shift}` : ''}`
+            : ''
+        }
+        onClose={() => setEditing(null)}
+        footer={
+          <button type="button" className="btn" onClick={saveEditedReason} disabled={saving}>
+            {saving ? 'Saving…' : 'Save reason'}
+          </button>
+        }
+      >
+        {editing && (
+          <>
+            <div className="calc mt-3">
+              <div>
+                Ideal: <b>{editing.ideal ?? '—'}</b>
+              </div>
+              <div>
+                Actual: <b>{editing.actual ?? '—'}</b>
+              </div>
+            </div>
+            <div className="sub mt-2">
+              The wording is what can be corrected — the day, the shift, the parameter and the two
+              figures are the record itself.
+            </div>
+            <div className="mt-3">
+              <label htmlFor="edit-reason">Reason</label>
+              <textarea
+                id="edit-reason"
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+            <div className="mt-2.5">
+              <label htmlFor="edit-by">Entered by</label>
+              <input
+                id="edit-by"
                 type="text"
                 placeholder="manager name"
                 value={enteredBy}

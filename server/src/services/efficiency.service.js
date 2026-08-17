@@ -124,6 +124,53 @@ function grinderUnits(rows) {
 }
 
 /**
+ * A day's figures for a line, folded up out of its shifts.
+ *
+ * The two efficiency benchmarks - kWh per kg and kg per man-hour - are set
+ * against the day rather than the shift, because that is the figure the plant
+ * actually judges by: a night shift that ran four hours on a line the day shift
+ * had already warmed up is not a worse crew, and comparing each half against a
+ * whole-day target would say it was.
+ *
+ * Labour-hours are summed per shift and then added, not summed across the day
+ * and multiplied: crew × hours has to be worked out while the crew and the hours
+ * still belong to the same shift, or a day with 2 hands over 12 h and 3 over 4 h
+ * reads as 5 hands over 16 h - eighty labour-hours where the plant spent thirty-
+ * six.
+ */
+function dailyUnits(units, keyOf) {
+  const byKey = new Map();
+  for (const u of units) {
+    const id = keyOf(u);
+    const mapKey = `${id}|${u.day}`;
+    // Built field by field rather than spread off the first shift: `workers`,
+    // `hours` and `util` belong to that one shift, and a day carrying one
+    // shift's crew is a figure somebody will eventually read as the day's.
+    const d = byKey.get(mapKey) ?? {
+      key: id,
+      day: u.day,
+      machineId: u.machineId ?? null,
+      machine: u.machine ?? null,
+      quality: u.quality ?? null,
+      out: 0,
+      kwh: 0,
+      labourHours: 0,
+      shifts: 0,
+    };
+    d.out += u.out ?? 0;
+    d.kwh += u.kwh ?? 0;
+    d.labourHours += (u.workers ?? 0) * (u.hours ?? 0);
+    d.shifts += 1;
+    byKey.set(mapKey, d);
+  }
+  return [...byKey.values()].map((d) => ({
+    ...d,
+    pmh: d.out > 0 && d.labourHours > 0 ? d.out / d.labourHours : null,
+    kwhkg: d.out > 0 && d.kwh > 0 ? d.kwh / d.out : null,
+  }));
+}
+
+/**
  * Yield per batch. A batch is charged in one shift and finishes in another, so
  * it is attributed to the shift its R4 output was weighed in - that is the
  * shift whose crew the number actually reflects.
@@ -325,7 +372,8 @@ export const efficiencyService = {
             value: round(u.pmh),
             baseline: round(bp),
             warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
-            ...idealFor(idealKey.specialPerManHour(u.quality), u.pmh, ideals),
+            // No ideal here: the manager's benchmark for this figure is set
+            // against the day, so the comparison is on the day card below.
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (total crew × total hours)',
@@ -346,7 +394,6 @@ export const efficiencyService = {
             value: round(u.kwhkg, 3),
             baseline: round(be, 3),
             warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
-            ...idealFor(idealKey.specialKwhPerKg(u.quality), u.kwhkg, ideals, 3),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'total energy ÷ output',
@@ -401,7 +448,7 @@ export const efficiencyService = {
             value: round(u.pmh, 1),
             baseline: round(bp, 1),
             warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
-            ...idealFor(idealKey.perManHour(u.machineId), u.pmh, ideals, 1),
+            // The benchmark for this one is per day - see the day card below.
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (crew × hours)',
@@ -422,7 +469,6 @@ export const efficiencyService = {
             value: round(u.kwhkg, 3),
             baseline: round(be, 3),
             warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
-            ...idealFor(idealKey.kwhPerKg(u.machineId), u.kwhkg, ideals, 3),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'energy ÷ output',
@@ -594,6 +640,107 @@ export const efficiencyService = {
       };
     });
 
+    /**
+     * The two efficiency benchmarks, against the day.
+     *
+     * Per day and not per shift because that is what the plant sets them as, and
+     * the difference is not academic: a night shift that ran four hours on a line
+     * the day shift had already warmed up is not a worse crew, and holding each
+     * half of a day against a whole-day target would report it as one. The shift
+     * cards above still carry both figures against the plant's own median, which
+     * is the question they were built to answer.
+     *
+     * Both lines are folded the same way and rendered from one list, so a grinder
+     * and a grade of the special line cannot end up compared by different
+     * arithmetic. Every card is keyed on the benchmark it is measured against.
+     */
+    const dayOf = (units, keyOf, idealKeys, describe) => {
+      const daily = dailyUnits(units, keyOf);
+      const basePmh = baselineBy(daily, (d) => d.key, (d) => d.pmh);
+      const baseKwh = baselineBy(daily, (d) => d.key, (d) => d.kwhkg);
+
+      return daily
+        .filter((d) => d.day === date)
+        .sort((a, b) => (a.key < b.key ? -1 : 1))
+        .map((d) => {
+          const bp = basePmh[d.key] ?? null;
+          const be = baseKwh[d.key] ?? null;
+          const spread = `${d.shifts} shift${d.shifts === 1 ? '' : 's'} · ${round(d.out, 0)} kg · ${round(d.labourHours, 1)} labour-h`;
+          return {
+            key: `day|${keyOf(d)}`,
+            line: 'day',
+            label: describe(d),
+            out: round(d.out, 0),
+            metrics: [
+              {
+                key: 'kwhkg',
+                label: 'Electricity (kWh/kg)',
+                unit: 'kWh/kg',
+                value: round(d.kwhkg, 3),
+                baseline: round(be, 3),
+                baselineLabel: `usual ${round(be, 3) ?? '—'} · ${spread}`,
+                warn: d.kwhkg != null && be != null && d.kwhkg > be * TH.energy,
+                ...idealFor(idealKeys.kwh(d), d.kwhkg, ideals, 3),
+                calc: d.kwhkg == null ? null : {
+                  title: 'Electricity (kWh / kg) · whole day',
+                  formula: "the day's energy ÷ the day's output",
+                  lines: [
+                    `energy = ${round(d.kwh, 1)} kWh over ${d.shifts} shift${d.shifts === 1 ? '' : 's'}`,
+                    `output = ${round(d.out, 0)} kg`,
+                    `= ${round(d.kwh, 1)} ÷ ${round(d.out, 0)}`,
+                  ],
+                  result: `${round(d.kwhkg, 3)} kWh/kg`,
+                  note: 'Measured over the whole day, which is how the ideal is set.',
+                },
+              },
+              {
+                key: 'pmh',
+                label: 'Labour productivity',
+                unit: 'kg/man-hour',
+                value: round(d.pmh, 1),
+                baseline: round(bp, 1),
+                baselineLabel: `usual ${round(bp, 1) ?? '—'} · ${spread}`,
+                warn: d.pmh != null && bp != null && d.pmh < bp * TH.labour,
+                ...idealFor(idealKeys.pmh(d), d.pmh, ideals, 1),
+                calc: d.pmh == null ? null : {
+                  title: 'Labour productivity · whole day',
+                  formula: "the day's output ÷ the day's labour-hours",
+                  lines: [
+                    `output = ${round(d.out, 0)} kg`,
+                    // Crew × hours is worked out inside each shift and then added.
+                    // Summing crew across the day and multiplying would price a
+                    // day of 2 hands over 12 h and 3 over 4 h as eighty
+                    // labour-hours, where the plant spent thirty-six.
+                    `labour = ${round(d.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
+                    `= ${round(d.out, 0)} ÷ ${round(d.labourHours, 1)}`,
+                  ],
+                  result: `${round(d.pmh, 1)} kg/man-hour`,
+                  note: 'Measured over the whole day, which is how the ideal is set.',
+                },
+              },
+            ],
+          };
+        });
+    };
+
+    const days = [
+      ...dayOf(
+        grindAll,
+        (u) => u.machineId,
+        { kwh: (d) => idealKey.kwhPerKg(d.key), pmh: (d) => idealKey.perManHour(d.key) },
+        (d) => d.machine ?? d.key,
+      ),
+      ...dayOf(
+        refAll,
+        (u) => u.quality,
+        {
+          kwh: (d) => idealKey.specialKwhPerKg(d.key),
+          pmh: (d) => idealKey.specialPerManHour(d.key),
+        },
+        (d) => `Special line · ${d.key}`,
+      ),
+    ];
+
     let kwh = 0;
     let out = 0;
     for (const r of shiftRows) {
@@ -609,6 +756,12 @@ export const efficiencyService = {
       grinders,
       coarse,
       autoclaves,
+      /**
+       * kWh/kg and kg/man-hour for the whole day, per grinder and per grade of
+       * the special line - the granularity the manager sets those two at, and so
+       * the only place they are compared with a target.
+       */
+      days,
       yields,
       thresholds: TH,
       /**
@@ -655,6 +808,42 @@ export const efficiencyService = {
       .catch(() => ({ rows: [] }));
     return rows;
   },
+
+  /**
+   * Every reason recorded across a window of days, newest first.
+   *
+   * The card on the Efficiency tab shows a shift's own reasons, which answers
+   * "why did this shift miss" and cannot answer "what has been going wrong this
+   * month" - and the second is the question a record like this is kept for. The
+   * window is filtered here rather than in the query, which is how every other
+   * report in this service windows its rows: the table is one row per explained
+   * miss, so there is no page of them to stream.
+   */
+  async varianceReasonsIn({ from, to } = {}) {
+    const rows = await reasons.all({}, { sort: 'created_at' }).catch(() => []);
+    return rows
+      .filter((r) => {
+        const day = String(r.shift_date ?? '').slice(0, 10);
+        if (!day) return !from && !to;
+        return (!from || day >= from) && (!to || day <= to);
+      })
+      .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+  },
+
+  /**
+   * Corrects a reason that was typed wrong.
+   *
+   * The reason text only. The date, the shift, the parameter and the two figures
+   * are what the record *is* - a reason moved onto a different parameter, or
+   * re-pointed at a different day's numbers, is not a correction but a second
+   * record wearing the first one's id. Getting those wrong is fixed by writing
+   * the right one, which the screen already allows.
+   */
+  updateVarianceReason: (id, payload = {}) =>
+    reasons.update(id, {
+      reason: payload.reason,
+      entered_by: payload.enteredBy ?? null,
+    }),
 
   /**
    * `ideal` and `actual` are stored as the screen had them, not looked up again

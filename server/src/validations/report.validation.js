@@ -49,6 +49,18 @@ export const varianceReasonSchema = z.object({
 });
 
 /**
+ * Correcting the wording of a reason already recorded.
+ *
+ * The text and who wrote it, and nothing else. The day, the shift, the parameter
+ * and the two figures are what the record is - re-pointing one at a different
+ * parameter would be a second record wearing the first one's id.
+ */
+export const varianceReasonEditSchema = z.object({
+  reason: z.string().min(1).max(1000),
+  enteredBy: z.string().max(120).optional().nullable(),
+});
+
+/**
  * A labour rate coming into force on a date.
  *
  * Either half prices it: rupees an hour outright, or the day wage over the

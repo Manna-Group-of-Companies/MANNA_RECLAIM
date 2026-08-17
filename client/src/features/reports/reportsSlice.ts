@@ -15,6 +15,7 @@ import type {
   RunFilters,
   ShiftEfficiency,
   ShiftOption,
+  VarianceReason,
 } from '@/types/models';
 
 interface ReportsState {
@@ -26,6 +27,8 @@ interface ReportsState {
   filters: RunFilters | null;
   shifts: ShiftOption[];
   shiftEfficiency: ShiftEfficiency | null;
+  /** Every reason recorded over the window on the picker - the month's review. */
+  varianceReasons: VarianceReason[];
   downtime: DowntimeReport | null;
   downtimeDetail: DowntimeDetail[];
   loading: boolean;
@@ -40,6 +43,7 @@ const initialState: ReportsState = {
   filters: null,
   shifts: [],
   shiftEfficiency: null,
+  varianceReasons: [],
   downtime: null,
   downtimeDetail: [],
   loading: false,
@@ -115,6 +119,32 @@ export const addVarianceReason = createAsyncThunk(
   async (payload: VarianceReasonPayload, { rejectWithValue }) => {
     try {
       return await reportService.addVarianceReason(payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+/** The month's reasons, for review rather than for one shift's cards. */
+export const fetchVarianceReasons = createAsyncThunk(
+  'reports/varianceReasons',
+  async (range: DateRange | undefined, { rejectWithValue }) => {
+    try {
+      return await reportService.varianceReasons(range);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+export const updateVarianceReason = createAsyncThunk(
+  'reports/updateVarianceReason',
+  async (
+    { id, reason, enteredBy }: { id: string; reason: string; enteredBy?: string | null },
+    { rejectWithValue },
+  ) => {
+    try {
+      return await reportService.updateVarianceReason(id, { reason, enteredBy });
     } catch (err) {
       return rejectWithValue(fail(err));
     }
@@ -202,6 +232,21 @@ const reportsSlice = createSlice({
             action.payload,
             ...(state.shiftEfficiency.varianceReasons ?? []),
           ];
+        }
+        state.varianceReasons = [action.payload, ...state.varianceReasons];
+      })
+      .addCase(fetchVarianceReasons.fulfilled, (state, action) => {
+        state.varianceReasons = action.payload;
+      })
+      // The same row is on the shift's cards and in the month's review, so a
+      // correction has to land in both or the screen shows the old wording
+      // beside the new one.
+      .addCase(updateVarianceReason.fulfilled, (state, action) => {
+        const replace = (rows: VarianceReason[]) =>
+          rows.map((r) => (r.id === action.payload.id ? action.payload : r));
+        state.varianceReasons = replace(state.varianceReasons);
+        if (state.shiftEfficiency?.varianceReasons) {
+          state.shiftEfficiency.varianceReasons = replace(state.shiftEfficiency.varianceReasons);
         }
       })
       .addCase(fetchDowntime.pending, (state) => {

@@ -80,6 +80,27 @@ export const addEfficiencyNote = asyncHandler(async (req, res) =>
  * shift can be one and not the other, and mixing them would make both unreadable
  * afterwards.
  */
+/**
+ * Every reason across a window of days - the review the record is kept for. The
+ * cards on the Efficiency tab answer "why did this shift miss"; this answers
+ * "what has been going wrong", which is the one worth reading at a month's end.
+ */
+export const varianceReasons = asyncHandler(async (req, res) =>
+  ok(res, await efficiencyService.varianceReasonsIn(req.query)),
+);
+
+/** Corrects the wording. What the reason is *about* is not editable - see the service. */
+export const updateVarianceReason = asyncHandler(async (req, res) =>
+  ok(
+    res,
+    await efficiencyService.updateVarianceReason(req.params.id, {
+      ...req.body,
+      enteredBy: req.body.enteredBy ?? req.user?.name,
+    }),
+    'Reason updated',
+  ),
+);
+
 export const addVarianceReason = asyncHandler(async (req, res) =>
   created(
     res,

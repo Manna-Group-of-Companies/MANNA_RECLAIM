@@ -105,6 +105,26 @@ export const reportService = {
     return res.data.data;
   },
 
+  /**
+   * Every reason across a window of days. The cards answer "why did this shift
+   * miss"; this answers "what has been going wrong", which is the question worth
+   * asking at a month's end.
+   */
+  varianceReasons: (range?: DateRange) =>
+    get<VarianceReason[]>(endpoints.reports.varianceReasons, range),
+
+  /** Corrects the wording. What the reason is about is not editable. */
+  async updateVarianceReason(
+    id: string,
+    payload: { reason: string; enteredBy?: string | null },
+  ): Promise<VarianceReason> {
+    const res = await axiosClient.patch<ApiEnvelope<VarianceReason>>(
+      endpoints.reports.varianceReasonById(id),
+      payload,
+    );
+    return res.data.data;
+  },
+
   downtime: (params?: { month?: string }) => get<DowntimeReport>(endpoints.reports.downtime, params),
 
   downtimeDetail: (params: { month?: string; machineId: string }) =>

@@ -128,17 +128,15 @@ test('the sheet keeps every declared benchmark and drops anything else', async (
   assert.equal(api.tables.ideal_values[0].data.nonsense, undefined);
 });
 
-test('a shortfall is flagged, and beating the target is not', async () => {
+test('production is compared per shift, which is how it is set', async () => {
   const api = await startApi({
     tables: seed({
-      'prod.GRD_K': 1200, // made 1000 - short
-      'pmh.GRD_K': 40, // made 50 kg/man-hour - beaten
+      'prod.GRD_K': 1200, // made 1000 in the shift - short
     }),
   });
 
   const shift = await shiftOf(api);
   const out = metric(shift.grinders, 'grind|GRD_K', 'out');
-  const pmh = metric(shift.grinders, 'grind|GRD_K', 'pmh');
 
   assert.equal(out.value, 1000);
   assert.equal(out.ideal, 1200);
@@ -149,23 +147,64 @@ test('a shortfall is flagged, and beating the target is not', async () => {
   // rather than to a card on a screen that may be laid out differently later.
   assert.equal(out.parameter, 'prod.GRD_K');
 
-  assert.equal(pmh.value, 50);
-  assert.equal(pmh.variance, 10);
-  assert.equal(pmh.offTarget, false, 'beating a production target is not a shortfall');
+  // And the two day-level benchmarks are not also compared here, or the same
+  // target would be answered for twice under one key - once for each shift.
+  const pmh = metric(shift.grinders, 'grind|GRD_K', 'pmh');
+  assert.equal(pmh.ideal, undefined, 'labour productivity is judged over the day');
 });
 
-test('energy is compared the other way up - more kWh per kg is worse', async () => {
-  const api = await startApi({ tables: seed({ 'kwhkg.GRD_K': 0.4 }) });
+test('energy and labour productivity are compared over the whole day', async () => {
+  // Two shifts on the one grinder: 1000 kg on 20 labour-hours at 500 kWh, then
+  // 500 kg on 20 at 700 kWh. The day is 1500 kg, 40 labour-hours, 1200 kWh -
+  // 0.8 kWh/kg and 37.5 kg/man-hour, neither of which is either shift's figure.
+  const api = await startApi({
+    tables: {
+      ...seed({ 'kwhkg.GRD_K': 0.6, 'pmh.GRD_K': 40 }),
+      runs: [
+        grinderRun(),
+        grinderRun({ id: 'run-grd-n', shift: 'Night', weight_kg: 500, kwh: 700 }),
+      ],
+    },
+  });
 
-  const kwh = metric((await shiftOf(api)).grinders, 'grind|GRD_K', 'kwhkg');
-  assert.equal(kwh.value, 0.5, '500 kWh over 1000 kg');
-  assert.equal(kwh.ideal, 0.4);
-  assert.equal(kwh.variance, 0.1);
+  const day = (await shiftOf(api)).days;
+  const kwh = metric(day, 'day|GRD_K', 'kwhkg');
+  const pmh = metric(day, 'day|GRD_K', 'pmh');
+
+  assert.equal(kwh.value, 0.8, '1200 kWh over 1500 kg, both shifts');
+  assert.equal(kwh.ideal, 0.6);
   assert.equal(kwh.offTarget, true, 'over the energy target is a miss, not a win');
 
-  const under = await startApi({ tables: seed({ 'kwhkg.GRD_K': 0.6 }) });
-  const better = metric((await shiftOf(under)).grinders, 'grind|GRD_K', 'kwhkg');
-  assert.equal(better.offTarget, false, 'under the energy target is a win');
+  assert.equal(pmh.value, 37.5, '1500 kg over 40 labour-hours');
+  assert.equal(pmh.offTarget, true);
+  assert.equal(pmh.parameter, 'pmh.GRD_K');
+});
+
+test('a day’s labour-hours are worked out inside each shift, then added', async () => {
+  // 2 hands over 12 h, then 3 over 4 h. That is 24 + 12 = 36 labour-hours.
+  // Summing the crews and multiplying by the summed hours would say 5 × 16 = 80,
+  // and report the day as less than half as productive as it was.
+  const api = await startApi({
+    tables: {
+      ...seed(null),
+      runs: [
+        grinderRun({ workers: 2, hours_run: 12, weight_kg: 720 }),
+        grinderRun({ id: 'run-grd-n', shift: 'Night', workers: 3, hours_run: 4, weight_kg: 360 }),
+      ],
+    },
+  });
+
+  const pmh = metric((await shiftOf(api)).days, 'day|GRD_K', 'pmh');
+  assert.equal(pmh.value, 30, '1080 kg over 36 labour-hours');
+});
+
+test('energy under the target is a win, not a miss', async () => {
+  const api = await startApi({ tables: seed({ 'kwhkg.GRD_K': 0.6 }) });
+
+  const kwh = metric((await shiftOf(api)).days, 'day|GRD_K', 'kwhkg');
+  assert.equal(kwh.value, 0.5, '500 kWh over 1000 kg');
+  assert.equal(kwh.variance, -0.1);
+  assert.equal(kwh.offTarget, false, 'under the energy target is a win');
 });
 
 test('an unset benchmark compares to nothing rather than to nought', async () => {
@@ -173,7 +212,7 @@ test('an unset benchmark compares to nothing rather than to nought', async () =>
   const shift = await shiftOf(api);
 
   assert.equal(shift.idealsSet, false, 'the screen has to tell "no target yet" from "on target"');
-  const flagged = [...shift.grinders, ...shift.coarse, ...shift.autoclaves]
+  const flagged = [...shift.grinders, ...shift.coarse, ...shift.autoclaves, ...shift.days]
     .flatMap((c) => c.metrics)
     .filter((m) => m.offTarget);
   assert.deepEqual(flagged, [], 'an empty sheet flags nothing');
@@ -237,6 +276,66 @@ test('a reason keeps the two numbers it was written about', async () => {
   assert.equal(shift.varianceReasons[0].reason, 'Feedstock ran out at 14:00');
 });
 
+test('the month’s reasons read back together, and the window holds', async () => {
+  const api = await startApi({ tables: seed({ 'prod.GRD_K': 1200 }) });
+
+  const write = (date, reason) =>
+    api.call('/reports/variance-reasons', {
+      method: 'POST',
+      body: { date, shift: 'Day', parameter: 'prod.GRD_K', ideal: 1200, actual: 1000, reason },
+    });
+
+  await write('2026-08-01', 'Feedstock ran out');
+  await write('2026-08-30', 'Grinder 1 belt');
+  await write('2026-09-02', 'Next month');
+
+  const inAugust = await api.call('/reports/variance-reasons?from=2026-08-01&to=2026-08-31');
+  assert.equal(inAugust.status, 200);
+  const rows = (await inAugust.json()).data;
+
+  assert.deepEqual(
+    rows.map((r) => r.reason).sort(),
+    ['Feedstock ran out', 'Grinder 1 belt'],
+    'the window is the month asked for, not the whole record',
+  );
+});
+
+test('a reason’s wording can be corrected; what it is about cannot move', async () => {
+  const api = await startApi({ tables: seed({ 'prod.GRD_K': 1200 }) });
+
+  const posted = await api.call('/reports/variance-reasons', {
+    method: 'POST',
+    body: {
+      date: DAY,
+      shift: 'Day',
+      parameter: 'prod.GRD_K',
+      ideal: 1200,
+      actual: 1000,
+      reason: 'Feedstok ran out',
+    },
+  });
+  const { id } = (await posted.json()).data;
+
+  const fixed = await api.call(`/reports/variance-reasons/${id}`, {
+    method: 'PATCH',
+    body: {
+      reason: 'Feedstock ran out at 14:00',
+      // Sent and ignored. Re-pointing a reason at another parameter, or at other
+      // figures, would be a second record wearing this one's id.
+      parameter: 'kwhkg.GRD_K',
+      ideal: 5,
+      actual: 5,
+    },
+  });
+  assert.equal(fixed.status, 200);
+
+  const row = api.tables.variance_reasons[0];
+  assert.equal(row.reason, 'Feedstock ran out at 14:00');
+  assert.equal(row.parameter, 'prod.GRD_K', 'the parameter did not move');
+  assert.equal(row.ideal, 1200, 'the figures it was written about did not move');
+  assert.equal(row.actual, 1000);
+});
+
 test('the benchmarks are the back office’s, to read and to move', async () => {
   const api = await startApi({ tables: seed({ 'prod.GRD_K': 1200 }) });
 
@@ -257,6 +356,9 @@ test('the benchmarks are the back office’s, to read and to move', async () => 
       body: { date: DAY, parameter: 'prod.GRD_K', reason: 'anything' },
     });
     assert.equal(reason.status, 403, `${role} may not answer for them`);
+
+    const review = await api.call('/reports/variance-reasons', { role });
+    assert.equal(review.status, 403, `${role} may not read the answers back`);
   }
 
   assert.equal(api.tables.ideal_values[0].data['prod.GRD_K'], 1200, 'nothing moved');

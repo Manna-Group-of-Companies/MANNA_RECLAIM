@@ -137,8 +137,13 @@ export const endpoints = {
     shifts: '/reports/shifts',
     shiftEfficiency: '/reports/shift-efficiency',
     efficiencyNotes: '/reports/efficiency-notes',
-    /** Why an actual missed its ideal - read back with the shift, written here. */
+    /**
+     * Why an actual missed its ideal. A shift's own come back with it on
+     * shiftEfficiency; this is the review across a window of days, which is what
+     * the record is kept for. The PATCH corrects the wording only.
+     */
     varianceReasons: '/reports/variance-reasons',
+    varianceReasonById: (id: string) => `/reports/variance-reasons/${id}`,
     /**
      * The machine log as a spreadsheet - every logged run, one column set for
      * the whole plant. The only route that answers with a file rather than the
