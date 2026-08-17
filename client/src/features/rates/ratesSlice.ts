@@ -2,7 +2,7 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { rateService } from '@/api/services/rate.service';
 import { toRequestError } from '@/api/axiosClient';
 import { PRICE_LIST } from '@/config/constants';
-import type { CostRates, Rate } from '@/types/models';
+import type { CostRates, IdealValues, Rate } from '@/types/models';
 
 interface RatesState {
   rates: Rate[];
@@ -10,6 +10,14 @@ interface RatesState {
   priceList: Record<string, number>;
   /** The plant's cost inputs - what the back office's Rates tab edits. */
   costRates: CostRates | null;
+  /**
+   * What the plant should be making, as the manager sets it. Edited on the same
+   * tab as the cost rates and saved separately: one is what a thing costs and
+   * the other is what a shift is judged against, and a manager correcting a
+   * firewood rate has no business also re-writing every target.
+   */
+  idealValues: IdealValues | null;
+  savingIdeals: boolean;
   saving: boolean;
   loading: boolean;
   error: string | null;
@@ -20,6 +28,8 @@ const initialState: RatesState = {
   customers: [],
   priceList: PRICE_LIST,
   costRates: null,
+  idealValues: null,
+  savingIdeals: false,
   saving: false,
   loading: false,
   error: null,
@@ -65,6 +75,28 @@ export const saveCostRates = createAsyncThunk(
   },
 );
 
+export const fetchIdealValues = createAsyncThunk(
+  'rates/idealValues',
+  async (_, { rejectWithValue }) => {
+    try {
+      return await rateService.idealValues();
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
+export const saveIdealValues = createAsyncThunk(
+  'rates/saveIdealValues',
+  async (data: Record<string, number | null>, { rejectWithValue }) => {
+    try {
+      return await rateService.saveIdealValues(data);
+    } catch (err) {
+      return rejectWithValue(toRequestError(err).message);
+    }
+  },
+);
+
 const ratesSlice = createSlice({
   name: 'rates',
   initialState,
@@ -97,6 +129,20 @@ const ratesSlice = createSlice({
       })
       .addCase(saveCostRates.rejected, (state, action) => {
         state.saving = false;
+        state.error = action.payload as string;
+      })
+      .addCase(fetchIdealValues.fulfilled, (state, action) => {
+        state.idealValues = action.payload;
+      })
+      .addCase(saveIdealValues.pending, (state) => {
+        state.savingIdeals = true;
+      })
+      .addCase(saveIdealValues.fulfilled, (state, action) => {
+        state.savingIdeals = false;
+        state.idealValues = action.payload;
+      })
+      .addCase(saveIdealValues.rejected, (state, action) => {
+        state.savingIdeals = false;
         state.error = action.payload as string;
       })
       .addCase(saveRate.fulfilled, (state, action) => {

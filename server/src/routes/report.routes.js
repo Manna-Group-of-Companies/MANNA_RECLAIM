@@ -4,7 +4,11 @@ import { authenticate } from '../middlewares/auth.middleware.js';
 import { adminOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { dateRange } from '../validations/common.validation.js';
-import { efficiencyNoteSchema, shiftQuery } from '../validations/report.validation.js';
+import {
+  efficiencyNoteSchema,
+  shiftQuery,
+  varianceReasonSchema,
+} from '../validations/report.validation.js';
 
 const router = Router();
 
@@ -24,6 +28,17 @@ router.post(
   adminOnly,
   validate({ body: efficiencyNoteSchema }),
   reports.addEfficiencyNote,
+);
+/**
+ * Why an actual missed its ideal. Read back with the shift on
+ * /shift-efficiency; written here, by the back office only - the benchmark is
+ * the manager's and so is the answer for missing it.
+ */
+router.post(
+  '/variance-reasons',
+  adminOnly,
+  validate({ body: varianceReasonSchema }),
+  reports.addVarianceReason,
 );
 // The machine log as a spreadsheet. Admin only for the same reason /costing is:
 // it carries every run the plant has ever logged, with what each cost.

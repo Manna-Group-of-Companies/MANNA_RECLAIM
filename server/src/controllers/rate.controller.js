@@ -56,6 +56,24 @@ export const saveCostRates = asyncHandler(async (req, res) =>
 );
 
 /**
+ * The plant's benchmarks - what a shift should produce, how many charges a
+ * vessel should take in a day, and what a kg should cost in energy and in
+ * labour-hours.
+ *
+ * Behind the same door as the cost rates, and for a related reason: these are
+ * what the back office judges a shift against, so whoever can move them can move
+ * what counts as a good shift. Read by the admin Rates page, which edits them,
+ * and by the Efficiency screen, which shows every actual beside its ideal.
+ */
+export const idealValues = asyncHandler(async (_req, res) =>
+  ok(res, await rateService.idealValues()),
+);
+
+export const saveIdealValues = asyncHandler(async (req, res) =>
+  ok(res, await rateService.saveIdealValues(req.body.data, req.user?.name), 'Ideal values saved'),
+);
+
+/**
  * The labour rate through time - what an hour of a labourer cost, and from
  * when. Read and written by the back office only: it is what the picking gang,
  * the cracker crew and the grinders are all costed at, so it moves the plant's

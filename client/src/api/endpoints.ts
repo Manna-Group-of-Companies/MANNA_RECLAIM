@@ -105,6 +105,13 @@ export const endpoints = {
     quote: '/rates/quote',
     costRates: '/rates/cost-rates',
     /**
+     * The manager's benchmarks - what a shift ought to produce, how many charges
+     * a vessel ought to take, what a kg ought to cost in energy and in
+     * labour-hours. Beside the cost rates because they are edited on the same
+     * screen and behind the same door: they are what a shift is judged against.
+     */
+    idealValues: '/rates/ideal-values',
+    /**
      * The two figures a loading job is costed by, for the dispatch form's
      * running total. Its own route rather than the whole cost model above,
      * which stays the back office's - the yard raises dispatch notes, and that
@@ -130,6 +137,8 @@ export const endpoints = {
     shifts: '/reports/shifts',
     shiftEfficiency: '/reports/shift-efficiency',
     efficiencyNotes: '/reports/efficiency-notes',
+    /** Why an actual missed its ideal - read back with the shift, written here. */
+    varianceReasons: '/reports/variance-reasons',
     /**
      * The machine log as a spreadsheet - every logged run, one column set for
      * the whole plant. The only route that answers with a file rather than the

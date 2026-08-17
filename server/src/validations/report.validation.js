@@ -22,6 +22,33 @@ export const costRatesSchema = z.object({
 });
 
 /**
+ * The manager's benchmarks, saved as one sheet. Same shape as the cost rates
+ * above: unknown keys are dropped by the service against IDEAL_VALUE_KEYS, and a
+ * blank clears a target rather than setting it to nought.
+ */
+export const idealValuesSchema = costRatesSchema;
+
+/**
+ * Why an actual missed its ideal.
+ *
+ * `parameter` is the benchmark's own key rather than a card's title, so the
+ * reason stays attached to the figure it explains even if the screen is laid out
+ * differently later. `ideal` and `actual` come from the client because they are
+ * what it had on screen when the manager was asked - the point is to keep the
+ * two numbers the reason was written about, not today's.
+ */
+export const varianceReasonSchema = z.object({
+  date: isoDate,
+  shift: shiftEnum.optional().nullable(),
+  parameter: z.string().min(1).max(120),
+  label: z.string().max(200).optional().nullable(),
+  ideal: z.coerce.number().optional().nullable(),
+  actual: z.coerce.number().optional().nullable(),
+  reason: z.string().min(1).max(1000),
+  enteredBy: z.string().max(120).optional().nullable(),
+});
+
+/**
  * A labour rate coming into force on a date.
  *
  * Either half prices it: rupees an hour outright, or the day wage over the

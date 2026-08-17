@@ -11,6 +11,7 @@ import type {
   RunFilters,
   ShiftEfficiency,
   ShiftOption,
+  VarianceReason,
 } from '@/types/models';
 
 export interface DateRange {
@@ -47,6 +48,26 @@ export interface EfficiencyNotePayload {
   enteredBy?: string | null;
 }
 
+/**
+ * Why an actual missed its ideal.
+ *
+ * `parameter` is the benchmark's own key rather than the card's title, so the
+ * reason stays attached to the figure it explains however the screen is laid out
+ * later. `ideal` and `actual` are sent because they are what was on screen when
+ * the manager was asked - the record is meant to keep the two numbers the reason
+ * was written about, not whatever the target says next month.
+ */
+export interface VarianceReasonPayload {
+  date: string;
+  shift?: string | null;
+  parameter: string;
+  label?: string | null;
+  ideal?: number | null;
+  actual?: number | null;
+  reason: string;
+  enteredBy?: string | null;
+}
+
 const get = async <T>(url: string, params?: Record<string, unknown>): Promise<T> => {
   const res = await axiosClient.get<ApiEnvelope<T>>(url, { params });
   return res.data.data;
@@ -71,6 +92,14 @@ export const reportService = {
   async addEfficiencyNote(payload: EfficiencyNotePayload): Promise<EfficiencyNote> {
     const res = await axiosClient.post<ApiEnvelope<EfficiencyNote>>(
       endpoints.reports.efficiencyNotes,
+      payload,
+    );
+    return res.data.data;
+  },
+
+  async addVarianceReason(payload: VarianceReasonPayload): Promise<VarianceReason> {
+    const res = await axiosClient.post<ApiEnvelope<VarianceReason>>(
+      endpoints.reports.varianceReasons,
       payload,
     );
     return res.data.data;

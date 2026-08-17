@@ -1131,6 +1131,70 @@ create policy labour_rates_service on public.labour_rates
 
 
 -- -----------------------------------------------------------------------------
+-- 6f. What the plant should have made, beside what it did
+--
+-- The Efficiency tab measures the plant against its own median, which answers
+-- "is this shift worse than usual" and cannot answer "is usual any good". These
+-- two tables are the manager's answer to the second question: the benchmark, and
+-- why a shift missed it. See migrations/0014.
+--
+-- `ideal_values` is one row with every benchmark inside `data`, the shape
+-- cost_rates already uses - the set of figures grows as the plant measures more
+-- things, and a column per figure would be a migration every time it does.
+--
+-- `variance_reasons` is deliberately not efficiency_notes: that table holds a
+-- different sentence ("under what this plant normally manages"), and a shift
+-- that beat the median while missing the target is not the same note as one
+-- that did neither.
+-- -----------------------------------------------------------------------------
+create table if not exists public.ideal_values (
+  id         text primary key,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz,
+  updated_by text
+);
+
+alter table public.ideal_values enable row level security;
+
+drop policy if exists ideal_values_read on public.ideal_values;
+create policy ideal_values_read on public.ideal_values
+  for select to anon, authenticated using (true);
+
+drop policy if exists ideal_values_service on public.ideal_values;
+create policy ideal_values_service on public.ideal_values
+  for all to service_role using (true) with check (true);
+
+-- `ideal` and `actual` are snapshots taken when the reason was written, not
+-- lookups: a benchmark raised next month must not rewrite what last month's
+-- shortfall was measured against.
+create table if not exists public.variance_reasons (
+  id         text primary key,
+  shift_date date not null,
+  shift      text,
+  parameter  text not null,
+  label      text,
+  ideal      numeric,
+  actual     numeric,
+  reason     text not null,
+  entered_by text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists variance_reasons_shift_idx
+  on public.variance_reasons (shift_date, shift);
+
+alter table public.variance_reasons enable row level security;
+
+drop policy if exists variance_reasons_read on public.variance_reasons;
+create policy variance_reasons_read on public.variance_reasons
+  for select to anon, authenticated using (true);
+
+drop policy if exists variance_reasons_service on public.variance_reasons;
+create policy variance_reasons_service on public.variance_reasons
+  for all to service_role using (true) with check (true);
+
+
+-- -----------------------------------------------------------------------------
 -- 7. Posting a dispatch
 --
 -- Header and lines in one transaction, with the stock draw-down inside it.

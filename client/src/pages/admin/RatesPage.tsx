@@ -2,34 +2,49 @@ import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   fetchCostRates,
+  fetchIdealValues,
   fetchRateCard,
   saveCostRates,
+  saveIdealValues,
   saveRate,
 } from '@/features/rates/ratesSlice';
 import { BoModal } from '@/components/ui';
-import { COST_RATE_GROUPS, DISPATCH_GRADES } from '@/config/constants';
+import { COST_RATE_GROUPS, DISPATCH_GRADES, IDEAL_VALUE_GROUPS } from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
 import type { DispatchGrade, Rate } from '@/types/models';
 
 const blankRate = { customer: '', grade: 'Special' as DispatchGrade, rate: '', note: '' };
 
+/** A form's worth of typed figures, ready to be sent. */
+const toNumbers = (values: Record<string, string>) =>
+  Object.fromEntries(
+    Object.entries(values).map(([k, v]) => [k, v.trim() === '' ? null : Number(v)]),
+  );
+
+const anyNotANumber = (data: Record<string, number | null>) =>
+  Object.values(data).some((v) => v != null && Number.isNaN(v));
+
 /**
  * back.html's Rates tab: the plant's cost inputs, which the Costing view is
- * priced from. The customer selling rates live underneath, since they are the
- * other half of "rates" and have nowhere else to be edited.
+ * priced from. The plant's ideal values sit under them - what a shift *should*
+ * make, as against what a thing costs - and the customer selling rates under
+ * those, since they are the other half of "rates" and have nowhere else to be
+ * edited.
  */
 export function RatesPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const { rates, costRates, saving } = useAppSelector((s) => s.rates);
+  const { rates, costRates, idealValues, saving, savingIdeals } = useAppSelector((s) => s.rates);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
 
   const [values, setValues] = useState<Record<string, string>>({});
+  const [ideals, setIdeals] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<typeof blankRate | null>(null);
 
   useEffect(() => {
     void dispatch(fetchCostRates());
+    void dispatch(fetchIdealValues());
     void dispatch(fetchRateCard());
   }, [dispatch, refreshTick]);
 
@@ -46,18 +61,51 @@ export function RatesPage() {
     );
   }, [costRates]);
 
-  const save = async () => {
-    const data = Object.fromEntries(
-      Object.entries(values).map(([k, v]) => [k, v.trim() === '' ? null : Number(v)]),
+  // The same rule for the benchmarks, and separately: the two halves of this
+  // page are saved by their own buttons, so seeding them together would let a
+  // refresh land in one while the other is being typed.
+  useEffect(() => {
+    if (!idealValues) return;
+    setIdeals((current) =>
+      Object.keys(current).length
+        ? current
+        : Object.fromEntries(
+            Object.entries(idealValues.data).map(([k, v]) => [k, v == null ? '' : String(v)]),
+          ),
     );
-    const bad = Object.entries(data).filter(([, v]) => v != null && Number.isNaN(v as number));
-    if (bad.length) {
+  }, [idealValues]);
+
+  const save = async () => {
+    const data = toNumbers(values);
+    if (anyNotANumber(data)) {
       notify('Every rate has to be a number', 'warn');
       return;
     }
     const result = await dispatch(saveCostRates(data));
     const okay = result.meta.requestStatus === 'fulfilled';
     notify(okay ? 'Rates saved' : 'Could not save the rates', okay ? 'ok' : 'err');
+  };
+
+  /**
+   * Saved on its own button rather than with the cost rates above. They are two
+   * different statements - what a thing costs, and what a shift ought to make -
+   * and a manager correcting a firewood rate should not also be re-posting every
+   * target on the page.
+   */
+  const saveIdeals = async () => {
+    const data = toNumbers(ideals);
+    if (anyNotANumber(data)) {
+      notify('Every ideal value has to be a number', 'warn');
+      return;
+    }
+    const negative = Object.values(data).some((v) => v != null && v < 0);
+    if (negative) {
+      notify('An ideal value cannot be negative', 'warn');
+      return;
+    }
+    const result = await dispatch(saveIdealValues(data));
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? 'Ideal values saved' : 'Could not save the ideal values', okay ? 'ok' : 'err');
   };
 
   const saveCustomerRate = async () => {
@@ -122,6 +170,52 @@ export function RatesPage() {
         {saving ? 'Saving…' : 'Save rates'}
       </button>
       <div className="sub mt-2 text-center">Saved figures load automatically for everyone.</div>
+
+      <div className="mx-0.5 mt-5">
+        <h1 className="text-lg">Ideal values</h1>
+        <div className="sub">
+          What the plant should be making. The Efficiency tab shows every figure it collects beside
+          its ideal here, flags the ones that fall short, and asks for a reason.
+          {idealValues?.updatedAt
+            ? ` Last saved ${dayLong(idealValues.updatedAt.slice(0, 10))}${idealValues.updatedBy ? ` by ${idealValues.updatedBy}` : ''}.`
+            : ''}
+        </div>
+        <div className="sub mt-1">
+          Leave a figure blank and nothing is compared against it — a blank is “no target set”, not
+          a target of zero.
+        </div>
+      </div>
+
+      {IDEAL_VALUE_GROUPS.map((group) => (
+        <div key={group.title} className="panel">
+          <div className="grouphead mt-0">
+            {group.title}
+            {group.note && <span className="muted font-normal"> ({group.note})</span>}
+          </div>
+          {group.fields.map((field) => (
+            <div key={field.key} className="field">
+              <label htmlFor={`id-${field.key}`}>
+                {field.label}
+                {field.unit && <span className="muted font-normal"> ({field.unit})</span>}
+              </label>
+              <input
+                id={`id-${field.key}`}
+                type="number"
+                inputMode="decimal"
+                min="0"
+                placeholder="not set"
+                value={ideals[field.key] ?? ''}
+                onChange={(e) => setIdeals({ ...ideals, [field.key]: e.target.value })}
+              />
+              {field.hint && <div className="sub mt-1">{field.hint}</div>}
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <button type="button" className="btn block mt-1" onClick={saveIdeals} disabled={savingIdeals}>
+        {savingIdeals ? 'Saving…' : 'Save ideal values'}
+      </button>
 
       <div className="grouphead">Customer selling rates</div>
       <div className="panel scroll-x mt-0 p-0">

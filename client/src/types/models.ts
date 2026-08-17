@@ -1052,6 +1052,24 @@ export interface EfficiencyMetric {
   baseline: number | null;
   baselineLabel?: string;
   warn: boolean;
+  /**
+   * The manager's benchmark for this figure, and how far off it the shift came.
+   *
+   * A different question from `baseline` above, and the two are deliberately
+   * both here: the baseline is what this plant normally manages and the ideal is
+   * what it is meant to manage, and a shift can be over one and under the other.
+   *
+   * `ideal` is null when nothing has been set, which is not the same as a target
+   * of zero - so `offTarget` stays false rather than flagging every line in a
+   * plant that has never filled the sheet in. `parameter` is the key a reason for
+   * the miss is filed under.
+   */
+  ideal?: number | null;
+  variance?: number | null;
+  variancePct?: number | null;
+  offTarget?: boolean;
+  parameter?: string | null;
+  idealLabel?: string | null;
   calc: {
     title: string;
     formula: string;
@@ -1076,6 +1094,9 @@ export interface EfficiencyCard {
   out?: number | null;
   workers?: number;
   hours?: number | null;
+  /** Coarse and autoclave cards name themselves - they are neither. */
+  label?: string;
+  line?: string;
 }
 
 export interface EfficiencyNote {
@@ -1089,15 +1110,51 @@ export interface EfficiencyNote {
   created_at?: string;
 }
 
+/**
+ * Why an actual missed the manager's ideal.
+ *
+ * Kept apart from EfficiencyNote above, which answers a different question -
+ * that one says the shift came in under what the plant normally manages, this
+ * one says it came in under what the plant is meant to manage. `ideal` and
+ * `actual` are the figures as they stood when the reason was written, so a
+ * benchmark raised later does not rewrite what was being explained.
+ */
+export interface VarianceReason {
+  id: string;
+  shift_date: string;
+  shift?: string | null;
+  parameter: string;
+  label?: string | null;
+  ideal?: number | null;
+  actual?: number | null;
+  reason: string;
+  entered_by?: string | null;
+  created_at?: string;
+}
+
 export interface ShiftEfficiency {
   date: string | null;
   shift: string | null;
   totals: { runs: number; outKg: number | null; kwh: number | null };
   refiners: EfficiencyCard[];
   grinders: EfficiencyCard[];
+  /** The coarse line, one card for the line - only R2 weighs. */
+  coarse: EfficiencyCard[];
+  /** Charges per vessel per day, which is the only count that is shift-proof. */
+  autoclaves: EfficiencyCard[];
   yields: EfficiencyCard[];
   notes: EfficiencyNote[];
+  varianceReasons: VarianceReason[];
+  /** Whether any benchmark has been set at all - "no target yet" is not "on target". */
+  idealsSet?: boolean;
   thresholds: { labour: number; energy: number; yield: number; utilisation: number };
+}
+
+/** The manager's benchmarks, as the Rates tab edits them. */
+export interface IdealValues {
+  data: Record<string, number | null>;
+  updatedAt: string | null;
+  updatedBy: string | null;
 }
 
 export interface DowntimeReport {

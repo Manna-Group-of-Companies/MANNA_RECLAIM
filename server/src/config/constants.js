@@ -375,6 +375,14 @@ export const TABLES = {
   machineTargets: 'machine_targets',
   // Why a shift under-performed, written by the back office when it flags a dip.
   efficiencyNotes: 'efficiency_notes',
+  /**
+   * What the plant *should* make - one row, id 'current', every benchmark inside
+   * `data`. The manager's own figures, as against efficiencyNotes' baselines,
+   * which are the plant's median of itself. See migrations/0014.
+   */
+  idealValues: 'ideal_values',
+  /** Why an actual missed its ideal, against the date, shift and parameter. */
+  varianceReasons: 'variance_reasons',
 };
 
 /**
@@ -517,5 +525,139 @@ export const LOADING_RATE_KEYS = {
   contractPerKg: 'loadingPerKg',
   labourPerHour: 'loadingLabourPerHour',
 };
+
+/**
+ * ---------------------------------------------------------------------------
+ * Ideal values - what the plant should be making, as the manager sets it
+ * ---------------------------------------------------------------------------
+ *
+ * EFFICIENCY_THRESHOLDS above measure the plant against its own median, which
+ * answers "is this shift worse than usual" and cannot answer "is usual any
+ * good": a line that has run 15% under its capacity for two years has a median
+ * that says so, and a screen that never once flags it. These are the other
+ * half - a figure somebody decided on, that the plant's own history cannot
+ * quietly drift away from.
+ *
+ * Every one of them is compared against a figure the app already collects, and
+ * that is the whole test for whether a benchmark belongs here: an ideal with
+ * nothing to sit beside is a number in a form.
+ */
+
+/**
+ * The lines that are given an ideal production per shift.
+ *
+ * The three grinders and the coarse line, each of which weighs a shift's output
+ * as one figure. The cracker is deliberately absent - it weighs nothing, because
+ * what it cracks is weighed downstream at the grinders, so an ideal against it
+ * would compare a target with a permanent blank.
+ *
+ * The special line is not here either, and for the opposite reason: it comes off
+ * in grades and is benchmarked per grade below.
+ */
+export const IDEAL_PRODUCTION_LINES = [
+  { key: 'GRD_K', label: 'Grinder 1' },
+  { key: 'GRD_S', label: 'Grinder 2' },
+  { key: 'GRD_O', label: 'Soorya Grinder' },
+  { key: 'COARSE', label: 'Coarse line' },
+];
+
+/** The grinders, which get an efficiency benchmark each. */
+export const IDEAL_GRINDERS = IDEAL_PRODUCTION_LINES.filter((l) => l.key !== 'COARSE');
+
+/**
+ * The autoclaves the plant runs, benchmarked on runs per day rather than per
+ * shift - a vessel is charged, cooked and emptied across whatever shift boundary
+ * falls in the middle, so counting a day's charges is the only count that does
+ * not depend on where the crew changed over.
+ *
+ * A and M only: N and O are seeded disabled and have been for the life of this
+ * project (see devSeed and schema.sql). If either is brought back, add it here
+ * and the comparison follows.
+ */
+export const IDEAL_AUTOCLAVES = [
+  { key: 'AC_A', label: 'Autoclave A' },
+  { key: 'AC_M', label: 'Autoclave M' },
+];
+
+/** The special line's benchmarks are per grade - see IDEAL_PRODUCTION_LINES. */
+export const SPECIAL_LINE_KEY = 'SPECIAL';
+
+/**
+ * How a benchmark is named inside `ideal_values.data`.
+ *
+ * Built rather than written out, so the form, the whitelist and the comparison
+ * cannot disagree about what a figure is called - a target saved under one
+ * spelling and read under another is a target that silently never applies.
+ */
+export const idealKey = {
+  production: (key) => `prod.${key}`,
+  specialProduction: (quality) => `prod.${SPECIAL_LINE_KEY}.${quality}`,
+  autoclaveRuns: (key) => `runs.${key}`,
+  kwhPerKg: (key) => `kwhkg.${key}`,
+  specialKwhPerKg: (quality) => `kwhkg.${SPECIAL_LINE_KEY}.${quality}`,
+  perManHour: (key) => `pmh.${key}`,
+  specialPerManHour: (quality) => `pmh.${SPECIAL_LINE_KEY}.${quality}`,
+};
+
+/**
+ * Every benchmark the manager may set, with what it is called on screen and the
+ * unit it is in. `lowerIsBetter` is what says which side of the ideal counts as
+ * a shortfall: more kg is better, fewer kWh per kg is better, and a comparison
+ * that does not know the difference flags every good shift on the energy line.
+ *
+ * The client mirrors this as IDEAL_VALUE_GROUPS in config/constants.ts, which is
+ * the same arrangement laid out as a form. Keep the keys in step.
+ */
+export const IDEAL_VALUE_FIELDS = [
+  ...IDEAL_PRODUCTION_LINES.map((line) => ({
+    key: idealKey.production(line.key),
+    label: `${line.label} — production`,
+    unit: 'kg/shift',
+    lowerIsBetter: false,
+  })),
+  ...QUALITIES.map((quality) => ({
+    key: idealKey.specialProduction(quality),
+    label: `Special line ${quality} — production`,
+    unit: 'kg/shift',
+    lowerIsBetter: false,
+  })),
+  ...IDEAL_AUTOCLAVES.map((vessel) => ({
+    key: idealKey.autoclaveRuns(vessel.key),
+    label: `${vessel.label} — runs`,
+    unit: 'runs/day',
+    lowerIsBetter: false,
+  })),
+  ...IDEAL_GRINDERS.map((grinder) => ({
+    key: idealKey.kwhPerKg(grinder.key),
+    label: `${grinder.label} — energy`,
+    unit: 'kWh/kg',
+    lowerIsBetter: true,
+  })),
+  ...QUALITIES.map((quality) => ({
+    key: idealKey.specialKwhPerKg(quality),
+    label: `Special line ${quality} — energy`,
+    unit: 'kWh/kg',
+    lowerIsBetter: true,
+  })),
+  ...IDEAL_GRINDERS.map((grinder) => ({
+    key: idealKey.perManHour(grinder.key),
+    label: `${grinder.label} — labour productivity`,
+    unit: 'kg/man-hour',
+    lowerIsBetter: false,
+  })),
+  ...QUALITIES.map((quality) => ({
+    key: idealKey.specialPerManHour(quality),
+    label: `Special line ${quality} — labour productivity`,
+    unit: 'kg/man-hour',
+    lowerIsBetter: false,
+  })),
+];
+
+/** The whitelist a save is filtered through - anything else is dropped. */
+export const IDEAL_VALUE_KEYS = IDEAL_VALUE_FIELDS.map((f) => f.key);
+
+const IDEAL_FIELD_BY_KEY = Object.fromEntries(IDEAL_VALUE_FIELDS.map((f) => [f.key, f]));
+
+export const idealFieldFor = (key) => IDEAL_FIELD_BY_KEY[key] ?? null;
 
 export default { ROLES, SHIFTS, QUALITIES, DISPATCH_GRADES, MACHINE_KINDS, PRICE_LIST, TABLES, VIEWS };

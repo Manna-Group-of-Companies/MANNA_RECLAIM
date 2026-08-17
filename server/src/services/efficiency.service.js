@@ -1,10 +1,14 @@
 import { crud } from './base.service.js';
+import { rateService } from './rate.service.js';
 import {
   TABLES,
   REFINER_IDS,
   GRINDER_IDS,
   SHIFT_MINUTES,
   EFFICIENCY_THRESHOLDS as TH,
+  IDEAL_AUTOCLAVES,
+  idealKey,
+  idealFieldFor,
 } from '../config/constants.js';
 
 /**
@@ -22,6 +26,7 @@ import {
 
 const runs = crud(TABLES.runs, { defaultSort: 'shift_date' });
 const notes = crud(TABLES.efficiencyNotes, { defaultSort: 'created_at' });
+const reasons = crud(TABLES.varianceReasons, { defaultSort: 'created_at' });
 
 const num = (v) => {
   if (v == null || v === '') return null;
@@ -148,6 +153,103 @@ function batchYields(rows) {
     .filter((u) => u.pct != null);
 }
 
+/**
+ * The coarse line's shift, as one unit.
+ *
+ * The line is two machines - PR1 breaks the charge down and R2 works it - and
+ * only R2 weighs, so a shift's coarse output is the sum of what the line weighed
+ * rather than anything per-machine. It has never had a card on this screen
+ * because it has no per-machine baseline worth drawing; it gets one now because
+ * the manager sets an ideal against it, and a target with nothing beside it is a
+ * number in a form.
+ */
+function coarseUnits(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    if (r.line !== 'coarse') continue;
+    const key = `${r.shift_date}|${r.shift ?? ''}`;
+    const u = byKey.get(key) ?? {
+      day: r.shift_date, shift: r.shift ?? '', out: 0, workers: 0, hours: 0, kwh: 0,
+    };
+    u.out += num(r.weight_kg) ?? 0;
+    u.workers += num(r.workers) ?? 0;
+    u.hours += runHours(r) ?? 0;
+    u.kwh += runKwh(r) ?? 0;
+    byKey.set(key, u);
+  }
+  return [...byKey.values()].filter((u) => u.out > 0);
+}
+
+/**
+ * How many charges each vessel took on a day.
+ *
+ * Counted per day rather than per shift on purpose: a vessel is charged, cooked
+ * and emptied across whatever shift boundary happens to fall in the middle, so a
+ * per-shift count would report the same day's work differently depending on when
+ * the crew changed over. The manager's benchmark is per day for the same reason.
+ *
+ * A run is one charge. The load is what opens it, so counting the runs on the
+ * vessel counts the charges it took.
+ */
+function autoclaveRunsByDay(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    if (r.kind !== 'autoclave' || !r.shift_date) continue;
+    const key = `${r.machine_id}|${r.shift_date}`;
+    const u = byKey.get(key) ?? {
+      machineId: r.machine_id, machine: r.machine ?? r.machine_id, day: r.shift_date, runs: 0,
+    };
+    u.runs += 1;
+    byKey.set(key, u);
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * One measured figure against the manager's benchmark for it.
+ *
+ * `offTarget` is the whole point of `lowerIsBetter`: more kg is better and fewer
+ * kWh per kg is better, and a comparison that does not know the difference flags
+ * every good shift the energy line ever has. A shift that beats its target is
+ * not flagged and is still shown its variance - the number is worth reading
+ * either way round.
+ *
+ * An unset benchmark compares to nothing and flags nothing. That is not the same
+ * as a target of zero, and it is why an unset figure is stored as null.
+ */
+function againstIdeal(value, ideal, { lowerIsBetter = false, digits = 2 } = {}) {
+  const target = ideal == null || !Number.isFinite(Number(ideal)) ? null : Number(ideal);
+  if (value == null || target == null) {
+    return { ideal: round(target, digits), variance: null, variancePct: null, offTarget: false };
+  }
+  const variance = value - target;
+  return {
+    ideal: round(target, digits),
+    variance: round(variance, digits),
+    // A target of nought has no percentage to be off by - anything over it is
+    // infinitely better, which is not a figure to put on a screen.
+    variancePct: target === 0 ? null : round((variance / target) * 100, 1),
+    offTarget: lowerIsBetter ? value > target : value < target,
+  };
+}
+
+/**
+ * The comparison attached to a metric, ready for the screen: the ideal, the
+ * variance, and the key a reason for it would be filed under.
+ *
+ * `parameter` travels with the metric rather than being rebuilt on the client,
+ * so a reason is filed against the benchmark's own key and stays attached to the
+ * figure it explains however the screen is laid out later.
+ */
+function idealFor(key, value, ideals, digits = 2) {
+  const field = idealFieldFor(key);
+  const comparison = againstIdeal(value, ideals?.[key], {
+    lowerIsBetter: field?.lowerIsBetter ?? false,
+    digits,
+  });
+  return { parameter: key, idealLabel: field?.label ?? null, ...comparison };
+}
+
 const baselineBy = (units, keyOf, valueOf) => {
   const buckets = new Map();
   for (const u of units) {
@@ -183,7 +285,13 @@ export const efficiencyService = {
    * screen can show its working rather than asking anyone to trust a number.
    */
   async forShift({ date, shift } = {}) {
-    const all = await runs.all({}, { sort: 'shift_date' });
+    // The benchmarks are one small row and the runs are the whole history, so
+    // they are fetched together rather than one after the other.
+    const [all, idealSheet] = await Promise.all([
+      runs.all({}, { sort: 'shift_date' }),
+      rateService.idealValues(),
+    ]);
+    const ideals = idealSheet?.data ?? {};
 
     const refAll = refinerUnits(all);
     const grindAll = grinderUnits(all);
@@ -213,9 +321,11 @@ export const efficiencyService = {
           {
             key: 'pmh',
             label: 'Production / man-hour',
+            unit: 'kg/man-hour',
             value: round(u.pmh),
             baseline: round(bp),
             warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
+            ...idealFor(idealKey.specialPerManHour(u.quality), u.pmh, ideals),
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (total crew × total hours)',
@@ -232,9 +342,11 @@ export const efficiencyService = {
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
+            unit: 'kWh/kg',
             value: round(u.kwhkg, 3),
             baseline: round(be, 3),
             warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
+            ...idealFor(idealKey.specialKwhPerKg(u.quality), u.kwhkg, ideals, 3),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'total energy ÷ output',
@@ -255,6 +367,9 @@ export const efficiencyService = {
             baseline: null,
             baselineLabel: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
             warn: false,
+            // The special line comes off in grades, so its shift target is per
+            // grade rather than one figure for the line - see IDEAL_VALUE_FIELDS.
+            ...idealFor(idealKey.specialProduction(u.quality), u.out, ideals, 0),
             calc: {
               title: 'Output',
               formula: 'total weighed output of this grade in this shift',
@@ -282,9 +397,11 @@ export const efficiencyService = {
           {
             key: 'pmh',
             label: 'Production / man-hour',
+            unit: 'kg/man-hour',
             value: round(u.pmh, 1),
             baseline: round(bp, 1),
             warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
+            ...idealFor(idealKey.perManHour(u.machineId), u.pmh, ideals, 1),
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (crew × hours)',
@@ -301,9 +418,11 @@ export const efficiencyService = {
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
+            unit: 'kWh/kg',
             value: round(u.kwhkg, 3),
             baseline: round(be, 3),
             warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
+            ...idealFor(idealKey.kwhPerKg(u.machineId), u.kwhkg, ideals, 3),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'energy ÷ output',
@@ -344,6 +463,7 @@ export const efficiencyService = {
             baseline: null,
             baselineLabel: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
             warn: false,
+            ...idealFor(idealKey.production(u.machineId), u.out, ideals, 0),
             calc: {
               title: 'Output',
               formula: 'total crumb weighed from this grinder this shift',
@@ -388,6 +508,92 @@ export const efficiencyService = {
         ],
       }));
 
+    /**
+     * The coarse line, which has never had a card here.
+     *
+     * One card for the line rather than one per machine: PR1 breaks the charge
+     * down and R2 works it, and only R2 weighs, so the shift has one output
+     * figure and it belongs to the line. Production only - the manager sets no
+     * energy or labour benchmark against coarse, so the card shows what the line
+     * made against what it was meant to make and leaves it there.
+     */
+    const coarseAll = coarseUnits(all);
+    const baseCoarse = median(coarseAll.map((u) => u.out));
+    const coarse = coarseAll.filter(here).map((u) => ({
+      key: 'coarse|line',
+      line: 'coarse',
+      label: 'Coarse line',
+      out: round(u.out, 0),
+      workers: u.workers,
+      hours: round(u.hours),
+      metrics: [
+        {
+          key: 'out',
+          label: 'Output',
+          value: round(u.out, 0),
+          unit: 'kg',
+          baseline: round(baseCoarse, 0),
+          baselineLabel: `usual ${round(baseCoarse, 0) ?? '—'} kg · ${u.workers} crew · ${round(u.hours, 1)} h`,
+          warn: u.out != null && baseCoarse != null && u.out < baseCoarse * TH.labour,
+          ...idealFor(idealKey.production('COARSE'), u.out, ideals, 0),
+          calc: {
+            title: 'Coarse output',
+            formula: 'everything the coarse line weighed this shift',
+            lines: [
+              `= sum of the line's weighed runs over ${round(u.hours)} h with ${u.workers} crew`,
+            ],
+            result: `${round(u.out, 0)} kg`,
+            note: `Usual = median coarse shift = ${round(baseCoarse, 0) ?? '—'} kg.`,
+          },
+        },
+      ],
+    }));
+
+    /**
+     * The autoclaves, counted per day.
+     *
+     * The only card on this screen that is not about the shift on the picker: a
+     * vessel is charged, cooked and emptied across whatever shift boundary falls
+     * in the middle, so a per-shift count reports the same day's work
+     * differently depending on when the crew changed over. The card says so
+     * rather than leaving the reader to notice.
+     */
+    const acAll = autoclaveRunsByDay(all);
+    const baseAcRuns = baselineBy(acAll, (u) => u.machineId, (u) => u.runs);
+    const autoclaves = IDEAL_AUTOCLAVES.map((vessel) => {
+      const today = acAll.find((u) => u.machineId === vessel.key && u.day === date);
+      const runsToday = today?.runs ?? 0;
+      const base = baseAcRuns[vessel.key] ?? null;
+      return {
+        key: `autoclave|${vessel.key}`,
+        line: 'autoclave',
+        machineId: vessel.key,
+        label: vessel.label,
+        metrics: [
+          {
+            key: 'runs',
+            label: 'Charges today',
+            value: runsToday,
+            unit: 'runs/day',
+            baseline: round(base, 1),
+            baselineLabel: `usual ${round(base, 1) ?? '—'} a day`,
+            warn: base != null && runsToday < base * TH.labour,
+            ...idealFor(idealKey.autoclaveRuns(vessel.key), runsToday, ideals, 0),
+            calc: {
+              title: 'Charges today',
+              formula: 'charges logged on this vessel across the whole day',
+              lines: [
+                `${vessel.label} on ${date ?? '—'} = ${runsToday}`,
+                'counted per day, not per shift - a charge crosses the handover',
+              ],
+              result: `${runsToday} run${runsToday === 1 ? '' : 's'}`,
+              note: `Usual = median day for this vessel = ${round(base, 1) ?? '—'}.`,
+            },
+          },
+        ],
+      };
+    });
+
     let kwh = 0;
     let out = 0;
     for (const r of shiftRows) {
@@ -401,8 +607,17 @@ export const efficiencyService = {
       totals: { runs: shiftRows.length, outKg: round(out, 0), kwh: round(kwh, 0) },
       refiners,
       grinders,
+      coarse,
+      autoclaves,
       yields,
       thresholds: TH,
+      /**
+       * Whether the manager has set any benchmark at all. The screen needs to
+       * tell "nothing to compare against yet" from "on target": an empty sheet
+       * flags nothing, and a page that quietly showed every line as fine would
+       * be reporting a hole as a pass.
+       */
+      idealsSet: Object.values(ideals).some((v) => v != null),
     };
   },
 
@@ -421,6 +636,40 @@ export const efficiencyService = {
       shift: payload.shift || null,
       line: payload.line,
       metric: payload.metric,
+      reason: payload.reason,
+      entered_by: payload.enteredBy ?? null,
+    }),
+
+  /**
+   * Why the actuals missed their ideals in a shift.
+   *
+   * A project that has not had migration 0014 run against it has no table to
+   * read, and a screen that cannot show past reasons is not a screen that should
+   * refuse to show the shift - so it answers empty, the same way the labour
+   * rates do. Writing one does not swallow the error: a manager typing a reason
+   * is owed the truth about whether it was kept.
+   */
+  async listVarianceReasons({ date, shift } = {}) {
+    const { rows } = await reasons
+      .list({ order: 'desc', limit: 200 }, { shift_date: date, shift: shift || undefined })
+      .catch(() => ({ rows: [] }));
+    return rows;
+  },
+
+  /**
+   * `ideal` and `actual` are stored as the screen had them, not looked up again
+   * here. The point of the record is the two numbers the reason was written
+   * about; a benchmark raised next month must not rewrite what a manager was
+   * explaining.
+   */
+  addVarianceReason: (payload = {}) =>
+    reasons.create({
+      shift_date: payload.date,
+      shift: payload.shift || null,
+      parameter: payload.parameter,
+      label: payload.label ?? idealFieldFor(payload.parameter)?.label ?? null,
+      ideal: payload.ideal ?? null,
+      actual: payload.actual ?? null,
       reason: payload.reason,
       entered_by: payload.enteredBy ?? null,
     }),

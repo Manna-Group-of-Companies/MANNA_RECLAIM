@@ -1,7 +1,7 @@
 import { axiosClient, requestPaged } from '../axiosClient';
 import { endpoints } from '../endpoints';
 import type { ApiEnvelope, ListQuery } from '@/types/api';
-import type { CostRates, DispatchGrade, Rate } from '@/types/models';
+import type { CostRates, DispatchGrade, IdealValues, Rate } from '@/types/models';
 
 export interface Quote { rate: number | null; custom: boolean; note: string }
 
@@ -50,6 +50,23 @@ export const rateService = {
 
   async saveCostRates(data: Record<string, number | null>): Promise<CostRates> {
     const res = await axiosClient.put<ApiEnvelope<CostRates>>(endpoints.rates.costRates, { data });
+    return res.data.data;
+  },
+
+  /**
+   * The manager's benchmarks. Every declared key comes back, unset ones as null
+   * - so the form renders before anyone has saved, and a target nobody has set
+   * reads as blank rather than as zero.
+   */
+  async idealValues(): Promise<IdealValues> {
+    const res = await axiosClient.get<ApiEnvelope<IdealValues>>(endpoints.rates.idealValues);
+    return res.data.data;
+  },
+
+  async saveIdealValues(data: Record<string, number | null>): Promise<IdealValues> {
+    const res = await axiosClient.put<ApiEnvelope<IdealValues>>(endpoints.rates.idealValues, {
+      data,
+    });
     return res.data.data;
   },
 };

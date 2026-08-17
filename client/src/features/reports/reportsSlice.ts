@@ -3,6 +3,7 @@ import {
   reportService,
   type DateRange,
   type EfficiencyNotePayload,
+  type VarianceReasonPayload,
 } from '@/api/services/report.service';
 import { toRequestError } from '@/api/axiosClient';
 import type {
@@ -108,6 +109,18 @@ export const addEfficiencyNote = createAsyncThunk(
   },
 );
 
+/** Why an actual missed the manager's ideal - a different record to the above. */
+export const addVarianceReason = createAsyncThunk(
+  'reports/addVarianceReason',
+  async (payload: VarianceReasonPayload, { rejectWithValue }) => {
+    try {
+      return await reportService.addVarianceReason(payload);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 export const fetchDowntime = createAsyncThunk(
   'reports/downtime',
   async (params: { month?: string } | undefined, { rejectWithValue }) => {
@@ -181,6 +194,14 @@ const reportsSlice = createSlice({
       .addCase(addEfficiencyNote.fulfilled, (state, action) => {
         if (state.shiftEfficiency) {
           state.shiftEfficiency.notes = [action.payload, ...state.shiftEfficiency.notes];
+        }
+      })
+      .addCase(addVarianceReason.fulfilled, (state, action) => {
+        if (state.shiftEfficiency) {
+          state.shiftEfficiency.varianceReasons = [
+            action.payload,
+            ...(state.shiftEfficiency.varianceReasons ?? []),
+          ];
         }
       })
       .addCase(fetchDowntime.pending, (state) => {

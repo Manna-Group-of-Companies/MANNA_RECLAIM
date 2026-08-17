@@ -55,11 +55,12 @@ export const shiftOptions = asyncHandler(async (_req, res) =>
  * a browser on the shop floor's connection.
  */
 export const shiftEfficiency = asyncHandler(async (req, res) => {
-  const [analysis, notes] = await Promise.all([
+  const [analysis, notes, varianceReasons] = await Promise.all([
     efficiencyService.forShift(req.query),
     efficiencyService.listNotes(req.query),
+    efficiencyService.listVarianceReasons(req.query),
   ]);
-  return ok(res, { ...analysis, notes });
+  return ok(res, { ...analysis, notes, varianceReasons });
 });
 
 export const addEfficiencyNote = asyncHandler(async (req, res) =>
@@ -67,6 +68,26 @@ export const addEfficiencyNote = asyncHandler(async (req, res) =>
     res,
     await efficiencyService.addNote({ ...req.body, enteredBy: req.body.enteredBy ?? req.user?.name }),
     'Reason recorded',
+  ),
+);
+
+/**
+ * Why an actual missed the manager's ideal.
+ *
+ * Its own record rather than an efficiency note, because it is a different
+ * sentence: a note says the shift came in under what this plant normally
+ * manages, and this says it came in under what the plant is meant to manage. A
+ * shift can be one and not the other, and mixing them would make both unreadable
+ * afterwards.
+ */
+export const addVarianceReason = asyncHandler(async (req, res) =>
+  created(
+    res,
+    await efficiencyService.addVarianceReason({
+      ...req.body,
+      enteredBy: req.body.enteredBy ?? req.user?.name,
+    }),
+    'Reason recorded against the shift',
   ),
 );
 

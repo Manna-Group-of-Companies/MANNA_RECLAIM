@@ -105,6 +105,17 @@ export const registry = {
     'baseline', 'reason', 'entered_by', 'created_at',
   ]),
 
+  /**
+   * Why an actual missed the manager's ideal. `ideal` and `actual` are snapshots
+   * taken as the reason was written rather than looked up afterwards: a target
+   * raised next month must not rewrite what last month's shortfall was measured
+   * against. See migrations/0014.
+   */
+  [TABLES.varianceReasons]: table('id', [
+    'id', 'shift_date', 'shift', 'parameter', 'label', 'ideal', 'actual',
+    'reason', 'entered_by', 'created_at',
+  ]),
+
   // ---- quality ----
   [TABLES.qualityTests]: table('id', [
     'id', ...AUDIT, 'ts', 'kind', 'batch_no', 'shift_date', 'shift', 'verdict',
@@ -226,6 +237,13 @@ export const registry = {
     // Added by supabase/schema.sql.
     'updated_by',
   ]),
+  /**
+   * The manager's benchmarks - one row, id 'current', every figure inside
+   * `data`. Same shape as cost_rates above and for the same reason: the set of
+   * figures grows as the plant measures more things, and a column per figure
+   * would be a migration every time it does. See IDEAL_VALUE_KEYS.
+   */
+  [TABLES.idealValues]: table('id', ['id', 'data', 'updated_at', 'updated_by']),
   /**
    * One row per change to the labour rate, each with the day it came into
    * force. `per_hour` is what the costing multiplies by; a row that gave the

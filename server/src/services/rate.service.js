@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { crud } from './base.service.js';
-import { TABLES, PRICE_LIST, COST_RATE_KEYS, DEFAULT_SHIFT_HOURS } from '../config/constants.js';
+import {
+  TABLES,
+  PRICE_LIST,
+  COST_RATE_KEYS,
+  IDEAL_VALUE_KEYS,
+  DEFAULT_SHIFT_HOURS,
+} from '../config/constants.js';
 
 /**
  * Two different things were both called "rates" in the prototype:
@@ -18,6 +24,7 @@ const rates = crud(TABLES.customerRates, { defaultSort: 'customer' });
 const priceRows = crud(TABLES.priceList, { defaultSort: 'grade' });
 const plantRates = crud(TABLES.rates, { defaultSort: 'id' });
 const costRates = crud(TABLES.costRates, { defaultSort: 'id' });
+const idealValues = crud(TABLES.idealValues, { defaultSort: 'id' });
 const labourRates = crud(TABLES.labourRates, { defaultSort: 'effective_from' });
 
 /**
@@ -82,6 +89,9 @@ export function labourRateAt(date, history = [], fallback = 0) {
  * Keeping it means the back office and the old prototype read the same row.
  */
 const COST_RATES_ID = 'current';
+
+/** The ideal values sit the same way, in one row of their own table. */
+const IDEAL_VALUES_ID = 'current';
 
 /** Rate card and list price, loaded once per process and refreshed on write. */
 let cache = null;
@@ -155,6 +165,57 @@ export const rateService = {
       { id: COST_RATES_ID, data: clean, updated_at: new Date().toISOString(), updated_by: updatedBy },
     ]);
     return rateService.costRates();
+  },
+
+  /**
+   * The manager's benchmarks - what the plant should be making, per shift, per
+   * line and per grade.
+   *
+   * Every declared key comes back, unset ones as null rather than absent, so the
+   * form renders before anyone has ever saved and a newly declared benchmark
+   * reads as "not set" rather than as a target of zero - which every line in the
+   * plant would then be over, permanently.
+   *
+   * A project whose database has not had migration 0014 run against it has no
+   * table to read, and that is not an error worth failing the Efficiency screen
+   * over: it answers with every key unset, which is exactly where the screen was
+   * before this existed. The save path does not swallow it - see below.
+   */
+  async idealValues() {
+    const { rows } = await idealValues
+      .list({ limit: 1 }, { id: IDEAL_VALUES_ID })
+      .catch(() => ({ rows: [] }));
+    const stored = rows[0]?.data ?? {};
+    const data = Object.fromEntries(IDEAL_VALUE_KEYS.map((k) => [k, stored[k] ?? null]));
+    return { data, updatedAt: rows[0]?.updated_at ?? null, updatedBy: rows[0]?.updated_by ?? null };
+  },
+
+  /**
+   * Replaces the whole set. Unknown keys are dropped rather than stored, and a
+   * blank clears the benchmark rather than setting it to nought.
+   *
+   * Deliberately not wrapped in the catch the read above has: a manager who
+   * types thirty targets into a form is owed the truth about whether they were
+   * saved, and a silent success on a project with no table would leave them
+   * looking at figures nothing had kept.
+   */
+  async saveIdealValues(data = {}, updatedBy = null) {
+    const clean = {};
+    for (const key of IDEAL_VALUE_KEYS) {
+      const value = data[key];
+      if (value == null || value === '') continue;
+      const n = Number(value);
+      if (!Number.isNaN(n)) clean[key] = n;
+    }
+    await idealValues.upsertMany([
+      {
+        id: IDEAL_VALUES_ID,
+        data: clean,
+        updated_at: new Date().toISOString(),
+        updated_by: updatedBy,
+      },
+    ]);
+    return rateService.idealValues();
   },
 
   /**

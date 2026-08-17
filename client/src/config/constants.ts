@@ -499,6 +499,130 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
 ];
 
 /**
+ * ---------------------------------------------------------------------------
+ * Ideal values - what the plant should be making, as the manager sets it
+ * ---------------------------------------------------------------------------
+ *
+ * The Efficiency tab has always measured the plant against its own median,
+ * which answers "is this shift worse than usual" and cannot answer "is usual any
+ * good": a line that has run under its capacity for two years has a median that
+ * says so, and a screen that never once flags it. These are the other half - a
+ * figure somebody decided on, that the plant's own history cannot drift away
+ * from.
+ *
+ * The keys are built rather than written out, and they must match idealKey in
+ * server/src/config/constants.js exactly: a target saved under one spelling and
+ * read under another is a target that silently never applies. The server drops
+ * any key it does not declare, so a mistake here is a field that will not save
+ * rather than a benchmark nothing compares against.
+ */
+export const IDEAL_KEY = {
+  production: (key: string) => `prod.${key}`,
+  specialProduction: (quality: string) => `prod.SPECIAL.${quality}`,
+  autoclaveRuns: (key: string) => `runs.${key}`,
+  kwhPerKg: (key: string) => `kwhkg.${key}`,
+  specialKwhPerKg: (quality: string) => `kwhkg.SPECIAL.${quality}`,
+  perManHour: (key: string) => `pmh.${key}`,
+  specialPerManHour: (quality: string) => `pmh.SPECIAL.${quality}`,
+} as const;
+
+/**
+ * The lines given an ideal production per shift.
+ *
+ * The cracker is deliberately absent: it weighs nothing - what it cracks is
+ * weighed downstream at the grinders - so a target against it would sit beside a
+ * permanent blank. The special line is absent for the opposite reason: it comes
+ * off in grades and is benchmarked per grade.
+ *
+ * Mirrors IDEAL_PRODUCTION_LINES on the server.
+ */
+export const IDEAL_PRODUCTION_LINES = [
+  { key: 'GRD_K', label: 'Grinder 1' },
+  { key: 'GRD_S', label: 'Grinder 2' },
+  { key: 'GRD_O', label: 'Soorya Grinder' },
+  { key: 'COARSE', label: 'Coarse line' },
+];
+
+/** The grinders, which get an energy and a labour benchmark each. */
+export const IDEAL_GRINDERS = IDEAL_PRODUCTION_LINES.filter((l) => l.key !== 'COARSE');
+
+/**
+ * Autoclave A and M. N and O have been seeded disabled for the life of the
+ * project; if either is brought back, add it here and on the server.
+ */
+export const IDEAL_AUTOCLAVES = [
+  { key: 'AC_A', label: 'Autoclave A' },
+  { key: 'AC_M', label: 'Autoclave M' },
+];
+
+/**
+ * The ideal-value sheet as the Rates tab lays it out. Same shape as
+ * COST_RATE_GROUPS above, and the keys must match IDEAL_VALUE_FIELDS on the
+ * server.
+ */
+export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
+  {
+    title: 'Shift production — grinding & coarse',
+    note: 'what a line should weigh out in one shift',
+    fields: IDEAL_PRODUCTION_LINES.map((line) => ({
+      key: IDEAL_KEY.production(line.key),
+      label: line.label,
+      unit: 'kg/shift',
+    })),
+  },
+  {
+    title: 'Shift production — special line, by grade',
+    note: 'the line comes off in grades, so the target is per grade',
+    fields: QUALITIES.map((quality) => ({
+      key: IDEAL_KEY.specialProduction(quality),
+      label: quality,
+      unit: 'kg/shift',
+    })),
+  },
+  {
+    title: 'Autoclave charges',
+    note: 'per day, not per shift — a charge crosses the handover',
+    fields: IDEAL_AUTOCLAVES.map((vessel) => ({
+      key: IDEAL_KEY.autoclaveRuns(vessel.key),
+      label: vessel.label,
+      unit: 'runs/day',
+    })),
+  },
+  {
+    title: 'Energy — grinders',
+    fields: IDEAL_GRINDERS.map((grinder) => ({
+      key: IDEAL_KEY.kwhPerKg(grinder.key),
+      label: grinder.label,
+      unit: 'kWh/kg',
+    })),
+  },
+  {
+    title: 'Energy — special line, by grade',
+    fields: QUALITIES.map((quality) => ({
+      key: IDEAL_KEY.specialKwhPerKg(quality),
+      label: quality,
+      unit: 'kWh/kg',
+    })),
+  },
+  {
+    title: 'Labour productivity — grinders',
+    fields: IDEAL_GRINDERS.map((grinder) => ({
+      key: IDEAL_KEY.perManHour(grinder.key),
+      label: grinder.label,
+      unit: 'kg/man-hour',
+    })),
+  },
+  {
+    title: 'Labour productivity — special line, by grade',
+    fields: QUALITIES.map((quality) => ({
+      key: IDEAL_KEY.specialPerManHour(quality),
+      label: quality,
+      unit: 'kg/man-hour',
+    })),
+  },
+];
+
+/**
  * What the lab usually measures, offered as suggestions rather than as fields:
  * a test names its own readings, so a new one needs no change here. Mirrors the
  * prototype's QC_PARAM_SUGGEST.

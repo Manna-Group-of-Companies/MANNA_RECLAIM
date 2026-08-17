@@ -6,7 +6,11 @@ import { validate } from '../middlewares/validate.middleware.js';
 import { DISPATCH_ROLES } from '../config/constants.js';
 import { bulkListQuery } from '../validations/common.validation.js';
 import { rateSchema, customerSchema } from '../validations/dispatch.validation.js';
-import { costRatesSchema, labourRateSchema } from '../validations/report.validation.js';
+import {
+  costRatesSchema,
+  idealValuesSchema,
+  labourRateSchema,
+} from '../validations/report.validation.js';
 
 const router = Router();
 
@@ -73,6 +77,17 @@ router.get('/loading-rates', forDispatch, rates.loadingRates);
  * crew and the grinders are costed at, so whoever can move it moves the plant's
  * cost per kg.
  */
+/**
+ * The plant's benchmarks - what a shift ought to produce, how many charges a
+ * vessel ought to take, what a kg ought to cost in energy and in labour-hours.
+ *
+ * Behind the same door as the cost rates. These are what a shift is judged
+ * against, so whoever can move them can move what counts as a good shift - and
+ * the screen that shows them is the same back-office one that shows the costing.
+ */
+router.get('/ideal-values', adminOnly, rates.idealValues);
+router.put('/ideal-values', adminOnly, validate({ body: idealValuesSchema }), rates.saveIdealValues);
+
 router.get('/labour-rates', adminOnly, rates.labourRates);
 router.post(
   '/labour-rates',
