@@ -21,6 +21,12 @@ export const userPaths = {
   bearing: '/bearing',
   reports: '/reports',
   settings: '/settings',
+  /**
+   * What this tablet has asked the server for, and what came back. Under
+   * Settings rather than on the tab bar: it is opened when something would not
+   * save, which is a handful of times a year, and a tab is for work.
+   */
+  log: '/settings/log',
 } as const;
 
 export const adminPaths = {

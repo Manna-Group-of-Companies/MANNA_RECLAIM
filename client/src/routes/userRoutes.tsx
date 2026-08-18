@@ -6,6 +6,7 @@ import {
   BatchesPage,
   BearingPage,
   HistoryPage,
+  LogPage,
   MachinesPage,
   PackingPage,
   QualityPage,
@@ -55,6 +56,10 @@ export const userRoutes: RouteObject[] = [
             ],
           },
           { path: 'settings', element: <SettingsPage /> },
+          // Beside Settings and outside both groups for the same reason: what
+          // this tablet asked the server for is every account's own business,
+          // including the lab's, and it is how a floor problem gets reported.
+          { path: 'settings/log', element: <LogPage /> },
         ],
       },
     ],
