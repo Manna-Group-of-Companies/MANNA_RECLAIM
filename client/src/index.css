@@ -662,20 +662,16 @@
   .tbtn:active {
     transform: scale(0.94);
   }
+  /* A due reading is amber, and stays amber. It used to pulse on a 1.6s loop,
+     which never stopped: "due" is a state that can sit there for a whole
+     shift, not an event that has just happened, and on a list where several
+     bearings come due together it was a row of buttons breathing out of step
+     behind the figures somebody is trying to read. The colour already says
+     it, and the button is still the same size and in the same place. */
   .tbtn.due {
     border-color: var(--t-warn-line);
     background: var(--t-warn-bg);
     color: var(--warn);
-    animation: tpulse 1.6s ease-in-out infinite;
-  }
-  @keyframes tpulse {
-    0%,
-    100% {
-      box-shadow: 0 0 0 0 rgb(var(--warn-rgb) / 0);
-    }
-    50% {
-      box-shadow: 0 0 0 4px rgb(var(--warn-rgb) / 0.22);
-    }
   }
   .pausebtn {
     width: 100%;
