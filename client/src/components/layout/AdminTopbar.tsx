@@ -9,13 +9,14 @@ import { useOnApp } from '@/hooks/useOnApp';
 import { minsAgo } from '@/utils/presence';
 import { clock24 } from '@/utils/date';
 
-/** The six back.html tabs, plus the seven this port adds. */
+/** The six back.html tabs, plus the eight this port adds. */
 const tabs = [
   { to: adminPaths.dashboard, label: 'Overview' },
   { to: adminPaths.history, label: 'History' },
   { to: adminPaths.quality, label: 'Quality' },
   { to: adminPaths.efficiency, label: 'Efficiency' },
   { to: adminPaths.rates, label: 'Rates' },
+  { to: adminPaths.ideals, label: 'Ideal values' },
   { to: adminPaths.costing, label: 'Costing' },
   { to: adminPaths.maintenance, label: 'Maintenance' },
   { to: adminPaths.bearings, label: 'Bearings' },

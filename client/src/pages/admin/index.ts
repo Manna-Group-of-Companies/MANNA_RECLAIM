@@ -4,6 +4,7 @@ export { AdminHistoryPage } from './HistoryPage';
 export { AdminQualityPage } from './QualityPage';
 export { EfficiencyPage } from './EfficiencyPage';
 export { RatesPage } from './RatesPage';
+export { IdealValuesPage } from './IdealValuesPage';
 export { CostingPage } from './CostingPage';
 export { MaintenancePage } from './MaintenancePage';
 export { BearingsPage } from './BearingsPage';

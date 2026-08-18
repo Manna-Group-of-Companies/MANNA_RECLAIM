@@ -36,6 +36,13 @@ export const adminPaths = {
   quality: '/admin/quality',
   efficiency: '/admin/efficiency',
   rates: '/admin/rates',
+  /**
+   * What a shift should make, as the manager sets it - the benchmarks the
+   * Efficiency tab holds each collected figure against. Its own address rather
+   * than the foot of /admin/rates: a target is meant to be revisited, and a
+   * page reached by scrolling past somebody else's figures is not.
+   */
+  ideals: '/admin/ideals',
   costing: '/admin/costing',
   maintenance: '/admin/maintenance',
   bearings: '/admin/bearings',
