@@ -3307,6 +3307,84 @@
   }
 
   /* ==================================================================
+   * back office - responsive
+   *
+   * The back office was one 820px column at every width, which is the one
+   * size it is never actually read at: a manager is on a desk monitor and a
+   * supervisor checking a figure is on a phone, and 820px is neither. The
+   * shell adapts here; no page knows about any of it.
+   * ================================================================== */
+
+  /* ---- phone: give the content back the margins the chrome was taking ---- */
+  @media (max-width: 559.98px) {
+    .back-office .wrap {
+      padding: 0 10px 48px;
+    }
+    .back-office .bo-head {
+      padding: 10px 0 6px;
+    }
+    /* The header is sticky, so every pixel it takes is a pixel the page below
+       it never gets back. Refresh / Shop floor / Sign out drop under the title
+       rather than squeezing it - three buttons and a heading do not fit across
+       360px, and what gives first is the plant name. */
+    .back-office .row {
+      flex-wrap: wrap;
+    }
+  }
+
+  /* ---- tablet up: the tab strip stops being a scroller ----
+
+     Thirteen tabs need about 960px, so the strip has side-scrolled at every
+     width since the eighth tab was added - which hides tabs behind a gesture
+     there is no sign of on a trackpad, and is why the strip has code to drag
+     the active one back into view. Once there is room for two rows there is
+     no reason to hide any of them - but only once there is, which is why
+     this starts at 720px rather than at the first tablet width. Seven columns
+     is where thirteen tabs fall into two rows; below that the grid would make
+     three, and three rows of chrome pinned to the top of a small screen costs
+     the page more than a scrolled strip does.
+
+     A grid rather than wrapped flex, because wrapped flex items stretch to
+     fill their own row: nine tabs above four would leave the four in the
+     second row more than twice as wide as the nine above them. Equal columns
+     keep the rows in step, and `auto-fit` collapses them into a single row as
+     soon as all thirteen fit across. */
+  @media (min-width: 720px) {
+    .back-office .tabstrip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      overflow-x: visible;
+    }
+  }
+
+  /* ---- desk: use the monitor ----
+
+     820px on a 1440px screen is a column of figures with a third of the
+     screen empty either side of it, while the wide tables - Quality's 720px,
+     the Efficiency day cards - scroll sideways inside it.
+
+     The form controls are held at a readable width rather than growing with
+     the column: a 1000px-wide box for a two-digit target is harder to fill in
+     than a narrow one, not easier. Only from here up, so nothing about a
+     phone or a tablet changes. */
+  @media (min-width: 1100px) {
+    .back-office .wrap {
+      max-width: 1120px;
+    }
+    .back-office .field input,
+    .back-office .field select,
+    .back-office .field textarea {
+      max-width: 520px;
+    }
+    /* And the button that submits them, for the same reason and to the same
+       width: a save button run out to the full column reads as a banner rather
+       than as the end of the form it belongs to. */
+    .back-office .btn.block {
+      max-width: 520px;
+    }
+  }
+
+  /* ==================================================================
    * responsive
    *
    * One column and a bottom bar on a phone; two columns from a tablet;
