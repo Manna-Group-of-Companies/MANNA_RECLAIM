@@ -373,14 +373,18 @@ class _HistoryRow extends StatelessWidget {
                           color: T.ink,
                         ),
                       ),
-                      // The day, the shift, the name it is signed with - and
-                      // the account that keyed it, on the one occasion that is
-                      // news: when the sheet's pick was somebody else's name.
+                      // The day, the shift, and who was signed in when the
+                      // machine was started - the account off the access token,
+                      // which nothing on the floor can switch, so it leads
+                      // rather than the sheet's pick. A run from before that was
+                      // recorded falls back to the name it is signed with. The
+                      // pick follows on the one occasion it is news: when the
+                      // record was signed with somebody else's name.
                       Text(
                         '${dayMonth(run.shiftDate)}'
                         '${run.shift.isNotEmpty ? ' · ${run.shift}' : ''}'
-                        '${run.supervisor != null ? ' · ${run.supervisor}' : ''}'
-                        '${run.enteredBy != null && run.enteredBy != run.supervisor ? ' · entered by ${run.enteredBy}' : ''}',
+                        '${(run.enteredBy ?? run.supervisor) != null ? ' · ${run.enteredBy ?? run.supervisor}' : ''}'
+                        '${run.enteredBy != null && run.supervisor != null && run.supervisor != run.enteredBy ? ' · signed as ${run.supervisor}' : ''}',
                         style: const TextStyle(
                           fontSize: 10.5,
                           color: T.inkFaint,
