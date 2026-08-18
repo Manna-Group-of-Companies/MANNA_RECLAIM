@@ -404,6 +404,14 @@ Future<RunSheetResult?> showRunSheet({
                 });
                 try {
                   final saved = await runService.update(run.id, payload);
+                  // And tell the rest of the app to re-read itself, for the
+                  // same reason the delete below does. The result this pops
+                  // swaps the one row in the log behind this sheet; what a
+                  // correction moves is added up from those rows elsewhere -
+                  // the shift's output on Reports, the meter readings the next
+                  // start pre-fills from - and a screen already built goes on
+                  // showing the figure from before it.
+                  ui.requestRefresh();
                   ui.notify('Entry updated');
                   if (context.mounted) {
                     Navigator.of(context).pop(RunSheetResult(saved: saved));
