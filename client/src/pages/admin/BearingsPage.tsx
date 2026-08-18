@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchBearingLogs, fetchBearingsDue } from '@/features/maintenance/maintenanceSlice';
 import { fetchMachines } from '@/features/machines/machinesSlice';
+import { useBearingDue } from '@/hooks/useBearingDue';
 import { BEARING_TEMP_LIMIT_C } from '@/config/constants';
 import { dayLong } from '@/utils/date';
 import { ago, minutes } from '@/utils/format';
@@ -93,7 +94,7 @@ function TrendChart({ points }: { points: Point[] }) {
  */
 export function BearingsPage() {
   const dispatch = useAppDispatch();
-  const due = useAppSelector((s) => s.maintenance.due);
+  const due = useBearingDue();
   const logs = useAppSelector((s) => s.maintenance.bearings);
   const machines = useAppSelector((s) => s.machines.items);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
@@ -139,6 +140,10 @@ export function BearingsPage() {
 
   if (selected) {
     const mineCount = countByMachine.get(selected.machineId) ?? 0;
+    // The row as it stands now, not as it stood when it was tapped: `selected`
+    // is a snapshot in state, so its own countdown would sit still while the
+    // trend beneath it is read. See useBearingDue.
+    const current = due.find((d) => d.machineId === selected.machineId) ?? selected;
     return (
       <>
         <button type="button" className="back" onClick={() => setSelected(null)}>
@@ -153,8 +158,8 @@ export function BearingsPage() {
                 {BEARING_TEMP_LIMIT_C} °C
               </div>
             </div>
-            <span className={`badge ${selected.due ? 'warn' : 'ok'}`}>
-              {selected.due ? 'due now' : `in ${minutes(selected.dueInMin)}`}
+            <span className={`badge ${current.due ? 'warn' : 'ok'}`}>
+              {current.due ? 'due now' : `in ${minutes(current.dueInMin)}`}
             </span>
           </div>
         </div>

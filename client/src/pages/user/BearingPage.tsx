@@ -17,6 +17,7 @@ import {
   ViewHead,
 } from '@/components/ui';
 import { icons } from '@/config/icons';
+import { useBearingDue } from '@/hooks/useBearingDue';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { ago, minutes } from '@/utils/format';
@@ -32,7 +33,9 @@ import type { BearingDue } from '@/types/models';
 export function BearingPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const due = useAppSelector((s) => s.maintenance.due);
+  // Live against the clock, so "due in 12 min" counts down to "overdue" while
+  // the page is open rather than at the next fetch - see useBearingDue.
+  const due = useBearingDue();
   const logs = useAppSelector((s) => s.maintenance.bearings);
   const active = useAppSelector((s) => s.runs.active);
   const machines = useAppSelector((s) => s.machines.items);

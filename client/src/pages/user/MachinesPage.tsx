@@ -41,6 +41,7 @@ import {
   gradeVar,
 } from '@/components/ui';
 import { icons } from '@/config/icons';
+import { useBearingDue } from '@/hooks/useBearingDue';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/utils/cn';
@@ -268,7 +269,9 @@ export function MachinesPage() {
   const active = useAppSelector((s) => s.runs.active);
   const shiftRuns = useAppSelector((s) => s.runs.shift);
   const openDown = useAppSelector((s) => s.maintenance.open);
-  const due = useAppSelector((s) => s.maintenance.due);
+  // Worked against the clock now, not the clock the list was fetched on - a
+  // tablet sits on this tab all shift and machines fall due underneath it.
+  const due = useBearingDue();
   const openBatches = useAppSelector((s) => s.batches.items);
   // What the presses mould. A press cannot start without one, so an empty list is
   // something the start sheet has to say out loud - see startNoProducts.

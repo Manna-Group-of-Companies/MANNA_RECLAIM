@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui';
 import type { IconName } from '@/config/icons';
 import type { Role } from '@/types/models';
 import { FLOOR_ROLES, LAB_ROLES } from '@/config/constants';
+import { useBearingDue } from '@/hooks/useBearingDue';
 import { cn } from '@/utils/cn';
 
 interface Tab {
@@ -56,7 +57,11 @@ export function BottomTabs() {
   const pendingWeigh = useAppSelector((s) => s.runs.pendingWeigh.length);
   const pendingPack = useAppSelector((s) => s.runs.pendingPack.length);
   const pendingQuality = useAppSelector((s) => s.quality.pending.length);
-  const bearingsDue = useAppSelector((s) => s.maintenance.due.filter((d) => d.due).length);
+  // Counted off the live figures rather than the fetched ones: the badge is how
+  // the crew learns there is work on a tab they are not looking at, and a count
+  // frozen at whatever was true when the tablet was opened never learns them
+  // anything. See useBearingDue.
+  const bearingsDue = useBearingDue().filter((d) => d.due).length;
 
   const counts = {
     weigh: pendingWeigh,

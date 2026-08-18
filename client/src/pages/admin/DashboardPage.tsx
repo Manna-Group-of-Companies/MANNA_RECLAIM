@@ -4,6 +4,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchDashboard } from '@/features/reports/reportsSlice';
 import { fetchBearingsDue, fetchOpenBreakdowns } from '@/features/maintenance/maintenanceSlice';
 import { adminPaths } from '@/config/paths';
+import { useBearingDue } from '@/hooks/useBearingDue';
 import { lastNDays } from '@/utils/date';
 import { num, rupees } from '@/utils/format';
 import { cn } from '@/utils/cn';
@@ -14,7 +15,7 @@ const WINDOWS = [7, 30, 90];
 export function DashboardPage() {
   const dispatch = useAppDispatch();
   const { production, costing, efficiency, loading } = useAppSelector((s) => s.reports);
-  const dueNow = useAppSelector((s) => s.maintenance.due.filter((d) => d.due));
+  const dueNow = useBearingDue().filter((d) => d.due);
   const openDown = useAppSelector((s) => s.maintenance.open);
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const [days, setDays] = useState(7);
