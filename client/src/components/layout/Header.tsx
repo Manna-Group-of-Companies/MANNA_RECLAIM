@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAppSelector } from '@/app/hooks';
+import { useSupervisor } from '@/hooks/useSupervisor';
 import { userPaths } from '@/config/paths';
 import { Icon } from '@/components/ui';
 import { cn } from '@/utils/cn';
@@ -51,17 +52,45 @@ function BrandPlate() {
   );
 }
 
-/** Sticky plate: brand, who is signed in, how many machines are turning. */
+/** Sticky plate: brand, who is signing, how many machines are turning. */
 export function Header() {
   const running = useAppSelector((s) => s.runs.active.length);
   const user = useAppSelector((s) => s.auth.user);
   const online = useAppSelector((s) => s.ui.online);
+  const { name: signingAs, isAccount } = useSupervisor();
 
   return (
     <header className="plate">
       <BrandPlate />
-      <div className="spacer" />
-      <span className="linetag">{user?.role ?? 'shop floor'}</span>
+      {/*
+       * Who is on the floor, not just what kind of account this is.
+       *
+       * The bar used to say "SUPERVISOR" and nothing else, which named the role
+       * and never the person - so the one thing worth checking at a glance, that
+       * the records being written are going out under the right name, was only
+       * visible inside Settings and inside the sheets that use it. Which is to
+       * say: at the moment it is too late to notice it is wrong. It says so
+       * here, on every tab, exactly as the app's plate does.
+       *
+       * The name is the signing name rather than the account's, because those
+       * two part on the shift where a browser signed in this morning is being
+       * used by whoever is holding it, and the name that goes on the record is
+       * the one that should be on the bar.
+       */}
+      <div className="who">
+        <span className="nm">
+          <b className={cn(!signingAs && 'muted')}>{signingAs || 'no supervisor set'}</b>
+          {/* Switched away from the account signed in here, and marked as
+              switched: it is a deliberate act at the start of a shift and it
+              stays put until somebody changes it back. */}
+          {!isAccount && (
+            <span className="sw" title="Switched from the account signed in here">
+              <Icon name="pencil" size={12} strokeWidth={2} />
+            </span>
+          )}
+        </span>
+        <span className="linetag">signing · {user?.role ?? 'shop floor'}</span>
+      </div>
       {!online && <span className="pill warn">Offline</span>}
       <span className={cn('runcount', !running && 'zero')}>{running} running</span>
       <Link to={userPaths.settings} aria-label="Settings" className="iconbtn">

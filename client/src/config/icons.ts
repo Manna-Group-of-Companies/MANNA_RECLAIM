@@ -27,6 +27,8 @@ export const icons = {
     '<path d="M12 3v3M5 7h14M5 7 2 15a4 4 0 0 0 6 0L5 7Zm14 0-3 8a4 4 0 0 0 6 0l-3-8ZM9 21h6M12 6v15"/>',
   /** On the field that opens as a search rather than a dropdown - see SearchSelectField. */
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
+  /** Beside a name that was switched away from the account signed in here. */
+  pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
 } as const;
 
 export type IconName = keyof typeof icons;
