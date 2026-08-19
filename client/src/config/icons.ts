@@ -25,6 +25,8 @@ export const icons = {
   thermo: '<path d="M12 14.8V6"/><circle cx="12" cy="17.5" r="3.2"/>',
   scale:
     '<path d="M12 3v3M5 7h14M5 7 2 15a4 4 0 0 0 6 0L5 7Zm14 0-3 8a4 4 0 0 0 6 0l-3-8ZM9 21h6M12 6v15"/>',
+  /** On the field that opens as a search rather than a dropdown - see SearchSelectField. */
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>',
 } as const;
 
 export type IconName = keyof typeof icons;

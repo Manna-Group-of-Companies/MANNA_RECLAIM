@@ -12,5 +12,7 @@ export { DataTable } from './DataTable';
 export type { Column } from './DataTable';
 export { TextField, SelectField, TextAreaField, FieldRow, FormWarning } from './Field';
 export { Pick, PickGrid, Readout, SheetLabel, ViewHead } from './Pick';
+export { SearchSelectField } from './SearchSelect';
+export type { SearchSelectOption } from './SearchSelect';
 export { SupervisorPick } from './SupervisorPick';
 export { Icon } from './Icon';

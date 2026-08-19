@@ -23,9 +23,39 @@ const initialState: BatchesState = {
   detailLoading: false,
 };
 
+/**
+ * The server's page size, and the most it will hand over at once - it clamps
+ * anything larger.
+ */
+const OPEN_PAGE = 200;
+
+/**
+ * Every open batch, however many pages that takes.
+ *
+ * It used to ask for one page of 100 and keep whatever came back. The open list
+ * is sorted oldest first - the order they need attention in - so the hundredth
+ * batch was a cutoff, and everything charged after it was simply not on the
+ * floor's screen. At 102 open batches that silently cost the refiner picker the
+ * two newest numbers on the plant, which are the two most likely to be the one
+ * the crew is standing in front of. A picker that quietly leaves a batch out is
+ * worse than a slow one: the grid reads as "these are all the batches there
+ * are", so the crew goes looking for a charge nobody can find.
+ *
+ * So it reads until it has the total the first page reported. The count is
+ * bounded by what is genuinely open, and in practice that is one request.
+ */
 export const fetchOpenBatches = createAsyncThunk('batches/fetchOpen', async (_, { rejectWithValue }) => {
   try {
-    return await batchService.listOpen({ limit: 100 });
+    const first = await batchService.listOpen({ page: 1, limit: OPEN_PAGE });
+    const rows = [...first.rows];
+    const pages = first.meta?.pages ?? 1;
+    for (let page = 2; page <= pages; page += 1) {
+      const next = await batchService.listOpen({ page, limit: OPEN_PAGE });
+      // An empty page means the list moved under us - stop rather than spin.
+      if (!next.rows.length) break;
+      rows.push(...next.rows);
+    }
+    return { rows, meta: first.meta };
   } catch (err) {
     return rejectWithValue(toRequestError(err).message);
   }

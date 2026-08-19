@@ -12,6 +12,7 @@ import {
   FormWarning,
   PageLoader,
   QualityChip,
+  SearchSelectField,
   SelectField,
   SheetLabel,
   TextAreaField,
@@ -707,6 +708,16 @@ export function HistoryPage() {
     };
   }, [date, shift, batch, machineId, refreshTick]);
 
+  // Every batch on record, with "All batches" as an entry of its own rather
+  // than the absence of one.
+  const batchOptions = useMemo(
+    () => [
+      { value: '', label: 'All batches' },
+      ...(filters?.batches ?? []).map((b) => ({ value: b, label: `#${b}` })),
+    ],
+    [filters],
+  );
+
   // Newest first, on the same clock the shop floor reads: the shift the run
   // belongs to, then when it actually ended.
   const sorted = useMemo(
@@ -777,19 +788,20 @@ export function HistoryPage() {
             </option>
           ))}
         </SelectField>
-        <SelectField
+        {/* Searched rather than scrolled, and the only picker on this bar that
+            is: the other three are a screenful each, while the batch list is
+            every number the plant has ever run. Every one of them is on it -
+            see SearchSelectField. */}
+        <SearchSelectField
           label="Batch"
+          sheetTitle="Find a batch"
+          searchLabel="Batch number"
+          searchPlaceholder="e.g. 3079"
           value={batch}
-          onChange={(e) => setBatch(e.target.value)}
+          options={batchOptions}
+          onChange={setBatch}
           fieldClassName="!mb-0"
-        >
-          <option value="">All batches</option>
-          {filters?.batches.map((b) => (
-            <option key={b} value={b}>
-              #{b}
-            </option>
-          ))}
-        </SelectField>
+        />
         <SelectField
           label="Machine"
           value={machineId}

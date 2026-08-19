@@ -251,10 +251,11 @@ class SelectFieldRow<V> extends StatelessWidget {
 /// have your batch is the correct reading of a dropdown that long.
 ///
 /// So it reads as the same field and opens as a search: type 3079 and there it
-/// is. Everything else about it is deliberately identical - the label, the
-/// chrome, the way the current choice is shown - because it sits in a row
-/// beside three ordinary dropdowns and should not look like a different kind of
-/// question.
+/// is - and every number is still on the list for the crew reading down them
+/// rather than looking one up. Everything else about it is deliberately
+/// identical - the label, the chrome, the way the current choice is shown -
+/// because it sits in a row beside three ordinary dropdowns and should not
+/// look like a different kind of question.
 class SearchSelectRow<V> extends StatelessWidget {
   const SearchSelectRow({
     super.key,
@@ -268,7 +269,6 @@ class SearchSelectRow<V> extends StatelessWidget {
     this.searchLabel = 'Find',
     this.searchPlaceholder,
     this.placeholder,
-    this.maxShown = 60,
   });
 
   final V? value;
@@ -285,11 +285,6 @@ class SearchSelectRow<V> extends StatelessWidget {
 
   /// Shown when nothing is selected and no item matches the current value.
   final String? placeholder;
-
-  /// How many matches are drawn at once. A cap rather than a page: past this
-  /// many the answer is to type another character, and the sheet says so
-  /// instead of quietly showing a slice as though it were the lot.
-  final int maxShown;
 
   String get _currentLabel {
     for (final item in items) {
@@ -348,7 +343,27 @@ class SearchSelectRow<V> extends StatelessWidget {
                         '${i.value}'.toLowerCase().contains(needle),
                   )
                   .toList(growable: false);
-        final shown = matches.take(maxShown).toList(growable: false);
+        final media = MediaQuery.of(sheetContext);
+
+        /*
+         * Every match, however many that is.
+         *
+         * This used to draw the first sixty and say so, on the reasoning that
+         * past that many the answer is to type another character. It is not:
+         * the crew opens this picker to read down the numbers as often as to
+         * look one up - "which batch was the one before this" is a question
+         * with no character to type - and a list that stops at sixty of four
+         * hundred and sixty-eight cannot answer it.
+         *
+         * Lazily, because the whole list is now on offer. A builder inside a
+         * bounded box asks only for the rows the box can show, so the picker
+         * costs a screenful whether the plant is at four hundred batches or
+         * four thousand. The height is measured off the screen less whatever
+         * the keyboard is covering, so the list ends above the number pad
+         * rather than behind it.
+         */
+        final room = ((media.size.height - media.viewInsets.bottom) * 0.55)
+            .clamp(200.0, media.size.height);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -362,20 +377,24 @@ class SearchSelectRow<V> extends StatelessWidget {
             ),
             if (matches.isEmpty)
               Hint('Nothing matches “${query.trim()}”.')
-            else ...[
-              for (final item in shown)
-                _PickerOption(
-                  label: item.label,
-                  selected: item.value == value,
-                  onTap: () =>
-                      Navigator.of(sheetContext).pop(items.indexOf(item)),
+            else
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: room),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  itemCount: matches.length,
+                  itemBuilder: (context, i) {
+                    final item = matches[i];
+                    return _PickerOption(
+                      label: item.label,
+                      selected: item.value == value,
+                      onTap: () =>
+                          Navigator.of(sheetContext).pop(items.indexOf(item)),
+                    );
+                  },
                 ),
-              if (matches.length > shown.length)
-                Hint(
-                  '${shown.length} of ${matches.length} shown — type another '
-                  'character to narrow it.',
-                ),
-            ],
+              ),
           ],
         );
       },

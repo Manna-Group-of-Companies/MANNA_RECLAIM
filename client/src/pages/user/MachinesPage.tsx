@@ -978,7 +978,12 @@ export function MachinesPage() {
         shiftwise
           ? ` · ${startShift}${tyre ? ` · ${TYRES[tyre].label}` : ''}`
           : special
-            ? ` · special line${nonProd ? ' · non-production' : ''}${
+            ? // The batch leads, for the same reason the moulding bench's number
+              // does below: a special pass is a pass on one batch, and the crew
+              // has just picked it off a grid of open ones. Saying it back is the
+              // confirmation that the run went on the batch they meant rather
+              // than the one beside it.
+              ` · ${batchNo.trim()} · special line${nonProd ? ' · non-production' : ''}${
                 mix.length ? ` · mixed with ${mix.length}` : ''
               }`
             : mouldRun
@@ -989,7 +994,13 @@ export function MachinesPage() {
                 ` · ${startBatchNo} · ${pressProduct?.name ?? press.product}`
               : pressRun
                 ? ` · ${pressProduct?.name ?? press.product}`
-                : ''
+                : // A refiner or pre-refiner on its own line refines a batch as
+                  // much as the special line does, and confirmed nothing at all -
+                  // the toast said the machine had started and left the crew to
+                  // trust the grid. It names the batch on the same terms.
+                  batchNo.trim()
+                  ? ` · ${batchNo.trim()}`
+                  : ''
       }`,
       'Could not start the run',
     );

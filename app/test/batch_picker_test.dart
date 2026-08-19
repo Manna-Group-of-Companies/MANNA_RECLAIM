@@ -80,16 +80,29 @@ void main() {
     expect(find.textContaining('Nothing matches'), findsOneWidget);
   });
 
-  testWidgets('a long list says it is showing part of itself', (tester) async {
+  testWidgets('a long list offers all of itself, not a first screenful', (
+    tester,
+  ) async {
     await tester.pumpWidget(_harness(value: '', onChanged: (_) {}));
 
     await tester.tap(find.text('All batches'));
     await tester.pumpAndSettle();
 
-    // Untyped, every one of the 201 entries matches and only the first 60 are
-    // drawn. Saying which is the difference between a cap and a list that
-    // quietly ends - see maxShown.
-    expect(find.textContaining('of 201 shown'), findsOneWidget);
+    // Untyped, every one of the 201 entries is on offer. The picker used to
+    // draw the first sixty and say so, which left the crew reading down the
+    // numbers - "which batch was the one before this" - with no way to get at
+    // the rest but to guess a character to type.
+    expect(find.textContaining('shown'), findsNothing);
+
+    // The last number is reached by scrolling. It is not built until it is
+    // scrolled to, which is what keeps a list this long affordable.
+    final list = find.descendant(
+      of: find.byType(ListView),
+      matching: find.byType(Scrollable),
+    );
+    expect(find.text('#3199'), findsNothing);
+    await tester.scrollUntilVisible(find.text('#3199'), 300, scrollable: list);
+    expect(find.text('#3199'), findsOneWidget);
   });
 
   testWidgets('All batches is a choice, not the absence of one', (
