@@ -346,6 +346,14 @@ export interface Run {
   /** What this run leaves for the next batch of the same grade. */
   leftout_out?: number | null;
   paused?: boolean;
+  /** When the pause it is standing in began - null unless it is paused. */
+  paused_at?: string | null;
+  /**
+   * Every pause already ended, added up, in milliseconds. Banked by the server
+   * on each resume, and taken off both the card's timer and the minutes a stop
+   * books: a machine stood still is not a machine running.
+   */
+  paused_ms?: number | null;
   /**
    * A moulding press run. The product it was set up for and what it was moulded
    * at - both copied off the product as the run started, so they read as the run

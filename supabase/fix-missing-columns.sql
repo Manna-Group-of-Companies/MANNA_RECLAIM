@@ -26,6 +26,9 @@
 -- cannot hold and the card never shows the paused timer.
 alter table public.runs add column if not exists paused      boolean default false;
 alter table public.runs add column if not exists paused_at   timestamptz;
+-- Every pause before the one it is in, added up. Without it a resumed run
+-- counts the break it just took as time it ran.
+alter table public.runs add column if not exists paused_ms   bigint default 0;
 alter table public.runs add column if not exists remarks     text;
 alter table public.runs add column if not exists needs_weigh boolean default false;
 

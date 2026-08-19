@@ -177,7 +177,7 @@ Future<StopResult?> showStopSheet({
       // a warning and not a refusal.
       final mouldExpected = isMouldingBench
           ? expectedPieces(
-              runtimeMin: minutesBetween(run.startedAt),
+              runtimeMin: minutesBetween(run.startedAt, null, pausedMs(run)),
               cyclicMin: run.cyclicMin,
               cavities: run.cavities,
             )
@@ -662,14 +662,16 @@ String _subtitleFor({
     return [
       run.batchNo,
       run.product,
-      'ran ${elapsed(run.startedAt)}',
+      'ran ${runElapsed(run)}',
+      'started ${clockSec(run.startedAt)}',
     ].where((s) => s != null && s.isNotEmpty).join(' · ');
   }
   if (isPress) {
     return [
       run.product,
       run.batchNo,
-      'ran ${elapsed(run.startedAt)}',
+      'ran ${runElapsed(run)}',
+      'started ${clockSec(run.startedAt)}',
     ].where((s) => s != null && s.isNotEmpty).join(' · ');
   }
   if (shiftwise) {
@@ -686,9 +688,11 @@ String _subtitleFor({
       run.formulation,
       run.quality,
     ].where((s) => s != null && s.isNotEmpty).join(' · ');
-    return named.isEmpty ? 'Running ${elapsed(run.startedAt)}' : named;
+    return named.isEmpty
+        ? 'Running ${runElapsed(run)} · started ${clockSec(run.startedAt)}'
+        : named;
   }
-  return 'Running ${elapsed(run.startedAt)}'
+  return 'Running ${runElapsed(run)} · started ${clockSec(run.startedAt)}'
       '${run.batchNo != null ? ' · ${run.batchNo}' : ''}';
 }
 
@@ -887,7 +891,7 @@ Future<bool> _confirmStop({
       ? variancePct(
           piecesValue,
           expectedPieces(
-            runtimeMin: minutesBetween(run.startedAt),
+            runtimeMin: minutesBetween(run.startedAt, null, pausedMs(run)),
             cyclicMin: run.cyclicMin,
             cavities: run.cavities,
           ),

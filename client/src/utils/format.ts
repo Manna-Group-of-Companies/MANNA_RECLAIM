@@ -26,13 +26,48 @@ export const duration = (runtimeMin?: number | null, hoursRun?: number | null) =
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 };
 
-/** Live timer for a run in progress, matching the prototype's H:MM:SS. */
-export const elapsed = (fromISO: string, toISO?: string | null) => {
-  const ms = Math.max(0, (toISO ? new Date(toISO) : new Date()).getTime() - new Date(fromISO).getTime());
-  const s = Math.floor(ms / 1000);
+/** Milliseconds as H:MM:SS, the way the prototype's timer reads. */
+const hms = (ms: number) => {
+  const s = Math.floor(Math.max(0, ms) / 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 };
+
+/** Live timer for a run in progress, matching the prototype's H:MM:SS. */
+export const elapsed = (fromISO: string, toISO?: string | null) =>
+  hms((toISO ? new Date(toISO) : new Date()).getTime() - new Date(fromISO).getTime());
+
+/** A run as far as its pauses go - what runElapsed() and pausedMs() need of it. */
+export interface Pausable {
+  paused?: boolean | null;
+  paused_at?: string | null;
+  paused_ms?: number | null;
+}
+
+/**
+ * Every pause a run has taken, in milliseconds: the ones already ended, which
+ * the server banks into `paused_ms` on each resume, plus the one it is standing
+ * in now, measured off `paused_at`.
+ */
+export const pausedMs = (run?: Pausable | null, at: number = Date.now()) => {
+  const banked = Math.max(0, Number(run?.paused_ms) || 0);
+  if (!run?.paused || !run.paused_at) return banked;
+  const from = new Date(run.paused_at).getTime();
+  return Number.isNaN(from) ? banked : banked + Math.max(0, at - from);
+};
+
+/**
+ * How long a run has actually run, H:MM:SS - the clock since it started, less
+ * every pause it has taken.
+ *
+ * A paused machine is not running, so its timer stands still: the figure holds
+ * where it was when Pause was tapped and carries on from there on Resume,
+ * instead of counting the break in and reading high for the rest of the shift.
+ * The same subtraction the server makes when it books the minutes at a stop, so
+ * the card and the record agree.
+ */
+export const runElapsed = (run: Pausable & { started_at: string }, at: number = Date.now()) =>
+  hms(at - new Date(run.started_at).getTime() - pausedMs(run, at));
 
 /**
  * Hours a run took, in the back office's order of preference: what the crew

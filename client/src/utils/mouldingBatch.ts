@@ -99,10 +99,20 @@ export function variancePct(actual?: number | null, expected?: number | null): n
 export const overVariance = (pct?: number | null) =>
   pct != null && Math.abs(Number(pct)) > PIECES_VARIANCE_PCT;
 
-/** Minutes between two instants, for the expected count on a run still going. */
-export function minutesBetween(from?: string | null, to: Date = new Date()): number | null {
+/**
+ * Minutes between two instants, for the expected count on a run still going.
+ *
+ * `lessMs` comes off the gap - the time the bench stood paused, which the mould
+ * made nothing in. Leaving it in would measure a lot against a cycle it never
+ * had the minutes for, and flag every paused run as short.
+ */
+export function minutesBetween(
+  from?: string | null,
+  to: Date = new Date(),
+  lessMs = 0,
+): number | null {
   if (!from) return null;
   const started = new Date(from).getTime();
   if (Number.isNaN(started)) return null;
-  return Math.max(0, Math.round((to.getTime() - started) / 60000));
+  return Math.max(0, Math.round((to.getTime() - started - Math.max(0, lessMs)) / 60000));
 }

@@ -215,6 +215,13 @@ alter table public.runs add column if not exists needs_weigh boolean default fal
 alter table public.runs add column if not exists paused      boolean default false;
 alter table public.runs add column if not exists paused_at   timestamptz;
 
+-- How long the run has stood still. `paused_at` says when the pause it is in
+-- began; this is every pause before that one, added up. A paused machine is not
+-- running, so the time it stands still is not run time: the card's timer holds
+-- where it was and picks up from there, and the minutes a stop books are the
+-- clock between start and stop less this.
+alter table public.runs add column if not exists paused_ms   bigint default 0;
+
 -- The special line's rare non-production pass: metered like any other run, but
 -- it yields nothing to weigh, so it never reaches the Weigh or Packing tabs.
 -- Rows recorded before this column existed read null, and all of those were

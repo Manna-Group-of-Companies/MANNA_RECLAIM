@@ -48,6 +48,19 @@ export const clock24 = (iso?: string | null) => {
 };
 
 /**
+ * The same clock, down to the second - HH:MM:SS. What a running machine shows:
+ * the time it was started at, to the second the crew tapped Start, so it can be
+ * copied straight onto the shift's sheet.
+ */
+export const clockSec = (iso?: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+/**
  * A local 'YYYY-MM-DD' + 'HH:MM' pair as an instant. Built through the Date
  * constructor rather than string parsing so it reads as plant-local time, not
  * UTC. Null when either half is missing or the pair does not parse.

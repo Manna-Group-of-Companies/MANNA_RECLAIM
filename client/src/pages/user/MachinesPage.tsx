@@ -74,6 +74,7 @@ import {
 import {
   atLocal,
   clock24,
+  clockSec,
   currentShift,
   dayLong,
   dayMonth,
@@ -82,7 +83,7 @@ import {
   shiftForTime,
   todayISO,
 } from '@/utils/date';
-import { ago, elapsed } from '@/utils/format';
+import { ago, elapsed, pausedMs, runElapsed } from '@/utils/format';
 import type {
   Batch,
   BearingDue,
@@ -678,7 +679,9 @@ export function MachinesPage() {
    * reading while the sheet is open, which is why the two can differ by a
    * minute's worth and neither is wrong.
    */
-  const mouldRunMin = stopIsMoulding ? minutesBetween(stopping?.started_at) : null;
+  const mouldRunMin = stopIsMoulding
+    ? minutesBetween(stopping?.started_at, new Date(), pausedMs(stopping))
+    : null;
   const mouldExpected = stopIsMoulding
     ? expectedPieces({
         runtimeMin: mouldRunMin,
@@ -2098,11 +2101,21 @@ export function MachinesPage() {
               : stopIsMoulding
                 ? // The lot first: it is what the pieces will stand in the yard
                   // under, and what the lab will answer on.
-                  [stopping.batch_no, stopping.product, `ran ${elapsed(stopping.started_at)}`]
+                  [
+                    stopping.batch_no,
+                    stopping.product,
+                    `ran ${runElapsed(stopping)}`,
+                    `started ${clockSec(stopping.started_at)}`,
+                  ]
                     .filter(Boolean)
                     .join(' · ')
               : stopIsPress
-                ? [stopping.product, stopping.batch_no, `ran ${elapsed(stopping.started_at)}`]
+                ? [
+                    stopping.product,
+                    stopping.batch_no,
+                    `ran ${runElapsed(stopping)}`,
+                    `started ${clockSec(stopping.started_at)}`,
+                  ]
                     .filter(Boolean)
                     .join(' · ')
               : stopShiftwise
@@ -2117,8 +2130,10 @@ export function MachinesPage() {
                   .join(' · ')
               : stopsWithMeters
                 ? [stopping.batch_no, stopping.formulation, stopping.quality].filter(Boolean).join(' · ') ||
-                  `Running ${elapsed(stopping.started_at)}`
-                : `Running ${elapsed(stopping.started_at)}${stopping.batch_no ? ` · ${stopping.batch_no}` : ''}`
+                  `Running ${runElapsed(stopping)} · started ${clockSec(stopping.started_at)}`
+                : `Running ${runElapsed(stopping)} · started ${clockSec(stopping.started_at)}${
+                    stopping.batch_no ? ` · ${stopping.batch_no}` : ''
+                  }`
         }
         led="var(--led-brand)"
         onClose={closeSheet}

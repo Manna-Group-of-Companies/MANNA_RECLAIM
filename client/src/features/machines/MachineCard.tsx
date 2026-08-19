@@ -1,6 +1,6 @@
 import { BatchRef, FormChip, Icon, QualityChip } from '@/components/ui';
-import { elapsed, kg } from '@/utils/format';
-import { clock, dayMonth } from '@/utils/date';
+import { elapsed, kg, runElapsed } from '@/utils/format';
+import { clock, clockSec, dayMonth } from '@/utils/date';
 import { useTicker } from '@/hooks/useTicker';
 import { KIND_ACCENT, isMoulding } from '@/config/constants';
 import { cn } from '@/utils/cn';
@@ -181,7 +181,21 @@ export function MachineCard({
                 </FormChip>
               )}
             </div>
-            <span className={cn('timer', paused && 'paused')}>{elapsed(run.started_at)}</span>
+            {/* How long it has been running leads, in the big figure the crew
+                reads across the floor - and the time it was started at sits
+                under it, hours:minutes:seconds, because that is the reading
+                that goes on the shift's sheet and it cannot be got off a
+                counter without subtracting it from the wall clock first. The
+                lower line is named: `10:03:47` and `2:14:07` are the same
+                shape, and an unlabelled pair of them is two numbers nobody can
+                tell apart. The upper figure stands still while the run is
+                paused - see runElapsed(). */}
+            <div className="flex flex-col items-end leading-tight">
+              <span className={cn('timer', paused && 'paused')}>{runElapsed(run)}</span>
+              <small className="whitespace-nowrap text-[11px] text-ink-faint">
+                started {clockSec(run.started_at)}
+              </small>
+            </div>
           </div>
           <div className="flex gap-2">
             <button

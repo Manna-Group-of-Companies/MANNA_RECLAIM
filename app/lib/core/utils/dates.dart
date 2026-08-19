@@ -53,6 +53,15 @@ String clock24(String? iso) {
   return '${_pad(d.hour)}:${_pad(d.minute)}';
 }
 
+/// The same clock, down to the second - HH:MM:SS. What a running machine shows:
+/// the time it was started at, to the second the crew tapped Start, so it can be
+/// copied straight onto the shift's sheet.
+String clockSec(String? iso) {
+  final d = _parse(iso);
+  if (d == null) return '—';
+  return '${_pad(d.hour)}:${_pad(d.minute)}:${_pad(d.second)}';
+}
+
 /// The same, in the 12-hour form the cards use for "last run".
 String clock(String? iso) {
   final d = _parse(iso);

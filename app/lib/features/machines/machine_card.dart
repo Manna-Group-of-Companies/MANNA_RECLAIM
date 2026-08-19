@@ -309,14 +309,36 @@ class _MachineCardState extends State<MachineCard> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      elapsed(run.startedAt),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: paused ? T.warn : T.ok,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+                    // How long it has been running leads, in the big figure the
+                    // crew reads across the floor - and the time it was started
+                    // at sits under it, hours:minutes:seconds, because that is
+                    // the reading that goes on the shift's sheet and it cannot
+                    // be got off a counter without subtracting it from the wall
+                    // clock first. The lower line is named: `10:03:47` and
+                    // `2:14:07` are the same shape, and an unlabelled pair of
+                    // them is two numbers nobody can tell apart. The upper
+                    // figure stands still while the run is paused - see
+                    // runElapsed().
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          runElapsed(run),
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: paused ? T.warn : T.ok,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                        Text(
+                          'started ${clockSec(run.startedAt)}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: T.inkFaint,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -38,18 +38,47 @@ String duration(num? runtimeMin, num? hoursRun) {
   return h > 0 ? '${h}h ${m.toString().padLeft(2, '0')}m' : '${m}m';
 }
 
+/// Milliseconds as H:MM:SS, the way the prototype's timer reads.
+String _hms(int ms) {
+  final s = (ms < 0 ? 0 : ms) ~/ 1000;
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${s ~/ 3600}:${p((s % 3600) ~/ 60)}:${p(s % 60)}';
+}
+
 /// Live timer for a run in progress, matching the prototype's H:MM:SS.
 String elapsed(String? fromIso, [String? toIso]) {
   final from = DateTime.tryParse(fromIso ?? '');
   if (from == null) return '0:00:00';
   final to = toIso != null ? DateTime.tryParse(toIso) : null;
-  final ms = (to ?? DateTime.now())
-      .difference(from)
-      .inMilliseconds
-      .clamp(0, 1 << 62);
-  final s = ms ~/ 1000;
-  String p(int n) => n.toString().padLeft(2, '0');
-  return '${s ~/ 3600}:${p((s % 3600) ~/ 60)}:${p(s % 60)}';
+  return _hms((to ?? DateTime.now()).difference(from).inMilliseconds);
+}
+
+/// Every pause a run has taken, in milliseconds: the ones already ended, which
+/// the server banks into `paused_ms` on each resume, plus the one it is
+/// standing in now, measured off `paused_at`.
+int pausedMs(Run? run, [DateTime? at]) {
+  final banked = (run?.pausedMs ?? 0).round();
+  final base = banked < 0 ? 0 : banked;
+  if (run == null || !run.paused) return base;
+  final from = DateTime.tryParse(run.pausedAt ?? '');
+  if (from == null) return base;
+  final open = (at ?? DateTime.now()).difference(from).inMilliseconds;
+  return base + (open < 0 ? 0 : open);
+}
+
+/// How long a run has actually run, H:MM:SS - the clock since it started, less
+/// every pause it has taken.
+///
+/// A paused machine is not running, so its timer stands still: the figure holds
+/// where it was when Pause was tapped and carries on from there on Resume,
+/// instead of counting the break in and reading high for the rest of the shift.
+/// The same subtraction the server makes when it books the minutes at a stop,
+/// so the card and the record agree.
+String runElapsed(Run run, [DateTime? at]) {
+  final from = DateTime.tryParse(run.startedAt);
+  if (from == null) return '0:00:00';
+  final now = at ?? DateTime.now();
+  return _hms(now.difference(from).inMilliseconds - pausedMs(run, now));
 }
 
 /// Hours a run took, in the back office's order of preference: what the crew

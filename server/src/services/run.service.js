@@ -95,6 +95,27 @@ function pressCost(row) {
 }
 
 /**
+ * Milliseconds the pause a run is standing in has lasted, at the instant `at`.
+ * Zero on a run that is not paused, and on a paused row from before `paused_at`
+ * was written - a pause with no start is not one this can measure.
+ */
+const openPauseMs = (run, at) => {
+  if (!run?.paused || !run.paused_at) return 0;
+  const from = new Date(run.paused_at).getTime();
+  return Number.isNaN(from) ? 0 : Math.max(0, at - from);
+};
+
+/**
+ * Every pause a run has taken, added up: the ones already banked in
+ * `paused_ms`, plus the one it is standing in now.
+ *
+ * A paused machine is not running, so none of this is time it ran - it comes
+ * off the timer the floor watches and off the minutes a stop books.
+ */
+export const pausedMsOf = (run, at = Date.now()) =>
+  Math.max(0, Number(run?.paused_ms ?? 0) || 0) + openPauseMs(run, at);
+
+/**
  * What a sleeve or loop run cost, and how its count compares with what the
  * mould said it should have been.
  *
@@ -452,6 +473,9 @@ export function mergePatch(record, run, leg) {
     firewood_kg: addNum(record.firewood_kg, leg.firewood_kg),
     runtime_min: addNum(record.runtime_min, leg.runtime_min),
     hours_run: addNum(record.hours_run, leg.hours_run),
+    // The shift stood still for as long as all of its starts stood still. Out
+    // of the minutes above already - this is only what it adds up to.
+    paused_ms: addNum(record.paused_ms, leg.paused_ms),
     weight_kg: addNum(record.weight_kg, leg.weight_kg),
     workers: maxNum(record.workers, leg.workers),
     /*
@@ -1093,7 +1117,13 @@ export const runService = {
     if (run.ended_at) throw ApiError.conflict('Run is not in progress');
     const ended = payload.stoppedAt || new Date().toISOString();
     const started = run.started_at ? new Date(run.started_at).getTime() : null;
-    const clockMin = started ? Math.round((new Date(ended).getTime() - started) / 60000) : null;
+    // The clock between start and stop, less every pause taken in between - a
+    // machine stood still for an hour ran an hour less than the clock says. A
+    // run stopped while it is still paused counts that pause up to the stop.
+    const pausedMs = pausedMsOf(run, new Date(ended).getTime());
+    const clockMin = started
+      ? Math.round(Math.max(0, new Date(ended).getTime() - started - pausedMs) / 60000)
+      : null;
     // What the crew recorded, then the hour meter, then the clock. The minutes
     // follow the hours whenever the hours came from a reading: the two describe
     // the same run, and screens that show minutes read that column first.
@@ -1131,6 +1161,12 @@ export const runService = {
       unloaded_at: run.kind === 'autoclave' ? ended : run.unloaded_at,
       runtime_min: runtimeMin,
       hours_run: hoursRun,
+      // A run cannot be left paused once it is stopped, and the pause it was
+      // standing in is banked with the rest - what stood still is on the record
+      // rather than lost with the flag.
+      paused: false,
+      paused_at: null,
+      paused_ms: Math.round(pausedMs),
       elec_end: payload.elecEnd ?? run.elec_end,
       hour_end: payload.hourEnd ?? run.hour_end,
       kwh: kwhOf(run, payload) ?? run.kwh,
@@ -1748,10 +1784,29 @@ export const runService = {
     }
   },
 
-  pause: (id, paused = true) =>
-    base
-      .update(id, { paused, paused_at: paused ? new Date().toISOString() : null })
-      .then(decorate),
+  /**
+   * Pause a run, or set it going again.
+   *
+   * A pause is not a gap the run time counts. `paused_at` holds when the pause
+   * began; resuming banks how long it lasted into `paused_ms` and clears it, so
+   * the timer picks up where it stopped rather than where the wall clock got
+   * to. Pausing a run that is already paused leaves `paused_at` alone - moving
+   * it would throw away the pause standing.
+   */
+  async pause(id, paused = true) {
+    const run = await base.findById(id);
+    if (paused) {
+      if (run.paused && run.paused_at) return decorate(run);
+      return decorate(await base.update(id, { paused: true, paused_at: new Date().toISOString() }));
+    }
+    return decorate(
+      await base.update(id, {
+        paused: false,
+        paused_at: null,
+        paused_ms: Math.round(pausedMsOf(run)),
+      }),
+    );
+  },
 
   async upsertMany(rows) {
     return (await base.upsertMany(rows)).map(decorate);

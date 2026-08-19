@@ -607,6 +607,8 @@ class Run {
     this.leftoutIn,
     this.leftoutOut,
     this.paused = false,
+    this.pausedAt,
+    this.pausedMs,
     this.product,
     this.cavities,
     this.cyclicMin,
@@ -695,6 +697,14 @@ class Run {
   final num? leftoutOut;
   final bool paused;
 
+  /// When the pause it is standing in began - null unless it is paused.
+  final String? pausedAt;
+
+  /// Every pause already ended, added up, in milliseconds. Banked by the server
+  /// on each resume, and taken off both the card's timer and the minutes a stop
+  /// books: a machine stood still is not a machine running.
+  final num? pausedMs;
+
   // A moulding press run, and the sleeve and loop benches beside it.
   final String? product;
   final int? cavities;
@@ -780,6 +790,8 @@ class Run {
     leftoutIn: _num(j['leftout_in']),
     leftoutOut: _num(j['leftout_out']),
     paused: _bool(j['paused']),
+    pausedAt: _str(j['paused_at']),
+    pausedMs: _num(j['paused_ms']),
     product: _str(j['product']),
     cavities: _int(j['cavities']),
     cyclicMin: _num(j['cyclic_min']),
@@ -850,6 +862,8 @@ class Run {
     leftoutIn: leftoutIn,
     leftoutOut: leftoutOut,
     paused: paused,
+    pausedAt: pausedAt,
+    pausedMs: pausedMs,
     product: product,
     cavities: cavities,
     cyclicMin: cyclicMin,

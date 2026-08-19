@@ -90,10 +90,16 @@ num? variancePct(num? actual, num? expected) {
 bool overVariance(num? pct) => pct != null && pct.abs() > piecesVariancePct;
 
 /// Minutes between two instants, for the expected count on a run still going.
-int? minutesBetween(String? from, [DateTime? to]) {
+///
+/// `lessMs` comes off the gap - the time the bench stood paused, which the
+/// mould made nothing in. Leaving it in would measure a lot against a cycle it
+/// never had the minutes for, and flag every paused run as short.
+int? minutesBetween(String? from, [DateTime? to, int lessMs = 0]) {
   if (from == null || from.isEmpty) return null;
   final started = DateTime.tryParse(from);
   if (started == null) return null;
-  final mins = (to ?? DateTime.now()).difference(started).inMinutes;
-  return mins < 0 ? 0 : mins;
+  final ms =
+      (to ?? DateTime.now()).difference(started).inMilliseconds -
+      (lessMs < 0 ? 0 : lessMs);
+  return ms < 0 ? 0 : ms ~/ 60000;
 }
