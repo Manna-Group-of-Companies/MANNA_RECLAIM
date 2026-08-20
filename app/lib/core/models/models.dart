@@ -900,6 +900,7 @@ class RemovedRun {
     this.stockCleared,
     this.stockNote,
     this.qualityTestsDeleted = 0,
+    this.batchCleared,
   });
 
   final String id;
@@ -915,6 +916,11 @@ class RemovedRun {
   final String? stockNote;
   final int qualityTestsDeleted;
 
+  /// What the delete took back off the batch card - the discharge its autoclave
+  /// load had marked, the grade its refiner pass had settled. Null when the run
+  /// had nothing to take back, which is the ordinary case.
+  final ClearedBatch? batchCleared;
+
   factory RemovedRun.fromJson(Map<String, dynamic> j) => RemovedRun(
     id: _str(j['id']) ?? '',
     machineId: _str(j['machine_id']) ?? '',
@@ -925,6 +931,40 @@ class RemovedRun {
         : ClearedStock.fromJson(_map(j['stock_cleared'])),
     stockNote: _str(j['stock_note']),
     qualityTestsDeleted: _int(j['quality_tests_deleted']) ?? 0,
+    batchCleared: j['batch_cleared'] == null
+        ? null
+        : ClearedBatch.fromJson(_map(j['batch_cleared'])),
+  );
+}
+
+/// A batch card put back to what the runs still on record say it is.
+///
+/// The batch lives in the plant's shared state rather than in a table of its
+/// own, so nothing cascades into it - deleting a run has to take its marks off
+/// by hand, and the screen names them because a grade that has quietly unticked
+/// itself is not something anybody would connect to last week's delete.
+class ClearedBatch {
+  const ClearedBatch({
+    required this.ref,
+    this.dischargeCleared = false,
+    this.qualitiesCleared = const [],
+  });
+
+  final String ref;
+
+  /// The batch reads as still in the autoclave again - no load run is left.
+  final bool dischargeCleared;
+
+  /// Grades unticked because no remaining run makes them.
+  final List<String> qualitiesCleared;
+
+  factory ClearedBatch.fromJson(Map<String, dynamic> j) => ClearedBatch(
+    ref: _str(j['ref']) ?? '',
+    dischargeCleared: _bool(j['discharge_cleared']),
+    qualitiesCleared: (j['qualities_cleared'] as List? ?? [])
+        .map((q) => _str(q) ?? '')
+        .where((q) => q.isNotEmpty)
+        .toList(),
   );
 }
 

@@ -10,6 +10,11 @@ import http from 'node:http';
  * `Prefer: count=exact` answered in Content-Range, `/rpc/fn`) and serves rows
  * out of memory.
  *
+ * It answers Supabase Storage on the same listener, for the same reason:
+ * attaching a lab report and deleting one are HTTP calls to a second service,
+ * and a delete that has to reach into that service is only proved by something
+ * being on the other end of it.
+ *
  * It is deliberately not a database. What it is for is proving the layers above
  * one: that a role guard refuses before anything is read, that a response body
  * carries the fields it is supposed to and none it is not, and that the API
@@ -82,17 +87,75 @@ const readBody = (req) =>
   });
 
 /**
- * Starts the stub and hands back its URL, its tables, and a stop().
+ * The three Storage calls this project makes: put one object, list a folder,
+ * and delete a set of paths.
+ *
+ * A bucket the bag does not name answers 404, the way Supabase does for one
+ * that was never created. That is a case the server has to read as "there is
+ * nothing here to delete" rather than as a failure, so it is worth being able
+ * to seed.
+ */
+async function storageRoute(req, res, buckets, rest) {
+  const listMatch = /^list\/([^/]+)$/.exec(rest);
+  if (listMatch && req.method === 'POST') {
+    const paths = buckets[listMatch[1]];
+    if (!paths) return json(res, 404, { message: 'Bucket not found' });
+    const { prefix = '', limit = 100, offset = 0 } = (await readBody(req)) ?? {};
+    const folder = prefix ? `${prefix}/` : '';
+    const under = paths
+      .filter((path) => path.startsWith(folder))
+      // Storage names the entries in the folder, not their full paths.
+      .map((path) => ({ id: `object-${path}`, name: path.slice(folder.length) }));
+    return json(res, 200, under.slice(offset, offset + limit));
+  }
+
+  const bucketMatch = /^([^/]+)$/.exec(rest);
+  if (bucketMatch && req.method === 'DELETE') {
+    const paths = buckets[bucketMatch[1]];
+    if (!paths) return json(res, 404, { message: 'Bucket not found' });
+    const { prefixes = [] } = (await readBody(req)) ?? {};
+    buckets[bucketMatch[1]] = paths.filter((path) => !prefixes.includes(path));
+    return json(res, 200, prefixes.map((name) => ({ name })));
+  }
+
+  const objectMatch = /^([^/]+)\/(.+)$/.exec(rest);
+  if (objectMatch && req.method === 'POST') {
+    const [, bucket, path] = objectMatch;
+    const paths = buckets[bucket];
+    if (!paths) return json(res, 404, { message: 'Bucket not found' });
+    // Every upload the server makes carries x-upsert, so a repeat is one file.
+    if (!paths.includes(path)) paths.push(path);
+    return json(res, 200, { Key: `${bucket}/${path}` });
+  }
+
+  return json(res, 405, { message: 'method not allowed' });
+}
+
+/**
+ * Starts the stub and hands back its URL, its tables, its buckets and a stop().
  *
  * `tables` is a plain `{ name: [rows] }` bag the test reads and writes directly,
  * so an assertion about "what the database ended up holding" is an assertion
- * about the same array the requests moved.
+ * about the same array the requests moved. `storage` is the same idea one
+ * service over: `{ bucket: [paths] }`, which is what makes "the file went with
+ * the row" something a test can actually watch happen.
  */
-export async function startPostgrest({ tables = {}, functions = {}, missingColumns = {} } = {}) {
+export async function startPostgrest({
+  tables = {},
+  functions = {},
+  missingColumns = {},
+  storage = {},
+} = {}) {
   const store = { ...tables };
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://stub');
+
+    // Storage is a different service on the same project, so it is a different
+    // path prefix here rather than a different listener.
+    const storageMatch = /^\/storage\/v1\/object\/(.+)$/.exec(url.pathname);
+    if (storageMatch) return storageRoute(req, res, storage, decodeURI(storageMatch[1]));
+
     const rpcMatch = /^\/rest\/v1\/rpc\/(.+)$/.exec(url.pathname);
 
     if (rpcMatch) {
@@ -194,6 +257,7 @@ export async function startPostgrest({ tables = {}, functions = {}, missingColum
   return {
     url: `http://127.0.0.1:${port}`,
     tables: store,
+    storage,
     stop: () => new Promise((resolve) => server.close(resolve)),
   };
 }

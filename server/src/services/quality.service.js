@@ -1,6 +1,6 @@
 import { crud } from './base.service.js';
 import { stockService } from './stock.service.js';
-import { uploadObject } from '../config/supabase.js';
+import { uploadObject, removeObjects } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 import { TABLES, QUALITIES } from '../config/constants.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -153,6 +153,11 @@ export const qualityService = {
    * before this, or the state it would have opened in if this was the only one.
    * See stockService.refreshVerdictFor().
    *
+   * Nor is the row the only copy of the sheet. A report attached to a test is a
+   * file in Storage, and Storage is a different service with a different idea
+   * of what exists - it would have kept the lab's sheet at a public URL long
+   * after the test citing it was gone. That goes too, and it goes first.
+   *
    * That is allowed to fail without failing the delete. The test is already
    * gone and the group is a derived status that `npm run stock:qc-sync` puts
    * right, so it is logged rather than raised at whoever pressed delete - the
@@ -160,6 +165,19 @@ export const qualityService = {
    */
   async remove(id) {
     const test = await base.findById(id);
+
+    /*
+     * The report before the row, rather than after it.
+     *
+     * There is no transaction across PostgREST and Storage to have; what there
+     * is instead is an order in which a partial failure leaves something
+     * coherent, and a test still standing beside its own sheet is that. The
+     * other order leaves a file at a public URL that no row and no screen can
+     * lead anybody back to - unfindable, unlistable, and reported as a delete
+     * that worked. This way the delete can simply be pressed again.
+     */
+    if (test.attachment_url) await removeObjects(REPORT_BUCKET, test.id);
+
     await base.remove(id);
 
     let groups = [];

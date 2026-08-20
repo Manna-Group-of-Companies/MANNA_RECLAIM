@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { crud } from './base.service.js';
 import { machineService } from './machine.service.js';
-import { decorate as decorateRun } from './run.service.js';
+import { decorate as decorateRun, settlesGrade } from './run.service.js';
 import { qualityService } from './quality.service.js';
 import {
   TABLES,
@@ -663,6 +663,90 @@ export const batchService = {
       return next;
     });
     return found;
+  },
+
+  /**
+   * Takes back everything a run had written onto its batch card, for a run that
+   * has just been deleted from History.
+   *
+   * The mirror of markAutoclaveDone() and markQuality() above, and the reason it
+   * has to exist at all: a batch is not a table. It lives inside the tablets'
+   * `shared_state` blob, which is a second store with its own copy of what the
+   * plant did, and nothing in Postgres cascades into a JSON document. So a run
+   * deleted off `runs` used to leave its own conclusions standing there - a card
+   * reading "discharged 14:20" on the strength of an autoclave pass that no
+   * longer exists, or a grade ticked because a refiner ran it and then had that
+   * run struck off. Neither is visible from any screen as a leftover; both read
+   * exactly like a fact somebody recorded.
+   *
+   * Called after the row is gone, never before, because the question each mark
+   * has to answer is "does anything that is still on record say this?" - and
+   * that is only the truth once the deleted run is actually out of the table:
+   *
+   *   - a paired charge has a load run on each vessel, so one being deleted does
+   *     not un-discharge the batch. What it does do is move `unloadedAt` onto
+   *     the twin's discharge, rather than leave the card dated off a run that
+   *     was deleted.
+   *   - a grade two passes settled keeps its tick when one of them goes.
+   *
+   * What it cannot tell apart is a grade the supervisor had already ticked by
+   * hand before a refiner ran it: markQuality() is a no-op on a grade that is
+   * already marked, so the blob holds one tick and no record of who put it
+   * there. That tick comes off with the run. It is named in what comes back
+   * rather than done quietly, so History says the grade was unmarked and the
+   * supervisor can tick it again - which setQuality() will now allow, because
+   * the run that had been blocking the untick is the one that just went.
+   */
+  async forgetRun(run) {
+    const ref = String(run?.batch_no ?? '').trim();
+    if (!ref) return null;
+
+    const remaining = await runs.all({ batch_no: ref }, { sort: 'started_at', ascending: true });
+    const wasLoad = run.kind === 'autoclave' || Boolean(run.autoclave_id);
+    // A load still in the vessel has not discharged anything, so it is not what
+    // put the mark on the card and cannot be what takes it off.
+    const discharged = autoclaveRunsOf(remaining).filter((r) => r.ended_at);
+    const settled = settlesGrade(run) ? run.quality : null;
+
+    let cleared = null;
+    await mutateBatches((batches) => {
+      // Recomputed inside the guard, not accumulated outside it: mutateBatches
+      // re-runs this against a fresh document when a tablet writes first.
+      cleared = { ref, discharge_cleared: false, qualities_cleared: [] };
+
+      const index = batches.findIndex((b) => sameRef(refOf(b), ref));
+      if (index < 0) return batches;
+      const raw = batches[index];
+      const fields = {};
+
+      if (wasLoad && raw.autoclaveDone) {
+        if (!discharged.length) {
+          fields.autoclaveDone = false;
+          fields.unloadedAt = null;
+          cleared.discharge_cleared = true;
+        } else {
+          const at = iso(discharged[0].unloaded_at ?? discharged[0].ended_at);
+          if (at && at !== iso(raw.unloadedAt)) fields.unloadedAt = at;
+        }
+      }
+
+      const marked = raw.qualities ?? [];
+      if (settled && marked.includes(settled)) {
+        const stillRun = remaining.some((r) => settlesGrade(r) && r.quality === settled);
+        if (!stillRun) {
+          fields.qualities = marked.filter((q) => q !== settled);
+          cleared.qualities_cleared = [settled];
+        }
+      }
+
+      if (!Object.keys(fields).length) return batches;
+      const next = [...batches];
+      next[index] = { ...next[index], ...fields };
+      return next;
+    });
+
+    if (!cleared?.discharge_cleared && !cleared?.qualities_cleared.length) return null;
+    return cleared;
   },
 
   /**

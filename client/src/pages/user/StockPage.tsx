@@ -416,24 +416,6 @@ const overrideNote = (card: YardCard): string | null => {
     : 'the lab passed this — it has been held by hand since';
 };
 
-/**
- * Whether to say out loud that a verdict has no test behind it.
- *
- * Only where the silence is misleading. A `pending` group has obviously not been
- * tested and the band above the cards has just said so, and a coarse pool that
- * nobody has sampled is the ordinary case rather than the odd one - coarse sells
- * on the line running to specification, and the card already says "0 of 3
- * sampled". What is left is a group standing on a pass or a fail with nothing
- * measured under it, which is a real thing to know before loading it.
- *
- * The card says that flatly rather than blaming anyone for it. It is nearly
- * always the back office releasing a group the bench cannot reach - and the
- * signature line has already said so in that case - but a test that was filed
- * and later deleted lands here too, and "set by hand" would be a guess.
- */
-const unbacked = (card: YardCard) =>
-  !card.test && card.qc !== 'pending' && card.kindLabel !== 'pool';
-
 /** "2 of 3 sampled", and whether the lab flagged any of them. */
 const sampleHint = (samples: NonNullable<YardCard['samples']>) => {
   const counted = `${samples.taken} of ${samples.total} sampled`;
@@ -792,7 +774,6 @@ export function StockPage() {
           second is the answer to "can this order go out today"; the first is
           only how much of the yard the filters are letting through. */}
       <ViewHead
-        title="Stock"
         meta={
           <>
             {filtered ? `${visible.length} of ${cards.length}` : cards.length} groups ·{' '}
@@ -959,59 +940,48 @@ export function StockPage() {
                           Back office only, because the readings arrive with the
                           tester's name on them - see `test` on fromSummary().
                         */}
-                        {(c.test || unbacked(c)) && (
+                        {c.test && (
                           <div className="lab">
-                            {c.test ? (
-                              <>
-                                <div className="lab-h">
-                                  <span
-                                    className={cn(
-                                      'gradetag',
-                                      c.test.verdict === 'pass' ? 'pass' : 'hold',
-                                    )}
-                                  >
-                                    <i className="gd" />
-                                    lab {c.test.verdict === 'pass' ? 'pass' : 'hold'}
+                            <div className="lab-h">
+                              <span
+                                className={cn('gradetag', c.test.verdict === 'pass' ? 'pass' : 'hold')}
+                              >
+                                <i className="gd" />
+                                lab {c.test.verdict === 'pass' ? 'pass' : 'hold'}
+                              </span>
+                              <span className="muted">{testedLine(c.test)}</span>
+                            </div>
+
+                            {/* The bench and the card disagreeing, said in
+                                words - see overrideNote(). */}
+                            {override && <div className="lab-warn">{override}</div>}
+
+                            {/* What was actually measured, and the sheet it was
+                                written on. A test filed with neither is still a
+                                verdict, so both are optional and the row is
+                                dropped when there is nothing in it rather than
+                                drawn empty. */}
+                            {((c.test.params?.length ?? 0) > 0 || c.test.attachment_url) && (
+                              <div className="lab-b">
+                                {c.test.params?.map((p) => (
+                                  <span key={p.name}>
+                                    <b>{p.name}</b> {p.value}
+                                    {p.unit ?? ''}
                                   </span>
-                                  <span className="muted">{testedLine(c.test)}</span>
-                                </div>
-
-                                {/* The bench and the card disagreeing, said in
-                                    words - see overrideNote(). */}
-                                {override && <div className="lab-warn">{override}</div>}
-
-                                {/* What was actually measured, and the sheet it
-                                    was written on. A test filed with neither is
-                                    still a verdict, so both are optional and
-                                    the row is dropped when there is nothing in
-                                    it rather than drawn empty. */}
-                                {((c.test.params?.length ?? 0) > 0 || c.test.attachment_url) && (
-                                  <div className="lab-b">
-                                    {c.test.params?.map((p) => (
-                                      <span key={p.name}>
-                                        <b>{p.name}</b> {p.value}
-                                        {p.unit ?? ''}
-                                      </span>
-                                    ))}
-                                    {c.test.attachment_url && (
-                                      <a
-                                        href={c.test.attachment_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                      >
-                                        {c.test.attachment_name || 'report'} ↗
-                                      </a>
-                                    )}
-                                  </div>
+                                ))}
+                                {c.test.attachment_url && (
+                                  <a
+                                    href={c.test.attachment_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    {c.test.attachment_name || 'report'} ↗
+                                  </a>
                                 )}
-
-                                {c.test.remarks && <div className="lab-note">{c.test.remarks}</div>}
-                              </>
-                            ) : (
-                              <div className="lab-none">
-                                no lab test on file behind this verdict
                               </div>
                             )}
+
+                            {c.test.remarks && <div className="lab-note">{c.test.remarks}</div>}
                           </div>
                         )}
 

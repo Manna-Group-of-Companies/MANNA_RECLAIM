@@ -288,19 +288,10 @@ export function MachinesPage() {
    */
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   /**
-   * The batches a refiner may be pointed at: open, and out of the autoclave.
-   * A charge still cooking has nothing to refine yet, so it cannot be mixed into
-   * another batch's tailings and it is not what "nothing is ready" counts.
-   */
-  const refinableBatches = useMemo(
-    () => openBatches.filter((b) => b.autoclave_done),
-    [openBatches],
-  );
-  /**
    * What the Batch pick offers: every open batch, cooking ones included.
    *
-   * They used to be filtered down to refinableBatches, which read as "these are
-   * all the batches there are" and hid a charge the crew could see through the
+   * They used to be filtered down to the ones out of the autoclave, which read
+   * as "these are all the batches there are" and hid a charge the crew could see through the
    * vessel door. A batch still in the autoclave now shows with its state where
    * its stage times would be, so the pick says why it is not ready rather than
    * leaving the number off the screen. Nothing is refused: the server takes a
@@ -331,9 +322,17 @@ export function MachinesPage() {
   const [quality, setQuality] = useState<Quality>('Special');
   const [batchNo, setBatchNo] = useState('');
   /**
-   * Special line only: the other batches whose tailings are going through with
-   * the one being refined. The batch itself is not in here - it leads the list
-   * that gets sent, and cannot be mixed with itself.
+   * Any sheet that refines a batch: the other batches whose tailings are going
+   * through with the one being refined. The batch itself is not in here - it
+   * leads the list that gets sent, and cannot be mixed with itself.
+   *
+   * Filled by tapping the Batch grid a second time - see tapBatch. It was a
+   * grid of its own under "Mixed from", offered on the special line alone,
+   * which got both halves of this wrong. A refiner takes two batches at a time
+   * and could not say so at all, so a pass with two batches in it went on
+   * record as a pass on one; and a second grid of the same numbers is not what
+   * "pick two batches" looks like to a crew in gloves. One grid, and the tap
+   * after the first mixes one in.
    */
   const [mix, setMix] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(todayISO());
@@ -457,11 +456,57 @@ export function MachinesPage() {
    * the sheet says so and offers nothing to fill in.
    */
   const startNothingReady = startSpecial && pickableBatches.length === 0;
-  /** The other batches whose tailings can go through with the one picked. */
-  const mixable = useMemo(
-    () => (startSpecial && batchNo.trim() ? refinableBatches.filter((b) => b.ref !== batchNo.trim()) : []),
-    [startSpecial, batchNo, refinableBatches],
-  );
+  /**
+   * A tap on the Batch grid.
+   *
+   * The first number picked is the batch being refined - the one the run is
+   * filed under, and the only one the record keys on. What is tapped after it
+   * goes through with it as tailings, which is what `sources` keeps. Two
+   * batches is what a refiner takes at a time; the special line records up to
+   * four, which is as many as its columns hold.
+   *
+   * Untapping the one it is filed under hands that job to the next number still
+   * lit rather than dropping the whole picking: the crew is taking one batch
+   * back off the machine, not starting the pick again.
+   */
+  const tapBatch = (b: Batch) => {
+    const lead = batchNo.trim();
+    if (lead === b.ref) {
+      setBatchNo(mix[0] ?? '');
+      setMix(mix.slice(1));
+      return;
+    }
+    if (mix.includes(b.ref)) {
+      setMix(mix.filter((ref) => ref !== b.ref));
+      return;
+    }
+    if (!lead) {
+      setBatchNo(b.ref);
+      // The grade the batch was opened for is the one it will come off at, so
+      // the picker starts there - the crew can still say otherwise before it
+      // starts.
+      if (startSpecial && b.grade) setQuality(b.grade);
+      return;
+    }
+    if (!b.autoclave_done) {
+      // A charge is on this grid before it is out of the vessel, so that the
+      // pick says why it is not ready rather than leaving the number off the
+      // screen. It can still be the batch a run is filed under - the crew see
+      // it through the door - but it has no tailings to put through anything
+      // until it is discharged.
+      notify(`${b.ref} is still in the autoclave`, 'warn');
+      return;
+    }
+    // Two batches is what a refiner takes at a time: the one it is filed under
+    // and one more going through with it. The special line keeps the four it
+    // has always recorded - four columns is what the record has room for, and
+    // one of them is the batch being refined.
+    if (mix.length >= (startSpecial ? 3 : 1)) {
+      notify(startSpecial ? 'Up to 4 batches per mix' : 'Two batches at a time', 'warn');
+      return;
+    }
+    setMix([...mix, b.ref]);
+  };
 
   // ---- the press, sleeve bench or loop bench being set up ----
   const startIsPress = isPress(startMachine?.kind);
@@ -923,6 +968,9 @@ export function MachinesPage() {
     const line = sheet.line;
     const shiftwise = line ? line === 'coarse' : isShiftwise(machine.kind);
     const special = line === 'special';
+    // Every sheet that refines a named batch may have had more than one going
+    // through it - see `mix`.
+    const picksBatch = isRefiner(machine) || special;
     // The special line refines a named batch - there is nothing to run it
     // against otherwise, and the grade would belong to nothing.
     if (special && !batchNo.trim()) {
@@ -974,7 +1022,7 @@ export function MachinesPage() {
           // The batch being refined leads the list; the tailings mixed into it
           // follow. Sent only when there is a mix - a batch on its own is
           // already named by `batchNo`.
-          sources: special && mix.length ? [batchNo.trim(), ...mix] : undefined,
+          sources: picksBatch && mix.length ? [batchNo.trim(), ...mix] : undefined,
         }),
       ),
       `${machine.name} started${
@@ -1000,9 +1048,11 @@ export function MachinesPage() {
                 : // A refiner or pre-refiner on its own line refines a batch as
                   // much as the special line does, and confirmed nothing at all -
                   // the toast said the machine had started and left the crew to
-                  // trust the grid. It names the batch on the same terms.
+                  // trust the grid. It names the batch on the same terms, and
+                  // the batches mixed in with it for the same reason again: two
+                  // batches picked is two batches said back.
                   batchNo.trim()
-                  ? ` · ${batchNo.trim()}`
+                  ? ` · ${batchNo.trim()}${mix.length ? ` · mixed with ${mix.length}` : ''}`
                   : ''
       }`,
       'Could not start the run',
@@ -1871,7 +1921,14 @@ export function MachinesPage() {
           <>
             {startPicksBatch && pickableBatches.length > 0 && (
               <>
-                <SheetLabel>Batch</SheetLabel>
+                <SheetLabel>
+                  Batch{' '}
+                  {!mix.length && (
+                    <span className="muted normal-case tracking-normal">
+                      — tap a second to mix one in
+                    </span>
+                  )}
+                </SheetLabel>
                 <PickGrid>
                   {pickableBatches.map((b) => (
                     <Pick
@@ -1879,21 +1936,21 @@ export function MachinesPage() {
                       title={b.ref}
                       dot={b.grade ? gradeVar(b.grade) : undefined}
                       sub={<BatchPickSub batch={b} />}
-                      selected={batchNo === b.ref}
-                      onClick={() => {
-                        const next = batchNo === b.ref ? '' : b.ref;
-                        setBatchNo(next);
-                        // A batch cannot be mixed into itself, so picking one
-                        // takes it back out of the tailings.
-                        setMix(mix.filter((ref) => ref !== next));
-                        // The grade the batch was opened for is the one it will
-                        // come off at, so the picker starts there - the crew can
-                        // still say otherwise before it starts.
-                        if (next && startSpecial && b.grade) setQuality(b.grade);
-                      }}
+                      selected={batchNo === b.ref || mix.includes(b.ref)}
+                      onClick={() => tapBatch(b)}
                     />
                   ))}
                 </PickGrid>
+                {/* Which of the lit tiles the run is actually filed under. Two
+                    tiles lit the same way say nothing about that, and the one
+                    it is filed under is the one the batch card, the weighing
+                    and the costing all follow. */}
+                {mix.length > 0 && (
+                  <div className="hint">
+                    Filed under {batchNo.trim()} — {mix.join(' and ')}{' '}
+                    {mix.length === 1 ? 'goes' : 'go'} through with it as tailings.
+                  </div>
+                )}
               </>
             )}
             {(sheet.machine.needs_quality || startSpecial) && (
@@ -1919,7 +1976,13 @@ export function MachinesPage() {
                 note={startPicksBatch ? '— or type it' : '— optional'}
                 placeholder="e.g. B-104"
                 value={batchNo}
-                onChange={(e) => setBatchNo(e.target.value)}
+                onChange={(e) => {
+                  setBatchNo(e.target.value);
+                  // A number typed here is the batch being refined, so it comes
+                  // out of the mix if it was in it - nothing is mixed into
+                  // itself.
+                  setMix(mix.filter((ref) => ref !== e.target.value.trim()));
+                }}
                 fieldClassName="mt-4"
               />
             )}
@@ -1943,46 +2006,6 @@ export function MachinesPage() {
                     onClick={() => setNonProd(true)}
                   />
                 </PickGrid>
-              </>
-            )}
-
-            {/* A pass often carries the tailings of other batches through with
-                the one being refined. They are named here so the run says what
-                actually went into it - four batches in all, which is as many as
-                the record has room for. */}
-            {startSpecial && batchNo.trim() && (
-              <>
-                <SheetLabel className="mt-4">
-                  Mixed from{' '}
-                  <span className="muted normal-case tracking-normal">
-                    — add tailings of other batches
-                  </span>
-                </SheetLabel>
-                {mixable.length ? (
-                  <PickGrid>
-                    {mixable.map((b) => (
-                      <Pick
-                        key={b.id}
-                        title={b.ref}
-                        sub={b.formulation ?? undefined}
-                        selected={mix.includes(b.ref)}
-                        onClick={() => {
-                          if (mix.includes(b.ref)) {
-                            setMix(mix.filter((ref) => ref !== b.ref));
-                          } else if (mix.length >= 3) {
-                            // Four columns is all the record has room for, and
-                            // one of them is the batch being refined.
-                            notify('Up to 4 batches per mix', 'warn');
-                          } else {
-                            setMix([...mix, b.ref]);
-                          }
-                        }}
-                      />
-                    ))}
-                  </PickGrid>
-                ) : (
-                  <div className="hint">No other batches to mix.</div>
-                )}
               </>
             )}
 

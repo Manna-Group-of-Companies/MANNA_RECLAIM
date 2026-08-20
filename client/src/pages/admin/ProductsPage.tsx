@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useAppSelector } from '@/app/hooks';
 import { productService, type ProductPayload } from '@/api/services/product.service';
 import { machineService } from '@/api/services/machine.service';
@@ -148,6 +148,20 @@ export function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * Which product's Retire is armed, and which one is in flight.
+   *
+   * Retiring is the one control on this page that takes something away, and it
+   * went through on the first click while every other taking-away in this app -
+   * a run, a test, an empty stock group - asks once and says what it is about
+   * to do. A row of buttons where the harmless one and the destructive one
+   * behave identically is how the wrong one gets pressed.
+   *
+   * Restoring is not armed: putting a product back on the list is undone by
+   * pressing the same button again.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [retiring, setRetiring] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -215,13 +229,17 @@ export function ProductsPage() {
    * material cost reads the rate off those rows.
    */
   const retire = async (product: Product) => {
+    setRetiring(product.id);
     try {
       if (product.active) await productService.retire(product.id);
       else await productService.update(product.id, { active: true });
       notify(product.active ? 'Product retired' : 'Product back on the list');
+      setConfirming(null);
       void load();
     } catch (err) {
       notify(toRequestError(err).message, 'err');
+    } finally {
+      setRetiring(null);
     }
   };
 
@@ -291,38 +309,83 @@ export function ProductsPage() {
               {rows.map((product) => {
                 const cost = unitCost(product);
                 return (
-                  <tr key={product.id}>
-                    <td>{product.code ?? <span className="muted">—</span>}</td>
-                    <td>
-                      <b>{product.name}</b>
-                      {!product.active && <span className="badge none ml-1.5">retired</span>}
-                    </td>
-                    <td>{product.quality ?? <span className="muted">—</span>}</td>
-                    {/* A moulded product ships by the piece and a reclaim grade
-                        by the sack, so whichever pack it actually has is the
-                        one shown rather than a column of "not set". */}
-                    <td className="text-right">
-                      {product.pack_size != null
-                        ? `${product.pack_size} pcs`
-                        : show(product.pack_size_kg, 'kg')}
-                    </td>
-                    <td>{product.machine_id ?? <span className="muted">—</span>}</td>
-                    <td className="text-right">
-                      {cost == null ? <span className="muted">not costed</span> : `Rs ${cost}`}
-                    </td>
-                    <td className="text-right">
-                      <button
-                        type="button"
-                        className="btn ghost"
-                        onClick={() => setDraft(draftOf(product))}
-                      >
-                        Edit
-                      </button>{' '}
-                      <button type="button" className="btn ghost" onClick={() => void retire(product)}>
-                        {product.active ? 'Retire' : 'Restore'}
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={product.id}>
+                    <tr>
+                      <td>{product.code ?? <span className="muted">—</span>}</td>
+                      <td>
+                        <b>{product.name}</b>
+                        {!product.active && <span className="badge none ml-1.5">retired</span>}
+                      </td>
+                      <td>{product.quality ?? <span className="muted">—</span>}</td>
+                      {/* A moulded product ships by the piece and a reclaim grade
+                          by the sack, so whichever pack it actually has is the
+                          one shown rather than a column of "not set". */}
+                      <td className="text-right">
+                        {product.pack_size != null
+                          ? `${product.pack_size} pcs`
+                          : show(product.pack_size_kg, 'kg')}
+                      </td>
+                      <td>{product.machine_id ?? <span className="muted">—</span>}</td>
+                      <td className="text-right">
+                        {cost == null ? <span className="muted">not costed</span> : `Rs ${cost}`}
+                      </td>
+                      <td className="text-right">
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          onClick={() => setDraft(draftOf(product))}
+                        >
+                          Edit
+                        </button>{' '}
+                        {confirming === product.id ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn danger"
+                              onClick={() => void retire(product)}
+                              disabled={retiring === product.id}
+                            >
+                              {retiring === product.id ? 'Retiring…' : 'Yes, retire'}
+                            </button>{' '}
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={() => setConfirming(null)}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            onClick={() =>
+                              product.active ? setConfirming(product.id) : void retire(product)
+                            }
+                            title={
+                              product.active
+                                ? 'Take it off the pick lists — the runs that named it keep it'
+                                : 'Put it back on the pick lists'
+                            }
+                          >
+                            {product.active ? 'Retire' : 'Restore'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {/* Said beside the armed button rather than only in the toast
+                        afterwards: what a retire does not do is the part somebody
+                        hesitating over it is least likely to know. */}
+                    {confirming === product.id && (
+                      <tr>
+                        <td colSpan={7} className="sub">
+                          {product.name} leaves the pick lists at the presses and the benches. Every
+                          run that already moulded it keeps its name and its costing, and Restore puts
+                          it back.
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>

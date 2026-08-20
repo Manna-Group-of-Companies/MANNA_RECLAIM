@@ -373,7 +373,6 @@ class _StockPageState extends State<StockPage> {
     if (cards.isEmpty) {
       return ListView(
         children: const [
-          ViewHead(title: 'Stock'),
           EmptyState(
             icon: Icons.inventory_2_outlined,
             title: 'Nothing packed and ready',
@@ -453,7 +452,6 @@ class _StockPageState extends State<StockPage> {
           // second is the answer to "can this order go out today"; the first is
           // only how much of the yard the filters are letting through.
           ViewHead(
-            title: 'Stock',
             meta: Text(
               '${(grade.isNotEmpty || qc.isNotEmpty) ? '${visible.length} of ${cards.length}' : cards.length} '
               'groups · ${_readyLine(standing['pass']!)}',

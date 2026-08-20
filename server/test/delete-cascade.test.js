@@ -552,3 +552,271 @@ test('removing a verdict is the admin account’s, and a manager is refused with
   assert.equal(allowed.status, 200);
   assert.equal(api.tables.quality_tests.length, 0);
 });
+
+/**
+ * The two places a delete had still been leaving the record standing.
+ *
+ * Both are the same fault in different clothes: something outside Postgres is
+ * holding its own copy of what happened, and nothing cascades into it.
+ *
+ *   Storage    a lab report is a file, at a public URL, in a service that has
+ *              never heard of the row citing it.
+ *   the blob   a batch card is not a table - it lives inside the tablets'
+ *              shared_state document - so what a run wrote onto it survives the
+ *              run being struck off, and reads exactly like a fact somebody
+ *              recorded.
+ *
+ * The rule the plant runs on is that deleting an entry from History deletes it
+ * everywhere, and "everywhere" is these two as much as it is the runs table.
+ */
+
+test('deleting a lab test takes its report out of Storage with it', async (t) => {
+  const api = await startApi({
+    tables: {
+      quality_tests: [
+        {
+          id: 'test-1',
+          kind: 'batch',
+          batch_no: 'B1041',
+          quality: 'Fine',
+          verdict: 'pass',
+          ts: '2026-08-07T09:00:00Z',
+          attachment_url: 'http://stub/storage/v1/object/public/qc-reports/test-1/sheet.pdf',
+          attachment_name: 'sheet.pdf',
+        },
+      ],
+      stock_groups: [],
+    },
+    storage: { 'qc-reports': ['test-1/sheet.pdf', 'test-2/sheet.pdf'] },
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/quality-tests/test-1', { role: 'admin', method: 'DELETE' });
+  assert.equal(res.status, 200);
+
+  assert.deepEqual(
+    api.storage['qc-reports'],
+    ['test-2/sheet.pdf'],
+    "the sheet is gone from the bucket, and another test's is untouched",
+  );
+});
+
+test('a report re-attached under a second name does not survive the delete', async (t) => {
+  // attachReport() keys the file on its own name, so re-attaching as
+  // `sheet-v2.pdf` leaves `sheet.pdf` standing beside it and the row cites only
+  // the newer one. Deleting the URL alone would leave the older sheet readable
+  // for ever, which is the case that makes this a prefix rather than a path.
+  const api = await startApi({
+    tables: {
+      quality_tests: [
+        {
+          id: 'test-1',
+          kind: 'batch',
+          batch_no: 'B1041',
+          verdict: 'pass',
+          ts: '2026-08-07T09:00:00Z',
+          attachment_url: 'http://stub/storage/v1/object/public/qc-reports/test-1/sheet-v2.pdf',
+        },
+      ],
+      stock_groups: [],
+    },
+    storage: { 'qc-reports': ['test-1/sheet.pdf', 'test-1/sheet-v2.pdf'] },
+  });
+  t.after(() => api.stop());
+
+  await api.call('/quality-tests/test-1', { role: 'admin', method: 'DELETE' });
+  assert.deepEqual(api.storage['qc-reports'], [], 'both sheets go, not only the one on the row');
+});
+
+test('a test with no report attached is deleted without going near Storage', async (t) => {
+  const api = await startApi({
+    tables: {
+      quality_tests: [
+        {
+          id: 'test-1',
+          kind: 'batch',
+          batch_no: 'B1041',
+          verdict: 'pass',
+          ts: '2026-08-07T09:00:00Z',
+        },
+      ],
+      stock_groups: [],
+    },
+    // No buckets at all: a project that has never had a report filed against it
+    // must not have its deletes blocked on a bucket nobody ever created.
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/quality-tests/test-1', { role: 'admin', method: 'DELETE' });
+  assert.equal(res.status, 200);
+  assert.equal(api.tables.quality_tests.length, 0);
+});
+
+/** The plant blob, in the one shape these tests care about. */
+const plantDoc = (batches) => [{ id: 'plant', version: 1, doc: { batches } }];
+
+/** The batch card as it stands now, read straight out of the stub's blob. */
+const card = (api, no) => api.tables.shared_state[0].doc.batches.find((b) => b.no === no);
+
+/** A final-refiner pass, which is what settles a grade on the card. */
+const refinerRun = (over = {}) => ({
+  id: 'run-r4',
+  kind: 'refiner',
+  line: 'special',
+  machine_id: 'R4',
+  batch_no: '3088',
+  quality: 'Fine',
+  shift_date: '2026-08-13',
+  shift: 'Day',
+  started_at: '2026-08-13T06:00:00.000Z',
+  ended_at: '2026-08-13T14:00:00.000Z',
+  ...over,
+});
+
+/** The autoclave pass that discharged the charge. */
+const loadRun = (over = {}) => ({
+  id: 'run-ac',
+  kind: 'autoclave',
+  machine_id: 'AC_M',
+  batch_no: '3088',
+  shift_date: '2026-08-13',
+  shift: 'Night',
+  started_at: '2026-08-12T21:00:00.000Z',
+  ended_at: '2026-08-13T05:00:00.000Z',
+  unloaded_at: '2026-08-13T05:00:00.000Z',
+  ...over,
+});
+
+test('deleting the run that settled a grade takes the tick off the batch card', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [refinerRun()],
+      shared_state: plantDoc([{ id: 'b1', no: '3088', autoclaveDone: true, qualities: ['Fine'] }]),
+    },
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/runs/run-r4', { role: 'manager', method: 'DELETE' });
+  assert.equal(res.status, 200);
+  const { data } = await res.json();
+
+  assert.deepEqual(card(api, '3088').qualities, [], 'nothing on record says the batch made Fine');
+  assert.deepEqual(data.batch_cleared.qualities_cleared, ['Fine']);
+  assert.equal(
+    data.batch_cleared.discharge_cleared,
+    false,
+    'and a refiner pass has nothing to say about the vessel',
+  );
+});
+
+test('a grade a second pass also made keeps its tick', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [refinerRun(), refinerRun({ id: 'run-r4b', started_at: '2026-08-13T18:00:00.000Z' })],
+      shared_state: plantDoc([{ id: 'b1', no: '3088', autoclaveDone: true, qualities: ['Fine'] }]),
+    },
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/runs/run-r4', { role: 'manager', method: 'DELETE' });
+  const { data } = await res.json();
+
+  assert.deepEqual(card(api, '3088').qualities, ['Fine'], 'the other pass still made it');
+  assert.equal(data.batch_cleared, null, 'so the delete had nothing to take back');
+});
+
+test('a pass that produced nothing never marked the grade, and does not unmark it', async (t) => {
+  const api = await startApi({
+    tables: {
+      // A cleaning pass on R4: a grade named, but nothing came off it. It was
+      // not what ticked the grade, so deleting it must not untick it.
+      runs: [refinerRun({ non_production: true })],
+      shared_state: plantDoc([{ id: 'b1', no: '3088', autoclaveDone: true, qualities: ['Fine'] }]),
+    },
+  });
+  t.after(() => api.stop());
+
+  await api.call('/runs/run-r4', { role: 'manager', method: 'DELETE' });
+  assert.deepEqual(card(api, '3088').qualities, ['Fine']);
+});
+
+test('deleting the load run puts the batch back in the autoclave', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [loadRun()],
+      shared_state: plantDoc([
+        {
+          id: 'b1',
+          no: '3088',
+          autoclaveDone: true,
+          unloadedAt: '2026-08-13T05:00:00.000Z',
+          qualities: [],
+        },
+      ]),
+    },
+  });
+  t.after(() => api.stop());
+
+  const res = await api.call('/runs/run-ac', { role: 'manager', method: 'DELETE' });
+  const { data } = await res.json();
+
+  assert.equal(card(api, '3088').autoclaveDone, false, 'nothing on record discharged it');
+  assert.equal(card(api, '3088').unloadedAt, null, 'and no time is left dated off a deleted run');
+  assert.equal(data.batch_cleared.discharge_cleared, true);
+});
+
+test('a paired charge keeps its discharge, dated off the vessel still on record', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [
+        loadRun(),
+        loadRun({
+          id: 'run-ac2',
+          machine_id: 'AC_N',
+          ended_at: '2026-08-13T05:30:00.000Z',
+          unloaded_at: '2026-08-13T05:30:00.000Z',
+        }),
+      ],
+      shared_state: plantDoc([
+        {
+          id: 'b1',
+          no: '3088',
+          paired: true,
+          autoclaveDone: true,
+          unloadedAt: '2026-08-13T05:00:00.000Z',
+          qualities: [],
+        },
+      ]),
+    },
+  });
+  t.after(() => api.stop());
+
+  await api.call('/runs/run-ac', { role: 'manager', method: 'DELETE' });
+
+  assert.equal(card(api, '3088').autoclaveDone, true, 'the twin discharged it too');
+  assert.equal(
+    card(api, '3088').unloadedAt,
+    '2026-08-13T05:30:00.000Z',
+    'and the card is dated off the run that is left, not the one that went',
+  );
+});
+
+test('a load still in the vessel does not count as having discharged the batch', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [
+        loadRun(),
+        // A second load against the same number, still cooking. It has
+        // unloaded nothing, so it cannot be what holds the mark on.
+        loadRun({ id: 'run-ac2', machine_id: 'AC_N', ended_at: null, unloaded_at: null }),
+      ],
+      shared_state: plantDoc([
+        { id: 'b1', no: '3088', autoclaveDone: true, unloadedAt: '2026-08-13T05:00:00.000Z' },
+      ]),
+    },
+  });
+  t.after(() => api.stop());
+
+  await api.call('/runs/run-ac', { role: 'manager', method: 'DELETE' });
+  assert.equal(card(api, '3088').autoclaveDone, false);
+});

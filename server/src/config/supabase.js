@@ -17,6 +17,8 @@ const MAX_ATTEMPTS = 3;
 const MAX_REPAIRS = 20;
 /** Worth a second go: rate limiting and the gateway losing a connection. */
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+/** How many Storage entries one `list` asks for - it pages like everything else. */
+const STORAGE_PAGE = 100;
 
 export const isDbReady = () => Boolean(env.supabase.url && env.supabase.key);
 
@@ -537,6 +539,71 @@ export async function uploadObject(bucket, path, { body, contentType } = {}) {
 }
 
 /**
+ * Takes every file under one prefix back out of Storage.
+ *
+ * The counterpart to uploadObject(), and a prefix rather than a path on
+ * purpose: the lab's reports are filed under the test's own id, so `qc-reports`
+ * holds `<test id>/sheet.pdf` and - where somebody re-attached under a
+ * different filename - whatever the earlier upload was called as well. Deleting
+ * only the one URL the row happens to be carrying would leave those behind,
+ * readable at a public URL, belonging to a test that no longer exists. The
+ * whole folder goes.
+ *
+ * A prefix with nothing under it is not an error: a test that never had a
+ * report attached is the ordinary case, and this answers 0 for it.
+ */
+export async function removeObjects(bucket, prefix) {
+  if (!isDbReady()) throw ApiError.unavailable('Supabase is not configured');
+  const folder = String(prefix ?? '').replace(/^\/+|\/+$/g, '');
+  if (!folder) throw ApiError.badRequest('A storage prefix is required');
+
+  const storage = async (path, { method = 'POST', body } = {}) => {
+    let res;
+    try {
+      res = await fetch(`${env.supabase.url}/storage/v1/${path}`, {
+        method,
+        headers: headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new ApiError(503, `Supabase storage unreachable: ${err.message}`);
+    }
+    if (!res.ok) {
+      // A bucket nobody ever created holds nothing to delete, so a delete
+      // against it has already achieved what it was asked for.
+      if (res.status === 404) return null;
+      const detail = (await res.text().catch(() => '')).slice(0, 200);
+      if (res.status === 401 || res.status === 403) {
+        throw ApiError.unavailable(`Supabase rejected the API key for bucket "${bucket}"`);
+      }
+      throw new ApiError(res.status < 500 ? 400 : 502, `Storage delete failed: ${detail}`);
+    }
+    return res.json().catch(() => null);
+  };
+
+  // `list` names the entries in one folder rather than their full paths, and it
+  // pages - so the walk is the shape fetchAll() uses on the tables.
+  const paths = [];
+  for (let offset = 0; ; ) {
+    const page = await storage(`object/list/${bucket}`, {
+      body: { prefix: folder, limit: STORAGE_PAGE, offset },
+    });
+    const entries = Array.isArray(page) ? page : [];
+    // `id: null` is a nested folder rather than a file - nothing this project
+    // writes, and not something to hand a delete as though it were an object.
+    for (const entry of entries) {
+      if (entry?.name && entry.id !== null) paths.push(`${folder}/${entry.name}`);
+    }
+    if (entries.length < STORAGE_PAGE) break;
+    offset += entries.length;
+  }
+
+  if (!paths.length) return 0;
+  await storage(`object/${bucket}`, { method: 'DELETE', body: { prefixes: paths } });
+  return paths.length;
+}
+
+/**
  * Confirms at boot that the project actually has the tables and columns the
  * server writes to. An empty table gives nothing away on a `select=*`, but
  * naming a column PostgREST does not know is a 400 - so one request per table
@@ -586,4 +653,6 @@ export async function verifySchema(registry) {
   return problems;
 }
 
-export default { request, rpc, op, isDbReady, dbInfo, verifySchema, absentSchema, uploadObject };
+export default {
+  request, rpc, op, isDbReady, dbInfo, verifySchema, absentSchema, uploadObject, removeObjects,
+};

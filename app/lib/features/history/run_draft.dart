@@ -265,6 +265,12 @@ Map<String, dynamic> buildPayload(Draft draft, Draft base, RunMath math) {
 /// both - so "Entry deleted" on its own understates it by exactly the part
 /// somebody would want to check.
 ///
+/// The batch card is the third place a run leaves a mark - the discharge on its
+/// autoclave load, the tick on the grade a refiner settled - and the delete
+/// takes those back too. That one is named for a different reason than the
+/// yard: nobody would ever connect a grade that has quietly unticked itself to
+/// a run somebody deleted last week.
+///
 /// The unaccounted case is the one worth saying out loud: packed output no
 /// group could be found for is a discrepancy in the yard that no screen would
 /// otherwise show, so the server's note is passed straight through.
@@ -281,6 +287,13 @@ Map<String, dynamic> buildPayload(Draft draft, Draft base, RunMath math) {
   if (removed.qualityTestsDeleted > 0) {
     final n = removed.qualityTestsDeleted;
     parts.add('$n lab test${n > 1 ? 's' : ''} removed');
+  }
+  final batch = removed.batchCleared;
+  if (batch != null) {
+    if (batch.qualitiesCleared.isNotEmpty) {
+      parts.add('${batch.qualitiesCleared.join(', ')} unmarked on ${batch.ref}');
+    }
+    if (batch.dischargeCleared) parts.add('${batch.ref} back in the autoclave');
   }
   if (removed.stockNote != null) {
     return (message: removed.stockNote!, warn: true);

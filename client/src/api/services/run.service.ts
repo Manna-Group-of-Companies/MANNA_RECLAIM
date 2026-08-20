@@ -138,6 +138,25 @@ export interface RemovedRun {
   /** Packed output no group could be found for - unaccounted for in the yard. */
   stock_note?: string | null;
   quality_tests_deleted?: number;
+  /**
+   * What the delete took back off the batch card.
+   *
+   * A run does not only write its own row: an autoclave pass marks its batch as
+   * out of the vessel and a settling refiner pass ticks the grade it made, both
+   * of which live in the plant's batch record rather than on the run. Deleting
+   * the run takes those back where nothing else still on record says them - so
+   * the screen names them, because a supervisor who finds a grade unticked
+   * tomorrow should be able to remember that this is why.
+   *
+   * Null when the run had nothing to take back, which is the ordinary case.
+   */
+  batch_cleared?: {
+    ref: string;
+    /** The batch reads as still in the autoclave again - no load run is left. */
+    discharge_cleared: boolean;
+    /** Grades unticked because no remaining run makes them. */
+    qualities_cleared: string[];
+  } | null;
 }
 
 /**
