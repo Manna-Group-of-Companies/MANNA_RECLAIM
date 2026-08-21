@@ -503,12 +503,14 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
  * Ideal values - what the plant should be making, as the manager sets it
  * ---------------------------------------------------------------------------
  *
- * The Efficiency tab has always measured the plant against its own median,
- * which answers "is this shift worse than usual" and cannot answer "is usual any
- * good": a line that has run under its capacity for two years has a median that
- * says so, and a screen that never once flags it. These are the other half - a
- * figure somebody decided on, that the plant's own history cannot drift away
- * from.
+ * These are what the Efficiency tab flags against, and now the only thing it
+ * flags against. It used to compare each figure with the plant's own median as
+ * well, which answers "is this shift worse than usual" and cannot answer "is
+ * usual any good": a line that has run under its capacity for two years has a
+ * median that says so, and a screen that never once flags it. Worse for a screen
+ * whose job is to ask a supervisor why a shift came in short, it moved - a bad
+ * month lowered the bar the next month was judged by. A figure somebody decided
+ * on does neither, so a blank here is now a figure nobody is ever asked about.
  *
  * The keys are built rather than written out, and they must match idealKey in
  * server/src/config/constants.js exactly: a target saved under one spelling and
@@ -518,12 +520,22 @@ export const COST_RATE_GROUPS: CostRateGroup[] = [
  */
 export const IDEAL_KEY = {
   production: (key: string) => `prod.${key}`,
-  specialProduction: (quality: string) => `prod.SPECIAL.${quality}`,
+  /**
+   * No per-grade production key for the special line, deliberately.
+   *
+   * One charge is worked into sheets of several grades at once and the split is
+   * a market decision - more Special this month, more SuperFine next - so a
+   * kg/shift target per grade would flag the plant for making what it was asked
+   * to make. The line is benchmarked on how efficiently it runs instead, which
+   * is what does not move with the split. Mirrors the note on the server.
+   */
   autoclaveRuns: (key: string) => `runs.${key}`,
   kwhPerKg: (key: string) => `kwhkg.${key}`,
   specialKwhPerKg: (quality: string) => `kwhkg.SPECIAL.${quality}`,
   perManHour: (key: string) => `pmh.${key}`,
   specialPerManHour: (quality: string) => `pmh.SPECIAL.${quality}`,
+  /** What a charge should yield. One figure for the plant - see the server. */
+  batchYield: () => 'yield.BATCH',
 } as const;
 
 /**
@@ -563,19 +575,10 @@ export const IDEAL_AUTOCLAVES = [
 export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
   {
     title: 'Shift production — grinding & coarse',
-    note: 'what a line should weigh out in one shift',
+    note: 'what a line should weigh out in one shift — the special line has no production target, see below',
     fields: IDEAL_PRODUCTION_LINES.map((line) => ({
       key: IDEAL_KEY.production(line.key),
       label: line.label,
-      unit: 'kg/shift',
-    })),
-  },
-  {
-    title: 'Shift production — special line, by grade',
-    note: 'the line comes off in grades, so the target is per grade',
-    fields: QUALITIES.map((quality) => ({
-      key: IDEAL_KEY.specialProduction(quality),
-      label: quality,
       unit: 'kg/shift',
     })),
   },
@@ -587,6 +590,11 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
       label: vessel.label,
       unit: 'runs/day',
     })),
+  },
+  {
+    title: 'Batch yield',
+    note: 'what a charge should give back, as a percentage of what went into it',
+    fields: [{ key: IDEAL_KEY.batchYield(), label: 'Batch yield', unit: '%' }],
   },
   {
     title: 'Energy — grinders',
@@ -614,6 +622,7 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
   },
   {
     title: 'Labour productivity — special line, by grade',
+    note: 'the special line is judged on efficiency, not on how much of each grade it made',
     fields: QUALITIES.map((quality) => ({
       key: IDEAL_KEY.specialPerManHour(quality),
       label: quality,

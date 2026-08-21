@@ -1140,19 +1140,20 @@ create policy labour_rates_service on public.labour_rates
 -- -----------------------------------------------------------------------------
 -- 6f. What the plant should have made, beside what it did
 --
--- The Efficiency tab measures the plant against its own median, which answers
--- "is this shift worse than usual" and cannot answer "is usual any good". These
--- two tables are the manager's answer to the second question: the benchmark, and
--- why a shift missed it. See migrations/0014.
+-- The Efficiency tab used to measure the plant against its own median, which
+-- answers "is this shift worse than usual" and cannot answer "is usual any
+-- good" - and which moves, so the bar a supervisor was held to last month was
+-- not the bar this month. These two tables replaced it: the benchmark a manager
+-- decided on, and why a shift missed it. See migrations/0014.
 --
 -- `ideal_values` is one row with every benchmark inside `data`, the shape
 -- cost_rates already uses - the set of figures grows as the plant measures more
 -- things, and a column per figure would be a migration every time it does.
 --
 -- `variance_reasons` is deliberately not efficiency_notes: that table holds a
--- different sentence ("under what this plant normally manages"), and a shift
--- that beat the median while missing the target is not the same note as one
--- that did neither.
+-- free note against a card ("the belt was slipping all shift"), where a row here
+-- is an answer for a named target that was missed, with the two figures it was
+-- missed by.
 -- -----------------------------------------------------------------------------
 create table if not exists public.ideal_values (
   id         text primary key,

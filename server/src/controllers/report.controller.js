@@ -50,9 +50,10 @@ export const shiftOptions = asyncHandler(async (_req, res) =>
 );
 
 /**
- * One shift measured against the plant's own medians. Computed server-side:
- * the baselines need every run ever logged, which is not something to hand to
- * a browser on the shop floor's connection.
+ * One shift measured against the manager's ideal values. Computed server-side:
+ * the day fold-up and the batch yields both need runs from outside the shift
+ * that was asked for, and the whole run history is not something to hand to a
+ * browser on the shop floor's connection.
  */
 export const shiftEfficiency = asyncHandler(async (req, res) => {
   const [analysis, notes, varianceReasons] = await Promise.all([

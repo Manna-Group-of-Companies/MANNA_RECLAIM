@@ -377,8 +377,9 @@ export const TABLES = {
   efficiencyNotes: 'efficiency_notes',
   /**
    * What the plant *should* make - one row, id 'current', every benchmark inside
-   * `data`. The manager's own figures, as against efficiencyNotes' baselines,
-   * which are the plant's median of itself. See migrations/0014.
+   * `data`. The manager's own figures, and since the running-average baselines
+   * were taken off the Efficiency tab, the only thing an actual is flagged
+   * against. See migrations/0014.
    */
   idealValues: 'ideal_values',
   /** Why an actual missed its ideal, against the date, shift and parameter. */
@@ -451,14 +452,22 @@ export const SHIFT_MINUTES = 720;
 export const BEARING_TEMP_LIMIT_C = 80;
 
 /**
- * When the back office calls a shift below par. Each is a fraction of the
- * plant's own median, not an absolute target - the plant is measured against
- * itself, which is the only baseline it has.
+ * The one flag on the Efficiency tab that is not a manager's benchmark.
+ *
+ * Utilisation is a fraction of the shift itself - twelve hours is twelve hours,
+ * whatever the plant has averaged - so it is a fixed standard, not a figure that
+ * moves with the plant's history, and it stays.
+ *
+ * Three thresholds that used to sit here are gone: labour, energy and yield,
+ * each of which was a fraction of the plant's own median. A median answers "is
+ * this shift worse than usual" and cannot answer "is usual any good" - a line
+ * that has run 15% under capacity for two years has a median that says so, and a
+ * screen that never once flags it. Worse for a screen meant to hold people to
+ * account, it moves: a bad month lowers the bar the next month is judged by, so
+ * the same figure could be a miss in March and a pass in June. Those three
+ * comparisons are now made against IDEAL_VALUE_FIELDS below and nothing else.
  */
 export const EFFICIENCY_THRESHOLDS = {
-  labour: 0.8, // production per man-hour under 80% of usual
-  energy: 1.25, // kWh per kg over 125% of usual (more energy is worse)
-  yield: 0.85, // batch yield under 85% of usual
   utilisation: 0.7, // ran less than 70% of the 12 h shift
 };
 
@@ -531,16 +540,18 @@ export const LOADING_RATE_KEYS = {
  * Ideal values - what the plant should be making, as the manager sets it
  * ---------------------------------------------------------------------------
  *
- * EFFICIENCY_THRESHOLDS above measure the plant against its own median, which
- * answers "is this shift worse than usual" and cannot answer "is usual any
- * good": a line that has run 15% under its capacity for two years has a median
- * that says so, and a screen that never once flags it. These are the other
- * half - a figure somebody decided on, that the plant's own history cannot
- * quietly drift away from.
+ * These are what the Efficiency tab flags against, and now the only thing it
+ * flags against. It used to compare every figure with the plant's own median as
+ * well; see the note on EFFICIENCY_THRESHOLDS above for why a bar that the plant
+ * sets by drifting is no bar at all on a screen whose whole job is to ask a
+ * supervisor why a shift came in short.
  *
  * Every one of them is compared against a figure the app already collects, and
  * that is the whole test for whether a benchmark belongs here: an ideal with
- * nothing to sit beside is a number in a form.
+ * nothing to sit beside is a number in a form. The converse now bites too - a
+ * figure on that screen with no ideal against it is never flagged and nobody is
+ * ever asked about it, so anything the plant means to hold a shift to has to
+ * have a row here.
  */
 
 /**
@@ -591,12 +602,41 @@ export const SPECIAL_LINE_KEY = 'SPECIAL';
  */
 export const idealKey = {
   production: (key) => `prod.${key}`,
-  specialProduction: (quality) => `prod.${SPECIAL_LINE_KEY}.${quality}`,
+  /**
+   * There is deliberately no per-grade production key for the special line.
+   *
+   * One autoclave charge is worked into sheets of several grades at once, and
+   * how much of each comes off R4 is a market decision taken that week - more
+   * Special this month, more SuperFine next. A kg/shift target per grade would
+   * therefore flag the plant for making what it was asked to make, and a
+   * supervisor would be writing a reason for following an order.
+   *
+   * What does not move with the grade split is how efficiently the line runs,
+   * so the special line is benchmarked on kg per man-hour and kWh per kg alone -
+   * see specialPerManHour and specialKwhPerKg below. The grade's output is still
+   * shown on the card; it is context, not a target.
+   */
   autoclaveRuns: (key) => `runs.${key}`,
   kwhPerKg: (key) => `kwhkg.${key}`,
   specialKwhPerKg: (quality) => `kwhkg.${SPECIAL_LINE_KEY}.${quality}`,
   perManHour: (key) => `pmh.${key}`,
   specialPerManHour: (quality) => `pmh.${SPECIAL_LINE_KEY}.${quality}`,
+  /**
+   * What a charge should yield, as a percentage of what went into it.
+   *
+   * One figure for the plant, not one per vessel and not one per grade. A batch
+   * is charged as a charge and weighed out across whatever grades it came off
+   * as, so the yield is the material's, not the vessel's and not any one
+   * grade's - and a target split three ways would be three targets nobody could
+   * add back up to the one the plant actually cares about.
+   *
+   * It has a key at all because yield used to be flagged against the median
+   * yield of every batch on record. Taking that away without putting a target
+   * in its place would have left the one figure that says how much rubber the
+   * plant is throwing away as the only thing on the screen nobody is ever asked
+   * about.
+   */
+  batchYield: () => 'yield.BATCH',
 };
 
 /**
@@ -615,18 +655,18 @@ export const IDEAL_VALUE_FIELDS = [
     unit: 'kg/shift',
     lowerIsBetter: false,
   })),
-  ...QUALITIES.map((quality) => ({
-    key: idealKey.specialProduction(quality),
-    label: `Special line ${quality} — production`,
-    unit: 'kg/shift',
-    lowerIsBetter: false,
-  })),
   ...IDEAL_AUTOCLAVES.map((vessel) => ({
     key: idealKey.autoclaveRuns(vessel.key),
     label: `${vessel.label} — runs`,
     unit: 'runs/day',
     lowerIsBetter: false,
   })),
+  {
+    key: idealKey.batchYield(),
+    label: 'Batch yield',
+    unit: '%',
+    lowerIsBetter: false,
+  },
   ...IDEAL_GRINDERS.map((grinder) => ({
     key: idealKey.kwhPerKg(grinder.key),
     label: `${grinder.label} — energy`,

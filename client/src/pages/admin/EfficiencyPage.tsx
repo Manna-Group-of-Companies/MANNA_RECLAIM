@@ -29,35 +29,46 @@ function varianceText(metric: EfficiencyMetric): string {
 }
 
 /**
- * One measured value with the plant's usual figure under it, and the manager's
- * target under that.
+ * One measured value against the manager's target for it.
  *
- * The two are deliberately both shown. The baseline is what this plant normally
- * manages and the ideal is what it is meant to manage - a shift can be over one
- * and under the other, and that is exactly the shift worth looking at. A figure
- * with no ideal set shows no ideal line rather than a target of nought.
+ * One comparison, not two. This used to show the plant's own median beside the
+ * ideal, and a supervisor asked to explain a figure could reasonably ask which
+ * of the two lines they were being held to - and the median answer changed every
+ * month as the plant's history moved. What is drawn now is the figure, what it
+ * was meant to be, and the gap.
+ *
+ * Three states a figure can be in, and they are deliberately different sentences:
+ * off its ideal, on its ideal, or carrying no target at all. The third is not a
+ * pass and is not drawn like one. It splits two ways, and the card tells them
+ * apart: a figure that should have a target and does not says "no ideal set", so
+ * somebody goes and sets it; a figure benchmarked over the whole day says which
+ * card down the page does the comparing.
  */
 function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: CalcTarget) => void }) {
   const shown =
     metric.value == null ? '—' : `${metric.value}${metric.unit ? ` ${metric.unit}`.trim() : ''}`;
-  const baseline =
-    metric.baselineLabel ?? `usual ${metric.baseline == null ? '—' : metric.baseline}`;
   const onTarget = metric.ideal != null && metric.value != null && !metric.offTarget;
+  // A key with nothing behind it: a target belongs on this figure and nobody has
+  // set one. Said out loud rather than left as a missing line, because an
+  // unbenchmarked figure reading as a clean card is how a sheet stays half
+  // filled for a year.
+  const noTarget = metric.parameter != null && metric.ideal == null;
 
   const body = (
     <>
       <span>
         {metric.label}
         {metric.calc && <span className="muted ml-1 text-[10px]">ⓘ how?</span>}
-        {metric.warn && <span className="warnpill">below usual</span>}
+        {metric.warn && <span className="warnpill">{metric.warnLabel ?? 'flagged'}</span>}
         {metric.offTarget && <span className="warnpill">off ideal</span>}
         {onTarget && <span className="okpill">on ideal</span>}
+        {noTarget && <span className="muted ml-1 text-[10px]">no ideal set</span>}
       </span>
       <span className="text-right">
         <span className="mv" style={metric.warn || metric.offTarget ? { color: 'var(--err)' } : undefined}>
           {shown}
         </span>
-        <div className="mb">{baseline}</div>
+        {metric.context && <div className="mb">{metric.context}</div>}
         {metric.ideal != null && (
           <div className="mb" style={metric.offTarget ? { color: 'var(--err)' } : undefined}>
             ideal {metric.ideal}
@@ -131,7 +142,11 @@ export function EfficiencyPage() {
     [shifts, date],
   );
 
-  /** How many figures in the shift came in off the manager's target. */
+  /**
+   * How many figures in the shift came in off the manager's target. The one
+   * number on this page that says whether the shift is answerable for anything,
+   * so it counts misses against ideals and nothing else.
+   */
   const offTarget = useMemo(() => {
     if (!shiftEfficiency) return 0;
     const cards = [
@@ -259,7 +274,14 @@ export function EfficiencyPage() {
       : card.batch
         ? `Yield Batch ${card.batch}`
         : (card.machine ?? card.machineId ?? '');
-    const name = card.label ?? card.machine ?? card.quality ?? card.machineId ?? '';
+    // What the card is called on a saved reason. `batch` is in the chain because
+    // a yield card is named by nothing else - it has no machine, no grade and no
+    // label - and yield only started carrying an ideal when the median it used
+    // to be judged against was taken away. Without it a recorded reason reads
+    // " · Yield" and the reader cannot tell which batch it was about.
+    const name =
+      card.label ?? card.machine ?? card.quality ?? card.machineId ??
+      (card.batch ? `Batch ${card.batch}` : '');
     const missed = card.metrics.filter((m) => m.offTarget);
     const flagged = card.metrics.some((m) => m.warn) || missed.length > 0;
     const notes = line ? notesFor(line, metric) : [];
@@ -328,7 +350,14 @@ export function EfficiencyPage() {
               setNoteFor({ line, metric });
             }}
           >
-            {card.metrics.some((m) => m.warn) ? '⚠ Record reason for the dip' : '+ Add a note'}
+            {/*
+              `warn` is only ever the downtime flag now - every other comparison
+              on this screen is against an ideal and gets its own "why is this
+              off the ideal?" button above. Naming it as downtime rather than as
+              "the dip" is the difference between a note somebody can answer and
+              one they have to guess the question for.
+            */}
+            {card.metrics.some((m) => m.warn) ? '⚠ Record reason for the downtime' : '+ Add a note'}
           </button>
         )}
       </div>
@@ -387,14 +416,14 @@ export function EfficiencyPage() {
         </div>
 
         <div className="sub mt-2">
-          Each parameter is compared twice: with the plant’s usual value — the median of every shift
-          so far, so the plant is measured against itself — and with the ideal the manager set on the
-          Rates tab. Off-target values are flagged; tap one to see the arithmetic, or record why it
-          missed.
+          Every figure here is compared with the ideal the manager set on the Ideal values tab, and
+          with nothing else. Anything short of its ideal is flagged and asks for a reason; tap a
+          figure to see the arithmetic.
         </div>
         <div className="sub mt-1">
           Each ideal is compared at the granularity it is set: production per shift, autoclave
-          charges and the energy and labour figures over the whole day.
+          charges and batch yield per batch, and the energy and labour figures over the whole day.
+          A figure marked “no ideal set” is not a pass — it is a target nobody has filled in.
         </div>
 
         {shiftEfficiency && shiftEfficiency.idealsSet === false && (
@@ -406,7 +435,7 @@ export function EfficiencyPage() {
       </div>
 
       {error && <div className="errbox">Couldn’t load the shift: {error}</div>}
-      {loading && <div className="spin">Working out the baselines…</div>}
+      {loading && <div className="spin">Working out the shift…</div>}
 
       {!loading && shiftEfficiency && (
         <>
@@ -475,9 +504,10 @@ export function EfficiencyPage() {
 
           {/*
             Energy and labour productivity are set as day figures, so they are
-            compared as day figures. Both shifts are in each card - the shift
-            cards above show the same two against the plant's own median, which
-            is the question that is worth asking a shift at a time.
+            compared as day figures, and this is the only place either is
+            flagged. Both shifts are in each card - the shift cards above show
+            the same two figures because that is the span a supervisor works,
+            and they say plainly that the comparison is made down here.
           */}
           <div className="grouphead">
             Energy & labour · {dayLong(shiftEfficiency.date)} · whole day, both shifts
@@ -556,10 +586,10 @@ export function EfficiencyPage() {
         )}
       </BoModal>
 
-      {/* why it dipped below what the plant usually manages */}
+      {/* a free note against a card, as against answering for a missed target */}
       <BoModal
         open={Boolean(noteFor)}
-        title="Reason for the dip"
+        title="Note on this machine"
         subtitle={`${noteFor?.metric ?? ''} · ${dayLong(date)} · ${shift}`}
         onClose={() => setNoteFor(null)}
         footer={
@@ -569,7 +599,7 @@ export function EfficiencyPage() {
         }
       >
         <div className="mt-3">
-          <label htmlFor="eff-reason">What caused the efficiency to drop?</label>
+          <label htmlFor="eff-reason">Anything worth recording about this shift?</label>
           <textarea
             id="eff-reason"
             rows={3}

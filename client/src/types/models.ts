@@ -1047,30 +1047,52 @@ export interface ShiftOption {
 }
 
 /**
- * One metric on an efficiency card. `baseline` is the plant's own median for
- * the same figure; `warn` is the server's verdict on whether this shift falls
- * short of it. `calc` is the arithmetic spelled out, so the screen can show
- * its working instead of asking anyone to take the number on trust.
+ * One metric on an efficiency card, and the manager's ideal for it.
+ *
+ * There used to be a second comparison here - `baseline`, the plant's own median
+ * for the same figure - and it is gone. A median answers "is this shift worse
+ * than usual" and cannot answer "is usual any good", and it moves: a bad month
+ * lowered the bar the next month was judged by, so the same figure could be a
+ * miss in March and a pass in June. A screen that asks a supervisor to explain a
+ * shortfall has to be able to say what the shortfall was measured against and
+ * have that answer still be true next quarter.
+ *
+ * `calc` is the arithmetic spelled out, so the screen can show its working
+ * instead of asking anyone to take the number on trust.
  */
 export interface EfficiencyMetric {
   key: string;
   label: string;
   value: number | null;
   unit?: string;
-  baseline: number | null;
-  baselineLabel?: string;
+  /**
+   * Descriptive text under the figure - the crew and hours behind it, the shifts
+   * a day's figure folds up. Context only: nothing here is a comparison, and
+   * nothing here is what the metric is flagged against.
+   */
+  context?: string | null;
+  /**
+   * A flag that is not about the manager's ideal. Only utilisation raises one -
+   * it is measured against the twelve hours of the shift itself - and
+   * `warnLabel` is what the pill says, so the screen never has to guess which
+   * kind of flag it is showing.
+   */
   warn: boolean;
+  warnLabel?: string | null;
   /**
    * The manager's benchmark for this figure, and how far off it the shift came.
-   *
-   * A different question from `baseline` above, and the two are deliberately
-   * both here: the baseline is what this plant normally manages and the ideal is
-   * what it is meant to manage, and a shift can be over one and under the other.
+   * This is what the screen flags on.
    *
    * `ideal` is null when nothing has been set, which is not the same as a target
    * of zero - so `offTarget` stays false rather than flagging every line in a
-   * plant that has never filled the sheet in. `parameter` is the key a reason for
-   * the miss is filed under.
+   * plant that has never filled the sheet in.
+   *
+   * `parameter` is the key a reason for the miss is filed under, and null says
+   * something different from an unset `ideal`: null means this figure is not one
+   * a target is set against here at all - energy and labour productivity are set
+   * per day, so the shift card shows them and the day card compares them. A set
+   * `parameter` with a null `ideal` means a target belongs here and nobody has
+   * filled it in, which is worth nagging a manager about.
    */
   ideal?: number | null;
   variance?: number | null;
@@ -1121,11 +1143,10 @@ export interface EfficiencyNote {
 /**
  * Why an actual missed the manager's ideal.
  *
- * Kept apart from EfficiencyNote above, which answers a different question -
- * that one says the shift came in under what the plant normally manages, this
- * one says it came in under what the plant is meant to manage. `ideal` and
- * `actual` are the figures as they stood when the reason was written, so a
- * benchmark raised later does not rewrite what was being explained.
+ * Kept apart from EfficiencyNote above, which is a free note against a card. A
+ * row here answers for a named target with the two figures it was missed by, and
+ * `ideal` and `actual` are those figures as they stood when the reason was
+ * written - so a benchmark raised later does not rewrite what was explained.
  */
 export interface VarianceReason {
   id: string;
@@ -1153,8 +1174,8 @@ export interface ShiftEfficiency {
   /**
    * kWh/kg and kg/man-hour over the whole day, per grinder and per grade of the
    * special line. Those two benchmarks are set against the day, so this is the
-   * only place they are compared with a target - the shift cards carry the same
-   * figures against the plant's own median, which is a different question.
+   * only place they are compared with a target and the only place they are
+   * flagged - the shift cards show the same figures for context and say so.
    */
   days: EfficiencyCard[];
   yields: EfficiencyCard[];
@@ -1162,7 +1183,8 @@ export interface ShiftEfficiency {
   varianceReasons: VarianceReason[];
   /** Whether any benchmark has been set at all - "no target yet" is not "on target". */
   idealsSet?: boolean;
-  thresholds: { labour: number; energy: number; yield: number; utilisation: number };
+  /** The utilisation cut-off, and now nothing else - see EfficiencyMetric.warn. */
+  thresholds: { utilisation: number };
 }
 
 /** The manager's benchmarks, as the Rates tab edits them. */

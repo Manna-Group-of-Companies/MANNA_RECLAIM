@@ -14,14 +14,24 @@ import {
 /**
  * The back office's efficiency view, computed here rather than in the browser.
  *
- * The point of this screen is comparison: is *this* shift worse than the plant
- * usually manages? "Usual" is the median of the same figure across every shift
- * on record, so answering it needs the whole run history - which is exactly
- * what should not be shipped to a phone. The client gets one shift's cards
- * with the baselines already attached.
+ * The point of this screen is accountability: did the shift make what the
+ * manager said it should make, and if not, who signs the reason why. Every flag
+ * on it is a comparison with an ideal off the Ideal values tab. There is one
+ * exception and it is named as one - utilisation, which is measured against the
+ * twelve hours of the shift itself.
  *
- * Medians, not means: one catastrophic shift (a burst pipe, a 10-hour power
- * cut) would drag a mean down for months and quietly stop flagging anything.
+ * It used to carry a second comparison beside every figure: the plant's own
+ * median for the same figure, across every shift on record. That is gone. A
+ * median answers "is this shift worse than usual" and cannot answer "is usual
+ * any good", and on a screen that exists to ask a supervisor to explain a
+ * shortfall it is worse than merely unhelpful - it moves. A bad month lowers the
+ * bar the next month is judged by, so the same output could be a miss in March
+ * and a pass in June, and nobody could be held to either. What a shift is asked
+ * about is now a figure a manager decided on and can point at.
+ *
+ * The whole run history is still read here rather than in the browser: the day
+ * fold-up and the batch yields both need runs from outside the picked shift, and
+ * that is not something to ship to a phone on the shop floor's connection.
  */
 
 const runs = crud(TABLES.runs, { defaultSort: 'shift_date' });
@@ -35,13 +45,6 @@ const num = (v) => {
 };
 
 const round = (n, d = 2) => (n == null ? null : +Number(n).toFixed(d));
-
-function median(values) {
-  const a = values.filter((v) => v != null && !Number.isNaN(v)).sort((x, y) => x - y);
-  if (!a.length) return null;
-  const mid = Math.floor(a.length / 2);
-  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
-}
 
 /**
  * Hours a run took. Prefers what the crew recorded over the sync timestamps -
@@ -67,7 +70,7 @@ export function runKwh(r) {
 }
 
 /** One unit per shift + grade, summed across the refiner passes it went through. */
-function refinerUnits(rows) {
+export function refinerUnits(rows) {
   const byKey = new Map();
   for (const r of rows) {
     if (r.line !== 'special' || !r.quality || !REFINER_IDS.includes(r.machine_id)) continue;
@@ -97,7 +100,7 @@ function refinerUnits(rows) {
 }
 
 /** One unit per grinder per shift. The cracker has no output, so it drops out. */
-function grinderUnits(rows) {
+export function grinderUnits(rows) {
   const byKey = new Map();
   for (const r of rows) {
     if (r.line !== 'grind' || !GRINDER_IDS.includes(r.machine_id)) continue;
@@ -138,7 +141,7 @@ function grinderUnits(rows) {
  * reads as 5 hands over 16 h - eighty labour-hours where the plant spent thirty-
  * six.
  */
-function dailyUnits(units, keyOf) {
+export function dailyUnits(units, keyOf) {
   const byKey = new Map();
   for (const u of units) {
     const id = keyOf(u);
@@ -205,10 +208,8 @@ function batchYields(rows) {
  *
  * The line is two machines - PR1 breaks the charge down and R2 works it - and
  * only R2 weighs, so a shift's coarse output is the sum of what the line weighed
- * rather than anything per-machine. It has never had a card on this screen
- * because it has no per-machine baseline worth drawing; it gets one now because
- * the manager sets an ideal against it, and a target with nothing beside it is a
- * number in a form.
+ * rather than anything per-machine. It has a card because the manager sets an
+ * ideal against it, and a target with nothing beside it is a number in a form.
  */
 function coarseUnits(rows) {
   const byKey = new Map();
@@ -297,16 +298,26 @@ function idealFor(key, value, ideals, digits = 2) {
   return { parameter: key, idealLabel: field?.label ?? null, ...comparison };
 }
 
-const baselineBy = (units, keyOf, valueOf) => {
-  const buckets = new Map();
-  for (const u of units) {
-    const v = valueOf(u);
-    if (v == null) continue;
-    const key = keyOf(u);
-    buckets.set(key, [...(buckets.get(key) ?? []), v]);
-  }
-  return Object.fromEntries([...buckets].map(([k, vs]) => [k, median(vs)]));
-};
+/**
+ * A figure that carries no target of its own, and why.
+ *
+ * `parameter` is deliberately null rather than a key with nothing behind it. The
+ * screen reads a null parameter as "this figure is not one a target is set
+ * against" and a set parameter with a null ideal as "a target belongs here and
+ * nobody has filled it in" - two different sentences, and the second is the one
+ * that should nag a manager. Energy and labour productivity are the case: they
+ * are benchmarked over the whole day, so the shift card shows the figure and the
+ * day card below carries the comparison.
+ */
+const noTargetHere = (why) => ({
+  parameter: null,
+  idealLabel: null,
+  ideal: null,
+  variance: null,
+  variancePct: null,
+  offTarget: false,
+  context: why,
+});
 
 export const efficiencyService = {
   notes,
@@ -327,8 +338,8 @@ export const efficiencyService = {
   },
 
   /**
-   * One shift's cards, each metric carrying the plant's usual value and
-   * whether this shift is below it. `calc` spells out the arithmetic so the
+   * One shift's cards, each metric carrying the manager's ideal for it and
+   * whether the shift came in short. `calc` spells out the arithmetic so the
    * screen can show its working rather than asking anyone to trust a number.
    */
   async forShift({ date, shift } = {}) {
@@ -344,18 +355,11 @@ export const efficiencyService = {
     const grindAll = grinderUnits(all);
     const yieldAll = batchYields(all);
 
-    const basePmh = baselineBy(refAll, (u) => u.quality, (u) => u.pmh);
-    const baseKwh = baselineBy(refAll, (u) => u.quality, (u) => u.kwhkg);
-    const baseGrindPmh = baselineBy(grindAll, (u) => u.machineId, (u) => u.pmh);
-    const baseGrindKwh = baselineBy(grindAll, (u) => u.machineId, (u) => u.kwhkg);
-    const baseYield = median(yieldAll.map((u) => u.pct));
-
     const here = (u) => u.day === date && (u.shift ?? '') === shift;
     const shiftRows = all.filter((r) => r.shift_date === date && (r.shift ?? '') === shift);
 
     const refiners = refAll.filter(here).sort((a, b) => (a.quality < b.quality ? -1 : 1)).map((u) => {
-      const bp = basePmh[u.quality] ?? null;
-      const be = baseKwh[u.quality] ?? null;
+      const dayCard = 'compared on the whole-day card below';
       return {
         key: `refiner|${u.quality}`,
         quality: u.quality,
@@ -370,10 +374,13 @@ export const efficiencyService = {
             label: 'Production / man-hour',
             unit: 'kg/man-hour',
             value: round(u.pmh),
-            baseline: round(bp),
-            warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
-            // No ideal here: the manager's benchmark for this figure is set
-            // against the day, so the comparison is on the day card below.
+            warn: false,
+            // The manager's benchmark for this figure is set against the day, so
+            // the comparison - and the flag - are on the day card below. The
+            // shift's own figure stays here because a supervisor works a shift,
+            // not a day, and a card that hid it would be hiding the number the
+            // conversation is actually about.
+            ...noTargetHere(dayCard),
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (total crew × total hours)',
@@ -384,7 +391,7 @@ export const efficiencyService = {
                 `= ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.workers * u.hours)}`,
               ],
               result: `${round(u.pmh)}`,
-              note: `Usual = median across every ${u.quality} shift so far = ${round(bp) ?? '—'}. Flagged below ${Math.round(TH.labour * 100)}% of usual (${round(bp == null ? null : bp * TH.labour) ?? '—'}).`,
+              note: `The ideal for ${u.quality} labour productivity is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
             },
           },
           {
@@ -392,8 +399,8 @@ export const efficiencyService = {
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
             value: round(u.kwhkg, 3),
-            baseline: round(be, 3),
-            warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
+            warn: false,
+            ...noTargetHere(dayCard),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'total energy ÷ output',
@@ -403,20 +410,29 @@ export const efficiencyService = {
                 `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
               ],
               result: `${round(u.kwhkg, 3)} kWh/kg`,
-              note: `Usual = median across every ${u.quality} shift = ${round(be, 3) ?? '—'}. Flagged above ${Math.round(TH.energy * 100)}% of usual (${round(be == null ? null : be * TH.energy, 3) ?? '—'}).`,
+              note: `The ideal for ${u.quality} energy is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
             },
           },
           {
             key: 'out',
-            label: 'Output (maximise)',
+            label: 'Output',
             value: round(u.out, 0),
             unit: 'kg',
-            baseline: null,
-            baselineLabel: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
             warn: false,
-            // The special line comes off in grades, so its shift target is per
-            // grade rather than one figure for the line - see IDEAL_VALUE_FIELDS.
-            ...idealFor(idealKey.specialProduction(u.quality), u.out, ideals, 0),
+            /**
+             * Shown, and deliberately not compared with anything.
+             *
+             * One charge is worked into several grades at once and the split
+             * between them is a market decision, so how much Special rather
+             * than SuperFine came off R4 this shift is an instruction the line
+             * followed, not a result it can be held to. A kg/shift target here
+             * would ask a supervisor to explain having made what he was told to
+             * make. What the line *is* answerable for - how efficiently it
+             * worked, whatever the split - is on the whole-day card below.
+             */
+            ...noTargetHere(
+              `${u.workers} crew · ${round(u.hours, 1)} h · grade split follows demand`,
+            ),
             calc: {
               title: 'Output',
               formula: 'total weighed output of this grade in this shift',
@@ -430,8 +446,7 @@ export const efficiencyService = {
     });
 
     const grinders = grindAll.filter(here).sort((a, b) => (a.machineId < b.machineId ? -1 : 1)).map((u) => {
-      const bp = baseGrindPmh[u.machineId] ?? null;
-      const be = baseGrindKwh[u.machineId] ?? null;
+      const dayCard = 'compared on the whole-day card below';
       const downMin = Math.max(0, SHIFT_MINUTES - u.hours * 60);
       return {
         key: `grind|${u.machineId}`,
@@ -446,9 +461,9 @@ export const efficiencyService = {
             label: 'Production / man-hour',
             unit: 'kg/man-hour',
             value: round(u.pmh, 1),
-            baseline: round(bp, 1),
-            warn: u.pmh != null && bp != null && u.pmh < bp * TH.labour,
+            warn: false,
             // The benchmark for this one is per day - see the day card below.
+            ...noTargetHere(dayCard),
             calc: u.pmh == null ? null : {
               title: 'Production / man-hour',
               formula: 'output ÷ (crew × hours)',
@@ -459,7 +474,7 @@ export const efficiencyService = {
                 `= ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)})`,
               ],
               result: `${round(u.pmh, 1)}`,
-              note: `Usual for ${u.machine} = ${round(bp, 1) ?? '—'} (median). Flagged below ${Math.round(TH.labour * 100)}% of usual.`,
+              note: `The ideal for ${u.machine} labour productivity is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
             },
           },
           {
@@ -467,18 +482,18 @@ export const efficiencyService = {
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
             value: round(u.kwhkg, 3),
-            baseline: round(be, 3),
-            warn: u.kwhkg != null && be != null && u.kwhkg > be * TH.energy,
+            warn: false,
+            ...noTargetHere(dayCard),
             calc: u.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg)',
               formula: 'energy ÷ output',
               lines: [
-                `energy = ${round(u.kwh, 1)} kWh${u.machineId === 'GRD_O' ? ' (TOD meter × 3)' : ''}`,
+                `energy = ${round(u.kwh, 1)} kWh`,
                 `output = ${round(u.out, 0)} kg`,
                 `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
               ],
               result: `${round(u.kwhkg, 3)} kWh/kg`,
-              note: `Usual for ${u.machine} = ${round(be, 3) ?? '—'}. Flagged above ${Math.round(TH.energy * 100)}% of usual.`,
+              note: `The ideal for ${u.machine} energy is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
             },
           },
           {
@@ -486,9 +501,21 @@ export const efficiencyService = {
             label: 'Time · utilisation',
             value: u.util == null ? null : round(u.util * 100, 0),
             unit: '%',
-            baseline: null,
-            baselineLabel: `of 12 h · downtime ${round(downMin / 60)} h`,
+            /**
+             * The one flag on this screen that is not a manager's benchmark, and
+             * the one comparison that survived the medians going: twelve hours is
+             * twelve hours whatever the plant has averaged, so this is a fixed
+             * standard rather than a bar the plant sets by drifting. It is named
+             * on the card as its own kind of flag so nobody reads it as a target
+             * off the Ideal values tab.
+             */
+            context: `of 12 h · downtime ${round(downMin / 60)} h`,
             warn: u.util != null && u.util < TH.utilisation,
+            warnLabel: 'high downtime',
+            // Declared null rather than left off, so every metric on the wire
+            // answers the same question the same way: this is not a figure the
+            // manager sets a target against, so the card must not ask for one.
+            parameter: null,
             calc: u.util == null ? null : {
               title: 'Time · utilisation',
               formula: 'run hours ÷ 12 h shift',
@@ -506,8 +533,7 @@ export const efficiencyService = {
             label: 'Output (maximise)',
             value: round(u.out, 0),
             unit: 'kg',
-            baseline: null,
-            baselineLabel: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
+            context: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
             warn: false,
             ...idealFor(idealKey.production(u.machineId), u.out, ideals, 0),
             calc: {
@@ -536,9 +562,19 @@ export const efficiencyService = {
             label: 'Yield',
             value: round(y.pct, 1),
             unit: '%',
-            baseline: round(baseYield, 1),
-            baselineLabel: `usual ${round(baseYield, 1) ?? '—'}% · out ${round(y.out, 0)} kg`,
-            warn: y.pct != null && baseYield != null && y.pct < baseYield * TH.yield,
+            context: `charge ${y.charge ?? '—'} kg · out ${round(y.out, 0)} kg`,
+            warn: false,
+            /**
+             * Against the manager's figure, not the plant's median yield.
+             *
+             * This is the one metric on the screen that gained a target rather
+             * than only losing a baseline. Yield is how much rubber the plant
+             * throws away, and it was the figure most flattered by being judged
+             * against its own history - a plant that has quietly yielded 62% for
+             * two years has a median saying 62% is normal. One target for the
+             * plant: a charge is charged as a charge, not as a grade.
+             */
+            ...idealFor(idealKey.batchYield(), y.pct, ideals, 1),
             calc: {
               title: 'Yield',
               formula: 'output ÷ autoclave charge × 100',
@@ -548,7 +584,7 @@ export const efficiencyService = {
                 `= ${round(y.out, 0)} ÷ ${y.charge} × 100`,
               ],
               result: `${round(y.pct, 1)} %`,
-              note: `Usual = median yield across all batches = ${round(baseYield, 1) ?? '—'}%. Flagged below ${Math.round(TH.yield * 100)}% of usual.`,
+              note: 'Compared with the batch yield on the Ideal values tab.',
             },
           },
         ],
@@ -564,7 +600,6 @@ export const efficiencyService = {
      * made against what it was meant to make and leaves it there.
      */
     const coarseAll = coarseUnits(all);
-    const baseCoarse = median(coarseAll.map((u) => u.out));
     const coarse = coarseAll.filter(here).map((u) => ({
       key: 'coarse|line',
       line: 'coarse',
@@ -578,9 +613,8 @@ export const efficiencyService = {
           label: 'Output',
           value: round(u.out, 0),
           unit: 'kg',
-          baseline: round(baseCoarse, 0),
-          baselineLabel: `usual ${round(baseCoarse, 0) ?? '—'} kg · ${u.workers} crew · ${round(u.hours, 1)} h`,
-          warn: u.out != null && baseCoarse != null && u.out < baseCoarse * TH.labour,
+          context: `${u.workers} crew · ${round(u.hours, 1)} h`,
+          warn: false,
           ...idealFor(idealKey.production('COARSE'), u.out, ideals, 0),
           calc: {
             title: 'Coarse output',
@@ -589,7 +623,7 @@ export const efficiencyService = {
               `= sum of the line's weighed runs over ${round(u.hours)} h with ${u.workers} crew`,
             ],
             result: `${round(u.out, 0)} kg`,
-            note: `Usual = median coarse shift = ${round(baseCoarse, 0) ?? '—'} kg.`,
+            note: "Compared with the coarse line's shift production on the Ideal values tab.",
           },
         },
       ],
@@ -605,11 +639,9 @@ export const efficiencyService = {
      * rather than leaving the reader to notice.
      */
     const acAll = autoclaveRunsByDay(all);
-    const baseAcRuns = baselineBy(acAll, (u) => u.machineId, (u) => u.runs);
     const autoclaves = IDEAL_AUTOCLAVES.map((vessel) => {
       const today = acAll.find((u) => u.machineId === vessel.key && u.day === date);
       const runsToday = today?.runs ?? 0;
-      const base = baseAcRuns[vessel.key] ?? null;
       return {
         key: `autoclave|${vessel.key}`,
         line: 'autoclave',
@@ -621,9 +653,8 @@ export const efficiencyService = {
             label: 'Charges today',
             value: runsToday,
             unit: 'runs/day',
-            baseline: round(base, 1),
-            baselineLabel: `usual ${round(base, 1) ?? '—'} a day`,
-            warn: base != null && runsToday < base * TH.labour,
+            context: null,
+            warn: false,
             ...idealFor(idealKey.autoclaveRuns(vessel.key), runsToday, ideals, 0),
             calc: {
               title: 'Charges today',
@@ -633,7 +664,7 @@ export const efficiencyService = {
                 'counted per day, not per shift - a charge crosses the handover',
               ],
               result: `${runsToday} run${runsToday === 1 ? '' : 's'}`,
-              note: `Usual = median day for this vessel = ${round(base, 1) ?? '—'}.`,
+              note: 'Compared with the charges a day set for this vessel on the Ideal values tab.',
             },
           },
         ],
@@ -647,8 +678,9 @@ export const efficiencyService = {
      * the difference is not academic: a night shift that ran four hours on a line
      * the day shift had already warmed up is not a worse crew, and holding each
      * half of a day against a whole-day target would report it as one. The shift
-     * cards above still carry both figures against the plant's own median, which
-     * is the question they were built to answer.
+     * cards above still show both figures for the shift, because that is the
+     * span a supervisor works - but they carry no comparison, and this is the
+     * only place either figure is flagged.
      *
      * Both lines are folded the same way and rendered from one list, so a grinder
      * and a grade of the special line cannot end up compared by different
@@ -656,15 +688,11 @@ export const efficiencyService = {
      */
     const dayOf = (units, keyOf, idealKeys, describe) => {
       const daily = dailyUnits(units, keyOf);
-      const basePmh = baselineBy(daily, (d) => d.key, (d) => d.pmh);
-      const baseKwh = baselineBy(daily, (d) => d.key, (d) => d.kwhkg);
 
       return daily
         .filter((d) => d.day === date)
         .sort((a, b) => (a.key < b.key ? -1 : 1))
         .map((d) => {
-          const bp = basePmh[d.key] ?? null;
-          const be = baseKwh[d.key] ?? null;
           const spread = `${d.shifts} shift${d.shifts === 1 ? '' : 's'} · ${round(d.out, 0)} kg · ${round(d.labourHours, 1)} labour-h`;
           return {
             key: `day|${keyOf(d)}`,
@@ -677,9 +705,8 @@ export const efficiencyService = {
                 label: 'Electricity (kWh/kg)',
                 unit: 'kWh/kg',
                 value: round(d.kwhkg, 3),
-                baseline: round(be, 3),
-                baselineLabel: `usual ${round(be, 3) ?? '—'} · ${spread}`,
-                warn: d.kwhkg != null && be != null && d.kwhkg > be * TH.energy,
+                context: spread,
+                warn: false,
                 ...idealFor(idealKeys.kwh(d), d.kwhkg, ideals, 3),
                 calc: d.kwhkg == null ? null : {
                   title: 'Electricity (kWh / kg) · whole day',
@@ -698,9 +725,8 @@ export const efficiencyService = {
                 label: 'Labour productivity',
                 unit: 'kg/man-hour',
                 value: round(d.pmh, 1),
-                baseline: round(bp, 1),
-                baselineLabel: `usual ${round(bp, 1) ?? '—'} · ${spread}`,
-                warn: d.pmh != null && bp != null && d.pmh < bp * TH.labour,
+                context: spread,
+                warn: false,
                 ...idealFor(idealKeys.pmh(d), d.pmh, ideals, 1),
                 calc: d.pmh == null ? null : {
                   title: 'Labour productivity · whole day',
@@ -763,6 +789,12 @@ export const efficiencyService = {
        */
       days,
       yields,
+      /**
+       * The utilisation cut-off, and now nothing else. It is here so the screen
+       * can say what the one non-ideal flag on it means without hard-coding the
+       * number in two places. Everything else on this response is measured
+       * against the manager's sheet.
+       */
       thresholds: TH,
       /**
        * Whether the manager has set any benchmark at all. The screen needs to
