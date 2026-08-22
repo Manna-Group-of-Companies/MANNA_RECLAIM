@@ -74,11 +74,18 @@ export function SheetLabel({ children, className }: { children: ReactNode; class
   return <div className={cn('sheet-label', className)}>{children}</div>;
 }
 
-/** `.view-head`: the tab title on the left, a live count on the right. */
-export function ViewHead({ title, meta }: { title: string; meta?: ReactNode }) {
+/**
+ * `.view-head`: the tab title on the left, a live count on the right.
+ *
+ * The title is optional. The tab bar names every screen already, and on the
+ * screens that carry the most above the fold the heading was a line of chrome
+ * spending a row of a tablet's height on a word the crew had just tapped. The
+ * count stays where it has always been - see `.view-head .meta:only-child`.
+ */
+export function ViewHead({ title, meta }: { title?: string; meta?: ReactNode }) {
   return (
     <div className="view-head">
-      <h1>{title}</h1>
+      {title && <h1>{title}</h1>}
       {meta && <div className="meta">{meta}</div>}
     </div>
   );

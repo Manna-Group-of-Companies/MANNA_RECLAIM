@@ -63,9 +63,17 @@ Future<bool?> showStartSheet({
   var quality = 'Special';
   var batchNo = '';
 
-  /// Special line only: the other batches whose tailings are going through with
-  /// the one being refined. The batch itself is not in here - it leads the list
-  /// that gets sent, and cannot be mixed with itself.
+  /// Any sheet that refines a batch: the other batches whose tailings are going
+  /// through with the one being refined. The batch itself is not in here - it
+  /// leads the list that gets sent, and cannot be mixed with itself.
+  ///
+  /// Filled by tapping the Batch grid a second time - see tapBatch. It was a
+  /// grid of its own under "Mixed from", offered on the special line alone,
+  /// which got both halves of this wrong. A refiner takes two batches at a time
+  /// and could not say so at all, so a pass with two batches in it went on
+  /// record as a pass on one; and a second grid of the same numbers is not what
+  /// "pick two batches" looks like to a crew in gloves. One grid, and the tap
+  /// after the first mixes one in.
   var mix = <String>[];
   var startDate = todayISO();
   var startShift = currentShift();
@@ -112,7 +120,6 @@ Future<bool?> showStartSheet({
     title: isAutoclave ? 'Load ${machine.name}' : 'Start ${machine.name}',
     led: T.brand,
     body: (context, setSheetState) {
-      final refinable = batches.refinable;
       final pickable = batches.pickable;
 
       /// The special line needs a batch to work through. With none open at all
@@ -159,10 +166,62 @@ Future<bool?> showStartSheet({
       /// at.
       final loadShift = shiftForTime(loadTime);
 
-      // The other batches whose tailings can go through with the one picked.
-      final mixable = special && batchNo.trim().isNotEmpty
-          ? refinable.where((b) => b.ref != batchNo.trim()).toList()
-          : const <Batch>[];
+      /// A tap on the Batch grid.
+      ///
+      /// The first number picked is the batch being refined - the one the run
+      /// is filed under, and the only one the record keys on. What is tapped
+      /// after it goes through with it as tailings, which is what `sources`
+      /// keeps. Two batches is what a refiner takes at a time; the special line
+      /// records up to four, which is as many as its columns hold.
+      ///
+      /// Untapping the one it is filed under hands that job to the next number
+      /// still lit rather than dropping the whole picking: the crew is taking
+      /// one batch back off the machine, not starting the pick again.
+      void tapBatch(Batch b) {
+        final lead = batchNo.trim();
+        if (lead == b.ref) {
+          setSheetState(() {
+            batchNo = mix.isEmpty ? '' : mix.first;
+            mix = mix.skip(1).toList();
+          });
+          return;
+        }
+        if (mix.contains(b.ref)) {
+          setSheetState(() => mix = mix.where((r) => r != b.ref).toList());
+          return;
+        }
+        if (lead.isEmpty) {
+          setSheetState(() {
+            batchNo = b.ref;
+            // The grade the batch was opened for is the one it will come off
+            // at, so the picker starts there - the crew can still say
+            // otherwise before it starts.
+            if (special && b.grade != null) quality = b.grade!;
+          });
+          return;
+        }
+        if (!b.autoclaveDone) {
+          // A charge is on this grid before it is out of the vessel, so that
+          // the pick says why it is not ready rather than leaving the number
+          // off the screen. It can still be the batch a run is filed under -
+          // the crew see it through the door - but it has no tailings to put
+          // through anything until it is discharged.
+          ui.notify('${b.ref} is still in the autoclave', ToastKind.warn);
+          return;
+        }
+        // Two batches is what a refiner takes at a time: the one it is filed
+        // under and one more going through with it. The special line keeps the
+        // four it has always recorded - four columns is what the record has
+        // room for, and one of them is the batch being refined.
+        if (mix.length >= (special ? 3 : 1)) {
+          ui.notify(
+            special ? 'Up to 4 batches per mix' : 'Two batches at a time',
+            ToastKind.warn,
+          );
+          return;
+        }
+        setSheetState(() => mix = [...mix, b.ref]);
+      }
 
       if (nothingReady) {
         // The special line has nothing to work on until a charge is out of the
@@ -424,7 +483,10 @@ Future<bool?> showStartSheet({
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (picksBatch && pickable.isNotEmpty) ...[
-            const SheetLabel('Batch'),
+            SheetLabel(
+              'Batch',
+              note: mix.isEmpty ? '— tap a second to mix one in' : null,
+            ),
             PickGrid(
               children: [
                 for (final b in pickable)
@@ -433,23 +495,21 @@ Future<bool?> showStartSheet({
                     mono: true,
                     dot: b.grade == null ? null : qualityColour[b.grade],
                     subWidget: _BatchPickSub(b),
-                    selected: batchNo == b.ref,
-                    onTap: () => setSheetState(() {
-                      final next = batchNo == b.ref ? '' : b.ref;
-                      batchNo = next;
-                      // A batch cannot be mixed into itself, so picking one
-                      // takes it back out of the tailings.
-                      mix = mix.where((ref) => ref != next).toList();
-                      // The grade the batch was opened for is the one it will
-                      // come off at, so the picker starts there - the crew can
-                      // still say otherwise before it starts.
-                      if (next.isNotEmpty && special && b.grade != null) {
-                        quality = b.grade!;
-                      }
-                    }),
+                    selected: batchNo == b.ref || mix.contains(b.ref),
+                    onTap: () => tapBatch(b),
                   ),
               ],
             ),
+            // Which of the lit tiles the run is actually filed under. Two
+            // tiles lit the same way say nothing about that, and the one it is
+            // filed under is the one the batch card, the weighing and the
+            // costing all follow.
+            if (mix.isNotEmpty)
+              Hint(
+                'Filed under ${batchNo.trim()} — '
+                '${mix.join(' and ')} ${mix.length == 1 ? 'goes' : 'go'} '
+                'through with it as tailings.',
+              ),
           ],
 
           if (machine.needsQuality || special) ...[
@@ -473,7 +533,10 @@ Future<bool?> showStartSheet({
               note: picksBatch ? '— or type it' : '— optional',
               value: batchNo,
               placeholder: 'e.g. B-104',
-              onChanged: (v) => setSheetState(() => batchNo = v),
+              onChanged: (v) => setSheetState(() {
+                batchNo = v;
+                mix = mix.where((ref) => ref != v.trim()).toList();
+              }),
             ),
 
           // A special-line pass that yields nothing to weigh is rare enough
@@ -488,44 +551,6 @@ Future<bool?> showStartSheet({
               offTitle: 'Non-production',
               offSub: 'no weighing · rare',
             ),
-          ],
-
-          // A pass often carries the tailings of other batches through with the
-          // one being refined. They are named here so the run says what
-          // actually went into it - four batches in all, which is as many as
-          // the record has room for.
-          if (special && batchNo.trim().isNotEmpty) ...[
-            const SheetLabel(
-              'Mixed from',
-              note: '— add tailings of other batches',
-            ),
-            if (mixable.isEmpty)
-              const Hint('No other batches to mix.')
-            else
-              PickGrid(
-                children: [
-                  for (final b in mixable)
-                    Pick(
-                      title: b.ref,
-                      mono: true,
-                      sub: b.formulation,
-                      selected: mix.contains(b.ref),
-                      onTap: () {
-                        if (mix.contains(b.ref)) {
-                          setSheetState(
-                            () => mix = mix.where((r) => r != b.ref).toList(),
-                          );
-                        } else if (mix.length >= 3) {
-                          // Four columns is all the record has room for, and
-                          // one of them is the batch being refined.
-                          ui.notify('Up to 4 batches per mix', ToastKind.warn);
-                        } else {
-                          setSheetState(() => mix = [...mix, b.ref]);
-                        }
-                      },
-                    ),
-                ],
-              ),
           ],
 
           if (shiftwise) ...[
@@ -655,6 +680,7 @@ Future<bool?> showStartSheet({
                           line: line,
                           shiftwise: shiftwise,
                           special: special,
+                          picksBatch: picksBatch,
                           metered: metered,
                           picksProduct: picksProduct,
                           isMouldingBench: isMouldingBench,
@@ -795,6 +821,10 @@ Future<bool> _confirmStart({
   required String? line,
   required bool shiftwise,
   required bool special,
+
+  /// Whether this sheet refines a named batch - a refiner or the special line.
+  /// Both may have had more than one batch going through them; see [mix].
+  required bool picksBatch,
   required bool metered,
   required bool picksProduct,
   required bool isMouldingBench,
@@ -936,7 +966,7 @@ Future<bool> _confirmStart({
     // The batch being refined leads the list; the tailings mixed into it
     // follow. Sent only when there is a mix - a batch on its own is already
     // named by `batchNo`.
-    if (special && mix.isNotEmpty) 'sources': [batchNo.trim(), ...mix],
+    if (picksBatch && mix.isNotEmpty) 'sources': [batchNo.trim(), ...mix],
   });
 
   if (run == null) return false;
@@ -945,10 +975,32 @@ Future<bool> _confirmStart({
     shiftDate: startDate,
     shift: startShift,
   );
-  ui.notify(
-    '${machine.name} started'
-    '${shiftwise ? ' · $startShift${tyre != null ? ' · ${tyres[tyre]!.label}' : ''}' : special ? ' · special line${nonProd ? ' · non-production' : ''}${mix.isNotEmpty ? ' · mixed with ${mix.length}' : ''}' : isMouldingBench ? ' · $startBatchNo · ${product?.name ?? productId}' : picksProduct ? ' · ${product?.name ?? productId}' : ''}',
-  );
+
+  /// What the toast says after the machine's name: the one thing the crew has
+  /// just decided that a look at the running machine would not tell them back.
+  final String detail;
+  if (shiftwise) {
+    detail = ' · $startShift${tyre != null ? ' · ${tyres[tyre]!.label}' : ''}';
+  } else if (isMouldingBench) {
+    // The number it will be recorded under and what it is making, said back to
+    // the crew - either alone names a lot only halfway.
+    detail = ' · $startBatchNo · ${product?.name ?? productId}';
+  } else if (picksProduct) {
+    detail = ' · ${product?.name ?? productId}';
+  } else {
+    // A refiner refines a named batch as much as the special line does, and
+    // the crew has just picked it off a grid of open numbers - saying it back
+    // is the confirmation that the run went on the batch they meant rather
+    // than the one beside it. The mix is said for the same reason again: two
+    // batches picked is two batches said back.
+    final batch = batchNo.trim();
+    detail =
+        '${batch.isEmpty ? '' : ' · $batch'}'
+        '${special ? ' · special line' : ''}'
+        '${special && nonProd ? ' · non-production' : ''}'
+        '${mix.isNotEmpty ? ' · mixed with ${mix.length}' : ''}';
+  }
+  ui.notify('${machine.name} started$detail');
   return true;
 }
 

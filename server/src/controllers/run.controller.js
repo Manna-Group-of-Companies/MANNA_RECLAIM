@@ -1,8 +1,7 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ok, created, paginated } from '../utils/ApiResponse.js';
-import { runService } from '../services/run.service.js';
+import { runService, settlesGrade } from '../services/run.service.js';
 import { batchService } from '../services/batch.service.js';
-import { FINAL_REFINER_IDS } from '../config/constants.js';
 import { logger } from '../config/logger.js';
 
 export const list = asyncHandler(async (req, res) =>
@@ -75,20 +74,6 @@ export const start = asyncHandler(async (req, res) =>
 );
 
 /**
- * Whether logging this run is what settles a grade for its batch.
- *
- * The final refiner always does: it is the last pass a special-line grade goes
- * through, so the supervisor is not left ticking a grade the plant has already
- * made. A coarse-line machine turned onto the special line does too, but only
- * where its output is actually weighed - which is R2, and not PR1, whose pass
- * is a pre-refining one that yields no output record at all.
- */
-const settlesGrade = (run) =>
-  Boolean(run.quality) &&
-  run.non_production !== true &&
-  (FINAL_REFINER_IDS.includes(run.machine_id) || (run.line === 'special' && run.needs_weigh === true));
-
-/**
  * What logging a run tells the batch it was logged against.
  *
  * Discharging an autoclave is what takes a batch out of the vessel, and that is
@@ -120,6 +105,29 @@ export const stop = asyncHandler(async (req, res) => {
   await applyToBatch(run);
   return ok(res, run, 'Run stopped');
 });
+
+/**
+ * The other half of applyToBatch(), for a run coming off the record.
+ *
+ * The batch card is not a table - it is a row inside the tablets' plant blob -
+ * so nothing in Postgres cascades into it and a deleted run would otherwise
+ * leave its discharge mark and its grade tick behind, indistinguishable from
+ * facts. batchService.forgetRun() takes back only what nothing else on record
+ * still says; see the note there.
+ *
+ * A failure is logged rather than raised, the same way applyToBatch()'s is: the
+ * run is already off the record either way, and turning that into a 500 would
+ * have the crew press delete again on a row that is no longer there.
+ */
+async function forgetBatch(run) {
+  if (!run?.batch_no) return null;
+  try {
+    return await batchService.forgetRun(run);
+  } catch (err) {
+    logger.error(`Run ${run.id} deleted, but batch ${run.batch_no} still carries its marks: ${err.message}`);
+    return null;
+  }
+}
 
 /** The running tally kept on a machine that is still going. */
 export const tally = asyncHandler(async (req, res) =>
@@ -166,10 +174,20 @@ export const cancel = asyncHandler(async (req, res) =>
   ok(res, await runService.cancel(req.params.id), 'Run cancelled'),
 );
 
-/** Removes a logged run from the record for good (the History tab's delete). */
-export const remove = asyncHandler(async (req, res) =>
-  ok(res, await runService.discard(req.params.id), 'Run deleted'),
-);
+/**
+ * Removes a logged run from the record for good (the History tab's delete).
+ *
+ * The run is read before it is discarded because deleting it is not the whole
+ * of the act: what it told its batch has to be taken back afterwards, and by
+ * then the row it would have been read off is gone. The read is the same one
+ * discard() does, so a run that is not there still 404s here and nothing is
+ * touched.
+ */
+export const remove = asyncHandler(async (req, res) => {
+  const run = await runService.findById(req.params.id);
+  const removed = await runService.discard(req.params.id);
+  return ok(res, { ...removed, batch_cleared: await forgetBatch(run) }, 'Run deleted');
+});
 
 export const pause = asyncHandler(async (req, res) =>
   ok(res, await runService.pause(req.params.id, req.body.paused !== false), 'Run updated'),

@@ -475,6 +475,14 @@
     color: var(--ink-faint);
     font-family: var(--mono);
   }
+  /*
+   * A head with no title left on it. `space-between` would walk the count over
+   * to where the heading used to be; it stays on the right, which is where the
+   * crew read it on every other tab.
+   */
+  .view-head .meta:only-child {
+    margin-left: auto;
+  }
 
   /* ---------- machine list ---------- */
   .mlist {
@@ -1438,13 +1446,12 @@
     color: var(--ink-faint);
   }
   /*
-   * The two states worth raising the voice for: a verdict that disagrees with
-   * the test under it, and one with no test under it at all. Both are cases
-   * where the quiet version would read as the lab having said something it did
-   * not, so neither is drawn in the faint grey the rest of this block uses.
+   * The state worth raising the voice for: a verdict that disagrees with the
+   * test under it. The quiet version would read as the lab having said
+   * something it did not, so it is not drawn in the faint grey the rest of this
+   * block uses.
    */
-  .scard .lab-warn,
-  .scard .lab-none {
+  .scard .lab-warn {
     margin-top: 5px;
     font-size: 11.5px;
     color: var(--warn);

@@ -24,7 +24,8 @@ async function boot() {
   // Shared bags rather than values, so re-seeding a test can refill them
   // without standing another listener up.
   const missingColumns = {};
-  const db = await startPostgrest({ tables: {}, functions, missingColumns });
+  const storage = {};
+  const db = await startPostgrest({ tables: {}, functions, missingColumns, storage });
 
   const { createApp } = await import('../../src/app.js');
   const { signAccessToken } = await import('../../src/utils/jwt.js');
@@ -43,7 +44,7 @@ async function boot() {
   server.unref();
   const base = `http://127.0.0.1:${server.address().port}${env.apiPrefix}`;
 
-  return { db, functions, missingColumns, server, base, signAccessToken };
+  return { db, functions, missingColumns, storage, server, base, signAccessToken };
 }
 
 /**
@@ -51,7 +52,12 @@ async function boot() {
  * Re-seeds rather than restarts, so every test in a file starts from a known
  * store without paying for another listener.
  */
-export async function startApi({ tables = {}, functions = {}, missingColumns = {} } = {}) {
+export async function startApi({
+  tables = {},
+  functions = {},
+  missingColumns = {},
+  storage = {},
+} = {}) {
   started ??= await boot();
   const api = started;
 
@@ -63,6 +69,10 @@ export async function startApi({ tables = {}, functions = {}, missingColumns = {
   // is what the select pruning in config/supabase.js exists for.
   for (const key of Object.keys(api.missingColumns)) delete api.missingColumns[key];
   Object.assign(api.missingColumns, missingColumns);
+  // `{ 'qc-reports': ['test-1/sheet.pdf'] }` - the buckets and what is in them.
+  // A bucket left unnamed does not exist, which is a project that never made one.
+  for (const key of Object.keys(api.storage)) delete api.storage[key];
+  Object.assign(api.storage, storage);
 
   /** A signed-in account of the given role, as a bearer token. */
   const tokenFor = (role, name = role) => api.signAccessToken({ id: `user-${role}`, role, name });
@@ -83,6 +93,8 @@ export async function startApi({ tables = {}, functions = {}, missingColumns = {
     /** The API root, for the few tests that need to call it without a token. */
     base: api.base,
     tables: api.db.tables,
+    /** The buckets, as `{ bucket: [paths] }` - the same arrays the calls move. */
+    storage: api.storage,
     /** The listener outlives the test; the process ending is what closes it. */
     stop: async () => {},
   };

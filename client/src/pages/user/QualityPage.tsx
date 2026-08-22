@@ -695,7 +695,6 @@ export function QualityPage() {
   return (
     <>
       <ViewHead
-        title="Quality"
         meta={
           state
             ? `${visible.length} of ${cards.length} batches · ${STATE_LABEL[state].toLowerCase()}`

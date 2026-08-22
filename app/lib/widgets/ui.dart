@@ -371,8 +371,13 @@ class ReadableColumn extends StatelessWidget {
 
 /// `.view-head`: the tab title on the left, a live count on the right.
 class ViewHead extends StatelessWidget {
-  const ViewHead({super.key, required this.title, this.meta});
-  final String title;
+  const ViewHead({super.key, this.title, this.meta});
+
+  /// Optional. The tab bar names every screen already, and on the screens that
+  /// carry the most above the fold the heading was a line of chrome spending a
+  /// row of a tablet's height on a word the crew had just tapped. The count
+  /// keeps its place on the right either way.
+  final String? title;
   final Widget? meta;
 
   @override
@@ -381,8 +386,10 @@ class ViewHead extends StatelessWidget {
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(width: 12),
+        if (title != null) ...[
+          Text(title!, style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(width: 12),
+        ],
         if (meta != null)
           Expanded(
             child: DefaultTextStyle(

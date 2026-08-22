@@ -211,6 +211,12 @@ export function buildPayload(draft: Draft, changed: DraftField[], math: RunMath)
  * who sees the yard drop by twelve sacks an hour later should be able to
  * remember why.
  *
+ * The batch card is the third place a run leaves a mark - the discharge on its
+ * autoclave load, the tick on the grade a refiner settled - and the delete takes
+ * those back too. That one is worth naming for a different reason than the yard:
+ * nobody would ever connect a grade that has quietly unticked itself to a run
+ * somebody deleted last week.
+ *
  * The unaccounted case is the one worth saying out loud: packed output no group
  * could be found for is a discrepancy in the yard that no screen would
  * otherwise show, so the server's note is passed straight through.
@@ -224,6 +230,11 @@ export function deletedSummary(removed: RemovedRun): { message: string; warn: bo
   if (removed.quality_tests_deleted) {
     const n = removed.quality_tests_deleted;
     parts.push(`${n} lab test${n > 1 ? 's' : ''} removed`);
+  }
+  if (removed.batch_cleared) {
+    const { ref, discharge_cleared, qualities_cleared } = removed.batch_cleared;
+    if (qualities_cleared.length) parts.push(`${qualities_cleared.join(', ')} unmarked on ${ref}`);
+    if (discharge_cleared) parts.push(`${ref} back in the autoclave`);
   }
   if (removed.stock_note) return { message: removed.stock_note, warn: true };
   return { message: parts.join(' · '), warn: false };

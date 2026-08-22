@@ -26,9 +26,11 @@ export const startRunSchema = z.object({
    */
   nonProduction: z.boolean().optional(),
   /**
-   * The batches a special-line pass drew from, the one being refined first and
-   * the tailings mixed into it after. Four is the ceiling because that is how
-   * many columns the tablets kept them in - see src1..src4 in config/tables.
+   * The batches a refining pass drew from, the one being refined first and the
+   * tailings mixed into it after. Four is the ceiling because that is how many
+   * columns the tablets kept them in - see src1..src4 in config/tables. Sent by
+   * the special line and by the refiners alike: two batches through one machine
+   * is as ordinary on one as on the other.
    */
   sources: z.array(z.string().max(60)).max(4).optional().nullable(),
   // The refiner crews read both meters off the machine as they start it. A

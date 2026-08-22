@@ -13,6 +13,7 @@ import {
   SACK_KG,
   COARSE_GRADE,
   MOULDING_KINDS,
+  FINAL_REFINER_IDS,
   isCracker,
   isMoulding,
 } from '../config/constants.js';
@@ -43,9 +44,9 @@ const tests = crud(TABLES.qualityTests, { defaultSort: 'ts' });
  * client models are written against.
  */
 /**
- * The batches a special-line pass drew from, the one being refined first and
- * any tailings mixed into it after. The tablets kept them in four columns
- * rather than a list, so they are read back out as one.
+ * The batches a refining pass drew from, the one being refined first and any
+ * tailings mixed into it after. The tablets kept them in four columns rather
+ * than a list, so they are read back out as one.
  */
 const sourcesOf = (row) =>
   [row.src1, row.src2, row.src3, row.src4]
@@ -763,6 +764,25 @@ async function clearTraces(run) {
   };
 }
 
+/**
+ * Whether logging this run is what settles a grade for its batch.
+ *
+ * The final refiner always does: it is the last pass a special-line grade goes
+ * through, so the supervisor is not left ticking a grade the plant has already
+ * made. A coarse-line machine turned onto the special line does too, but only
+ * where its output is actually weighed - which is R2, and not PR1, whose pass
+ * is a pre-refining one that yields no output record at all.
+ *
+ * It lives here rather than beside the one caller because there are two, and
+ * they are mirrors: the run being logged marks the grade on the batch card, and
+ * the run being deleted takes it back off. Two copies of this rule would let a
+ * refiner mark a grade that deleting the same run could not unmark.
+ */
+export const settlesGrade = (run) =>
+  Boolean(run.quality) &&
+  run.non_production !== true &&
+  (FINAL_REFINER_IDS.includes(run.machine_id) || (run.line === 'special' && run.needs_weigh === true));
+
 export const runService = {
   ...base,
 
@@ -1033,8 +1053,9 @@ export const runService = {
       // into the run's kWh and hours - see efficiency.service's runKwh().
       elec_start: payload.elecStart ?? null,
       hour_start: payload.hourStart ?? null,
-      // The special line can refine one batch with the tailings of others mixed
-      // into it; the batch being refined is the first of them.
+      // A refiner - on its own line or on the special one - can refine one
+      // batch with the tailings of others mixed into it; the batch being
+      // refined is the first of them.
       ...sourceColumns(payload.sources),
       // A press run: the product it is set up for and what it is moulded at.
       ...(press ?? {}),
