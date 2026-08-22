@@ -20,6 +20,12 @@ export const userPaths = {
   history: '/history',
   bearing: '/bearing',
   reports: '/reports',
+  /**
+   * How the shift did against the manager's benchmarks, for the crew that
+   * worked it. The plant pays an incentive on these figures, so the people
+   * being measured read them on the same day the office does.
+   */
+  efficiency: '/efficiency',
   settings: '/settings',
   /**
    * What this tablet has asked the server for, and what came back. Under

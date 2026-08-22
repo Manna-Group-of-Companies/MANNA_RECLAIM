@@ -8,5 +8,6 @@ export { QualityPage } from './QualityPage';
 export { HistoryPage } from './HistoryPage';
 export { BearingPage } from './BearingPage';
 export { ReportsPage } from './ReportsPage';
+export { UserEfficiencyPage } from './EfficiencyPage';
 export { SettingsPage } from './SettingsPage';
 export { LogPage } from './LogPage';

@@ -1,5 +1,11 @@
 import { ApiError } from '../utils/ApiError.js';
-import { ADMIN_ROLES, DELETE_ROLES, ROLES, SUMMARY_ROLES } from '../config/constants.js';
+import {
+  ADMIN_ROLES,
+  DELETE_ROLES,
+  ROLES,
+  SHIFT_REVIEW_ROLES,
+  SUMMARY_ROLES,
+} from '../config/constants.js';
 
 /** Gate a route to specific roles: `authorize(ROLES.ADMIN, ROLES.MANAGER)`. */
 export const authorize = (...roles) => (req, _res, next) => {
@@ -49,6 +55,15 @@ export const readOnlyRoles = (req, _res, next) => {
  * why the MD is a list of its own rather than a wider ADMIN_ROLES.
  */
 export const summaryOnly = authorize(...SUMMARY_ROLES);
+
+/**
+ * How a shift did against its benchmarks, which the crew is entitled to see.
+ *
+ * Wider than summaryOnly by the two floor roles and read-only like it. The
+ * plant pays an incentive on these figures - see SHIFT_REVIEW_ROLES for what
+ * this deliberately does not open.
+ */
+export const shiftReview = authorize(...SHIFT_REVIEW_ROLES);
 
 /**
  * The deletes that cannot be undone from any screen - a weighing cleared, a

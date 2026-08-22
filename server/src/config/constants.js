@@ -38,6 +38,29 @@ export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
 export const SUMMARY_ROLES = [ROLES.MD, ...ADMIN_ROLES];
 
 /**
+ * Who may read how a shift did against the manager's benchmarks.
+ *
+ * The crew as well as the office, which is the point: the plant pays an
+ * incentive on these figures, and a target somebody is paid against and cannot
+ * see is not a target, it is a surprise at the end of the month. The supervisor
+ * closes the shift and reads the same numbers the office will read.
+ *
+ * What this does NOT open is the money. /reports/costing, the machine log and
+ * the rate card stay where they were - this is kg per man-hour and kWh per kg
+ * against what they were meant to be, and carries no rate, no wage and no
+ * customer. The crew is shown what it is judged on, not what it is worth.
+ *
+ * The reasons a supervisor is asked to write for a miss are a separate route and
+ * stay with the back office. This screen reports; it does not interrogate.
+ */
+export const SHIFT_REVIEW_ROLES = [
+  ROLES.WORKER,
+  ROLES.SUPERVISOR,
+  ROLES.MD,
+  ...ADMIN_ROLES,
+];
+
+/**
  * Who may delete, as opposed to who may correct.
  *
  * The admin account alone - deliberately narrower than ADMIN_ROLES, which is

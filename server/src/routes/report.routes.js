@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as reports from '../controllers/report.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { adminOnly, summaryOnly } from '../middlewares/role.middleware.js';
+import { adminOnly, shiftReview, summaryOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { dateRange } from '../validations/common.validation.js';
 import {
@@ -29,10 +29,10 @@ router.get('/downtime/detail', adminOnly, reports.downtimeDetail);
  * the manager's ideals, and the plant overview. All three are GETs that compute
  * and return; none of them writes.
  */
-router.get('/shifts', summaryOnly, reports.shiftOptions);
+router.get('/shifts', shiftReview, reports.shiftOptions);
 router.get(
   '/shift-efficiency',
-  summaryOnly,
+  shiftReview,
   validate({ query: shiftQuery }),
   reports.shiftEfficiency,
 );

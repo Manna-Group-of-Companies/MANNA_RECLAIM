@@ -58,6 +58,33 @@ const SUMMARY_READS = [
 ];
 
 /**
+ * The two the shop floor reads as well, and why they are not a leak.
+ *
+ * The plant pays an incentive on how a shift did against its benchmarks, and
+ * a target somebody is paid against and cannot see is not a target - it is a
+ * surprise at the end of the month. So the crew reads the shift it worked.
+ *
+ * They carry kg per man-hour and kWh per kg against what they were meant to
+ * be, and no rate, no wage and no customer. What stays shut is below.
+ */
+const FLOOR_READS = [
+  '/reports/shifts',
+  `/reports/shift-efficiency?date=${DAY}&shift=Day`,
+];
+
+/**
+ * And the office's own screens, which the floor still does not reach.
+ *
+ * The overview totals the plant and prices it - conversion cost, dispatched
+ * value - and the variance reasons are the answers supervisors are asked to
+ * give for a miss, which is a record kept about them rather than for them.
+ */
+const OFFICE_ONLY_READS = [
+  `/reports/dashboard?from=${DAY}&to=${DAY}`,
+  `/reports/variance-reasons?from=${DAY}&to=${DAY}`,
+];
+
+/**
  * Everything the account is not. Two kinds, and both matter:
  * the writes on the very routes it can read, and the back office's own screens.
  */
@@ -161,16 +188,31 @@ test('the back office keeps every one of those', async (t) => {
   }
 });
 
-test('a shop-floor account is no nearer the summary than it was', async (t) => {
+test('the floor reads the shift it worked, and nothing else of the office\'s', async (t) => {
   const api = await startApi({ tables: seed() });
   t.after(() => api.stop());
 
-  // md widened SUMMARY_ROLES, and the thing to be sure of is that it widened it
-  // by exactly one role rather than turning a closed door into an open one.
-  for (const path of SUMMARY_READS) {
-    for (const role of ['supervisor', 'worker', 'lab']) {
+  // The crew is paid on these figures, so the crew can read them.
+  for (const role of ['supervisor', 'worker']) {
+    for (const path of FLOOR_READS) {
+      const res = await api.call(path, { role });
+      assert.equal(res.status, 200, `${path} refused a ${role} with ${res.status}`);
+    }
+  }
+
+  // And the widening stopped exactly there. The overview prices the plant and
+  // the variance reasons are a record kept about supervisors, not for them.
+  for (const role of ['supervisor', 'worker', 'lab']) {
+    for (const path of OFFICE_ONLY_READS) {
       const res = await api.call(path, { role });
       assert.equal(res.status, 403, `${path} let a ${role} through with ${res.status}`);
     }
+  }
+
+  // The lab is not on the floor and is not paid on what the plant makes, so
+  // it gets neither.
+  for (const path of FLOOR_READS) {
+    const res = await api.call(path, { role: 'lab' });
+    assert.equal(res.status, 403, `${path} let the lab through with ${res.status}`);
   }
 });

@@ -31,6 +31,9 @@ const tabs: Tab[] = [
   { to: userPaths.stock, label: 'Stock', icon: 'dispatch' },
   { to: userPaths.quality, label: 'Quality', icon: 'quality', badge: 'quality', roles: LAB_ROLES },
   { to: userPaths.history, label: 'History', icon: 'history' },
+  // How the shift did against its targets. Floor work, deliberately: the crew
+  // is paid an incentive on these figures and reads them here.
+  { to: userPaths.efficiency, label: 'Efficiency', icon: 'reports' },
   { to: userPaths.bearing, label: 'Bearing', icon: 'bearing', badge: 'bearing' },
 ];
 
