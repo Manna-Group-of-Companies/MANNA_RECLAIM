@@ -52,13 +52,12 @@ Future<bool?> showStartSheet({
   final isPress = isPressKind(machine.kind);
   final isMouldingBench = isMoulding(machine.kind);
   final picksProduct = isPress || isMouldingBench;
-  final metered = hasMeters(machine.kind);
+  final metered = hasMeters(machine);
   final shiftwise = line != null ? line == 'coarse' : isShiftwiseKind(machine.kind);
   final special = line == 'special';
 
   /// The sheets that pick a batch off the open list rather than only typing one.
   final picksBatch = isRefiner(machine) || special;
-  final isTod = machine.id == todMachineId;
 
   // ---- form state ----
   var quality = 'Special';
@@ -582,16 +581,13 @@ Future<bool?> showStartSheet({
             const SizedBox(height: 14),
             TextFieldRow(
               controller: elecStart,
-              label: isTod
-                  ? 'Initial TOD-meter reading'
-                  : 'Initial electricity reading',
+              label: 'Initial electricity reading',
               note: previous?.elecEnd != null
                   ? '— last end ${previous!.elecEnd}'
                   : '— meter units now',
               suffix: 'units',
               decimal: true,
               placeholder: 'meter reading',
-              hint: isTod ? todNote : null,
             ),
             TextFieldRow(
               controller: hourStart,

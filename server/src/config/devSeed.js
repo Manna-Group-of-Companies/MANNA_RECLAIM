@@ -18,12 +18,34 @@ import { ROLES, TABLES } from './constants.js';
  * user.service.js / machine.service.js, when the plant is fully on Supabase.
  */
 
+/**
+ * The starting accounts. Mirrors SEED_USERS in scripts/seed-users.js, which is
+ * what writes the same seven into Supabase.
+ *
+ * `MD` is the managing director, and reads two screens: the plant overview and
+ * the shift efficiency. It is not a quieter Manager - it has no write anywhere
+ * in the app, which is what SUMMARY_ROLES is for. See the note there.
+ *
+ * `Admin` is not a spare manager. It is the only account that satisfies
+ * DELETE_ROLES, which is deliberately narrower than ADMIN_ROLES: clearing a
+ * weighing on Weigh, clearing an emptied group on Stock and taking a verdict off
+ * the record on Quality are the three things in this app that cannot be undone
+ * by doing them again, and they are behind this account and no other. Without
+ * one seeded, those controls existed in the code and were reachable by nobody.
+ *
+ * It is a separate account from Manager rather than a widening of what Manager
+ * may do, because that is the whole point of the split - the destructive half
+ * should take a deliberate sign-in, not ride along with the one somebody leaves
+ * open on a desk all day.
+ */
 const SEED_PINS = [
   { name: 'Mathai', role: ROLES.SUPERVISOR, pin: '1111' },
   { name: 'Rahul', role: ROLES.SUPERVISOR, pin: '2222' },
   { name: 'Devanand', role: ROLES.SUPERVISOR, pin: '3333' },
   { name: 'Lab', role: ROLES.LAB, pin: '4444' },
   { name: 'Manager', role: ROLES.MANAGER, pin: '2525' },
+  { name: 'Admin', role: ROLES.ADMIN, pin: '9999' },
+  { name: 'MD', role: ROLES.MD, pin: '3567' },
 ];
 
 export const DEV_USERS = SEED_PINS.map((u, i) => ({
@@ -39,7 +61,9 @@ export const DEV_MACHINES = [
   { id: 'CRK', name: 'Cracker', short: 'CRK', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - tyre prep (mixed)', accent: '#9bb0c4', enabled: true, sort_order: 1 },
   { id: 'GRD_K', name: 'Grinder 1', short: 'Grind 1', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 30# default', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', enabled: true, sort_order: 2 },
   { id: 'GRD_S', name: 'Grinder 2', short: 'Grind 2', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - 20# default', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'bike', enabled: true, sort_order: 3 },
-  { id: 'GRD_O', name: 'Soorya Grinder', short: 'Soorya', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', enabled: true, sort_order: 4 },
+  // No electricity meter and no hour meter on this one, which is why `meters`
+  // exists at all - see migrations/0015. Its sheets ask for weight and crew.
+  { id: 'GRD_O', name: 'Soorya Grinder', short: 'Soorya', kind: 'grind', group_name: 'Grinding line', sub: 'shiftwise - no meters', accent: '#9bb0c4', out_weight: true, tyre: true, def_tyre: 'truck', meters: false, bearings: false, enabled: true, sort_order: 4 },
   { id: 'AC_A', name: 'Autoclave A', short: 'AC-A', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2500, accent: '#e0762e', enabled: true, sort_order: 5 },
   { id: 'AC_M', name: 'Autoclave M', short: 'AC-M', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2200, accent: '#e0762e', enabled: true, sort_order: 6 },
   { id: 'AC_N', name: 'Autoclave N', short: 'AC-N', kind: 'autoclave', group_name: 'Autoclaves', capacity: 2200, accent: '#e0762e', enabled: false, sort_order: 7 },

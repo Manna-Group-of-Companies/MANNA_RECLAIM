@@ -2,6 +2,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { verifyAccessToken } from '../utils/jwt.js';
 import { userService } from '../services/user.service.js';
 import { logger } from '../config/logger.js';
+import { readOnlyRoles } from './role.middleware.js';
 
 const bearer = (req) => {
   const header = req.headers.authorization || '';
@@ -34,7 +35,18 @@ export function authenticate(req, _res, next) {
     const claims = verifyAccessToken(token);
     req.user = { id: claims.sub, role: claims.role, name: claims.name };
     noteSeen(claims.sub);
-    return next();
+    /*
+     * The one place every authenticated request passes through, which is why the
+     * read-only rule is applied here rather than route by route.
+     *
+     * A role that may not write is a fact about the role, not about the forty
+     * routes it happens to be able to reach today. Enforced per route it would
+     * be right until somebody adds route forty-one - and the routes that matter
+     * most here are the ones deliberately left open to everyone signed in, like
+     * correcting or deleting a run, which an account added later inherits
+     * without anybody choosing to hand them over.
+     */
+    return readOnlyRoles(req, _res, next);
   } catch (err) {
     return next(err);
   }

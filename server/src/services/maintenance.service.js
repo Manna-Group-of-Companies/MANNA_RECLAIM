@@ -18,6 +18,21 @@ const bearings = crud(TABLES.bearingLogs, { defaultSort: 'ts' });
  */
 export function bearingSpec(machine) {
   if (!machine || machine.kind === 'autoclave' || machine.kind === 'press') return null;
+  /*
+   * The machine's own answer beats what its kind implies.
+   *
+   * `kind` is a good guess and it is wrong about the Soorya Grinder, which is a
+   * grinder with nothing to grease. Left to the kind it asked for temperatures
+   * at four positions that nobody takes, every two hours, for the life of the
+   * project - and because a machine that has never been logged counts as due, it
+   * asked from a permanent state of overdue. A prompt that is always red is a
+   * prompt the crew learns to scroll past, including on the machines where it
+   * means something.
+   *
+   * Null is not false: it means nobody has answered for this machine, so the
+   * kind goes on answering. See migrations/0015.
+   */
+  if (machine.bearings === false) return null;
   const id = machine.id ?? machine._id;
   return {
     type: BUSH_MACHINE_IDS.includes(id) ? 'bush' : 'bearing',

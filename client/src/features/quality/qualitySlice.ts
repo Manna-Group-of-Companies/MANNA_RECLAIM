@@ -12,13 +12,25 @@ import type { Batch, QualityGradeSummary, QualityTest } from '@/types/models';
 
 interface QualityState {
   tests: QualityTest[];
-  /** Every open batch, tested or not - the Quality tab lists them all. */
+  /** Every open batch, tested or not - the bench's list and its badge. */
   batches: Batch[];
   /** Those with a grade still awaiting a verdict - the tab's badge counts these. */
   pending: Batch[];
   summary: QualityGradeSummary[];
   /** Batch numbers the lab has put on hold. Dispatch warns about these. */
   held: string[];
+  /**
+   * The back office's own read: every batch charged in the window it is looking
+   * at, open or closed, whatever line - with the verdicts to pair against them.
+   *
+   * Kept apart from `batches` above rather than widening it, because the two
+   * answer different questions for different people. The bench's badge means
+   * "batches I still have to test", and a bench works what is open; folding
+   * every closed untested charge since March into it would turn a number
+   * somebody acts on into one nobody reads.
+   */
+  record: { batches: Batch[]; tests: QualityTest[]; truncated: boolean };
+  recordLoading: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -29,6 +41,8 @@ const initialState: QualityState = {
   pending: [],
   summary: [],
   held: [],
+  record: { batches: [], tests: [], truncated: false },
+  recordLoading: false,
   loading: false,
   error: null,
 };
@@ -69,6 +83,37 @@ export const fetchPendingQuality = createAsyncThunk(
         tests,
         pending: state.filter(({ qc }) => !qc.allDone).map(({ batch }) => batch),
         held: state.filter(({ qc }) => qc.anyHold).map(({ batch }) => String(batch.ref)),
+      };
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
+/**
+ * The back office's lab record: every batch in the window and every verdict in
+ * it, so the page can show what was produced beside what was checked.
+ *
+ * `from` of null is the whole record - the plant has been logging since the
+ * spring and "everything produced till now" is a question somebody is entitled
+ * to ask. Both reads page back to the cutoff rather than taking the newest 200,
+ * and `truncated` says so when even that ran out.
+ */
+export const fetchQualityRecord = createAsyncThunk(
+  // Not 'quality/record' - recordTest below already owns that prefix, and two
+  // thunks sharing one action type is a runtime crash at store construction,
+  // not a name clash the compiler catches.
+  'quality/labRecord',
+  async ({ from }: { from: string | null }, { rejectWithValue }) => {
+    try {
+      const [batches, tests] = await Promise.all([
+        batchService.listSince(from),
+        qualityService.listSince(from),
+      ]);
+      return {
+        batches: batches.rows,
+        tests: tests.rows,
+        truncated: batches.truncated || tests.truncated,
       };
     } catch (err) {
       return rejectWithValue(fail(err));
@@ -189,6 +234,17 @@ const qualitySlice = createSlice({
         state.tests = action.payload.tests;
         state.held = action.payload.held;
       })
+      .addCase(fetchQualityRecord.pending, (state) => {
+        state.recordLoading = true;
+      })
+      .addCase(fetchQualityRecord.fulfilled, (state, action) => {
+        state.recordLoading = false;
+        state.record = action.payload;
+      })
+      .addCase(fetchQualityRecord.rejected, (state, action) => {
+        state.recordLoading = false;
+        state.error = (action.payload as string) ?? 'Could not load the lab record';
+      })
       .addCase(fetchQualitySummary.fulfilled, (state, action) => {
         state.summary = action.payload;
       })
@@ -212,6 +268,11 @@ const qualitySlice = createSlice({
        */
       .addCase(removeTest.fulfilled, (state, action) => {
         state.tests = state.tests.filter((t) => t.id !== action.payload.id);
+        // The back office's own copy as well. The page pairs batches against
+        // this list to decide which grades are still unchecked, so a row left
+        // here would go on certifying a batch after the verdict behind it was
+        // taken off the record - which is the exact thing the delete is for.
+        state.record.tests = state.record.tests.filter((t) => t.id !== action.payload.id);
       });
   },
 });

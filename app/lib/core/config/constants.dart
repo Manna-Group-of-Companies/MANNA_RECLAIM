@@ -102,9 +102,6 @@ const weighedPage = 20;
 /// which is where the stored flag is actually decided.
 const piecesVariancePct = 10;
 
-/// Soorya is metered on one phase only, so its energy is the difference x 3.
-const todMachineId = 'GRD_O';
-
 /// The cracker, singled out of the grinding line for one thing: picking.
 const crackerIds = <String>['CRK'];
 

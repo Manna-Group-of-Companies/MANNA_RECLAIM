@@ -28,6 +28,11 @@ const unique = (arr) => [...new Set(arr)];
 const ALWAYS_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'https://manna-reclaim.pages.dev',
+  // The Workers target. It is what `wrangler deploy` publishes - see
+  // client/wrangler.jsonc - so it is the origin a fresh deploy lands on, and it
+  // has been missing from this list while the test above it asserted otherwise.
+  // Whichever of the two URLs the plant opens, the login has to answer.
+  'https://manna-reclaim.odd-wind-70a0.workers.dev',
 ];
 
 export const env = {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   addEfficiencyNote,
@@ -8,24 +8,85 @@ import {
   fetchVarianceReasons,
   updateVarianceReason,
 } from '@/features/reports/reportsSlice';
+import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
+import { isReadOnly } from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
 import { cn } from '@/utils/cn';
-import type { EfficiencyCard, EfficiencyMetric, Shift, VarianceReason } from '@/types/models';
+import type {
+  EfficiencyCard,
+  EfficiencyMetric,
+  UnloggedMachine,
+  VarianceReason,
+} from '@/types/models';
 
 type CalcTarget = EfficiencyMetric['calc'];
 type NoteTarget = { line: 'refiner' | 'grind'; metric: string } | null;
 /** Which figure the manager is being asked to explain, and against what. */
 type VarianceTarget = { card: string; metric: EfficiencyMetric } | null;
 
-/** "−240 kg (−12%)" — the gap, in the unit and as a proportion of the target. */
+/**
+ * What the picked shift did on this card's line, said in the corner of it.
+ *
+ * A grade's shift output lives here rather than as a metric row. It is real and
+ * a manager wants it, but nobody sets a target against it - one charge is worked
+ * into several grades at once and the split follows demand, so a kg/shift target
+ * per grade would ask a supervisor to explain having made what he was told to
+ * make. As a row it was a permanently blank verdict column, and a row that never
+ * has an answer teaches people to skim the rows that do.
+ *
+ * The other half of the sentence is for a card whose line worked the day but not
+ * this shift. Those exist because the two comparisons on them are the day's; the
+ * card says so plainly rather than showing noughts.
+ */
+function shiftAside(card: EfficiencyCard): ReactNode {
+  const batches = card.batches?.length ? `Batch ${card.batches.join(', ')}` : null;
+  const worked = [
+    card.out == null ? null : `${card.out} kg`,
+    card.workers == null ? null : `${card.workers} crew`,
+    card.hours == null ? null : `${card.hours} h`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="cardaside">
+      {batches && <div>{batches}</div>}
+      {worked && <div>this shift: {worked}</div>}
+      {/*
+        What the two day-measured figures are folded out of. Said once, here,
+        rather than under each of them - it was under both and in this corner at
+        the same time, which put one sentence on a card three times.
+      */}
+      {card.dayNote && <div className="muted">whole day: {card.dayNote}</div>}
+    </div>
+  );
+}
+
+/**
+ * "−240 kg (−12%) short of target" — the gap, and which side of it that is.
+ *
+ * The words are the point. A sign on its own is not a verdict: +2.7% on labour
+ * productivity is a crew beating its benchmark and +5.8% on energy is the same
+ * rubber costing more electricity to make, and drawn as bare numbers the two are
+ * indistinguishable. `lowerIsBetter` is what tells them apart, so it is what
+ * picks the wording.
+ */
 function varianceText(metric: EfficiencyMetric): string {
   if (metric.variance == null) return '';
   const sign = metric.variance > 0 ? '+' : '';
   const unit = metric.unit ? ` ${metric.unit}` : '';
   const pct = metric.variancePct == null ? '' : ` (${sign}${metric.variancePct}%)`;
-  return `${sign}${metric.variance}${unit}${pct}`;
+  const above = metric.variance > 0;
+  const sense = metric.lowerIsBetter
+    ? above
+      ? 'over target'
+      : 'under target'
+    : above
+      ? 'above target'
+      : 'short of target';
+  return `${sign}${metric.variance}${unit}${pct} ${sense}`;
 }
 
 /**
@@ -41,8 +102,8 @@ function varianceText(metric: EfficiencyMetric): string {
  * off its ideal, on its ideal, or carrying no target at all. The third is not a
  * pass and is not drawn like one. It splits two ways, and the card tells them
  * apart: a figure that should have a target and does not says "no ideal set", so
- * somebody goes and sets it; a figure benchmarked over the whole day says which
- * card down the page does the comparing.
+ * somebody goes and sets it; a figure nobody sets a target against - a grade's
+ * output, whose split follows demand - says what it is instead.
  */
 function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: CalcTarget) => void }) {
   const shown =
@@ -56,25 +117,57 @@ function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: Calc
 
   const body = (
     <>
-      <span>
-        {metric.label}
-        {metric.calc && <span className="muted ml-1 text-[10px]">ⓘ how?</span>}
+      <span className="mlabel">
+        <span className="mname">
+          {metric.label}
+          {/*
+            Which span the figure covers, as a tag rather than a suffix on the
+            label. A grinder card carries both - two figures measured over the
+            day and two over the shift - and "· day" trailing the label read as
+            part of the name rather than as the answer to "of what?".
+          */}
+          {metric.span && <span className={`spantag ${metric.span}`}>{metric.span}</span>}
+          {/*
+            Said on the row, not left to be inferred from the unit. Somebody
+            reading this screen should not have to know that kWh/kg is the one
+            figure here you want to go down.
+          */}
+          {metric.ideal != null && (
+            <span className="dirtag" title="which side of the ideal is the good side">
+              {metric.lowerIsBetter ? '↓ lower is better' : '↑ higher is better'}
+            </span>
+          )}
+        </span>
+        {metric.calc && <span className="muted text-[10px]">ⓘ how?</span>}
         {metric.warn && <span className="warnpill">{metric.warnLabel ?? 'flagged'}</span>}
         {metric.offTarget && <span className="warnpill">off ideal</span>}
         {onTarget && <span className="okpill">on ideal</span>}
-        {noTarget && <span className="muted ml-1 text-[10px]">no ideal set</span>}
+        {noTarget && <span className="muted text-[10px]">no ideal set</span>}
       </span>
-      <span className="text-right">
+      <span className="mright">
         <span className="mv" style={metric.warn || metric.offTarget ? { color: 'var(--err)' } : undefined}>
           {shown}
         </span>
-        {metric.context && <div className="mb">{metric.context}</div>}
         {metric.ideal != null && (
-          <div className="mb" style={metric.offTarget ? { color: 'var(--err)' } : undefined}>
-            ideal {metric.ideal}
-            {metric.variance != null ? ` · ${varianceText(metric)}` : ''}
+          <div className="mcmp">
+            <span className="muted">ideal</span> {metric.ideal}
+            {metric.variance != null && (
+              <>
+                {' '}&nbsp;·&nbsp;{' '}
+                {/*
+                  Green when the figure is on the good side of its target, red
+                  when it is not - rather than muted grey for everything that is
+                  not a miss. A shift that beat its benchmark was being told so
+                  in the same colour as a shift nobody had set a target for.
+                */}
+                <span className={metric.offTarget ? 'gapbad' : 'gapgood'}>
+                  {varianceText(metric)}
+                </span>
+              </>
+            )}
           </div>
         )}
+        {metric.context && <div className="mb">{metric.context}</div>}
       </span>
     </>
   );
@@ -96,9 +189,29 @@ export function EfficiencyPage() {
   );
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   const user = useAppSelector((s) => s.auth.user);
+  /**
+   * The managing director opens this same page at /md/efficiency and reads it
+   * rather than writes it: no "why is this off the ideal?", no note, no edit on
+   * a reason somebody else recorded.
+   *
+   * The reasons themselves stay on the card, which is the point of letting that
+   * account in at all - the figure says a shift came in short and the reason
+   * says why, and an MD reading the first without the second would be the worst
+   * version of this screen. The three buttons are the whole difference, so this
+   * is one page and not two: a copy would drift from the one the manager sees,
+   * and the two would disagree about the same shift.
+   *
+   * Hiding a button is not the guard. Every write behind them is adminOnly at
+   * the routes, so an MD posting the request by hand is refused there.
+   */
+  const readOnly = isReadOnly(user?.role);
 
-  const [date, setDate] = useState('');
-  const [shift, setShift] = useState<Shift>('Day');
+  /*
+   * The day and the shift are the back office's, not this page's - picked
+   * once above the tab strip and read by every tab. See BackOfficeDay.
+   */
+  const date = useAppSelector((s) => s.ui.backOfficeDay);
+  const shift = useAppSelector((s) => s.ui.backOfficeShift);
   const [calc, setCalc] = useState<CalcTarget>(null);
   const [noteFor, setNoteFor] = useState<NoteTarget>(null);
   const [varianceFor, setVarianceFor] = useState<VarianceTarget>(null);
@@ -106,19 +219,23 @@ export function EfficiencyPage() {
   const [reason, setReason] = useState('');
   const [enteredBy, setEnteredBy] = useState(user?.name ?? '');
   const [saving, setSaving] = useState(false);
+  /** The machine being reported down from this screen, and what is said about it. */
+  const [downFor, setDownFor] = useState<UnloggedMachine | null>(null);
+  const [downCause, setDownCause] = useState('');
+  const [downAt, setDownAt] = useState('');
+
+  const unlogged = useMemo(
+    () =>
+      [...(shiftEfficiency?.unlogged ?? [])].sort(
+        (a, b) => Number(b.needsAnswer) - Number(a.needsAnswer) || a.machine.localeCompare(b.machine),
+      ),
+    [shiftEfficiency],
+  );
 
   useEffect(() => {
     void dispatch(fetchShiftOptions());
   }, [dispatch, refreshTick]);
 
-  // Open on the newest shift on record, and follow the day picker after that.
-  useEffect(() => {
-    if (date || !shifts.length) return;
-    const first = shifts[0];
-    if (!first) return;
-    setDate(first.date);
-    setShift(first.shifts.includes('Day') ? 'Day' : (first.shifts[0] ?? 'Day'));
-  }, [shifts, date]);
 
   useEffect(() => {
     if (!date) return;
@@ -154,7 +271,9 @@ export function EfficiencyPage() {
       ...shiftEfficiency.grinders,
       ...(shiftEfficiency.coarse ?? []),
       ...(shiftEfficiency.autoclaves ?? []),
-      ...(shiftEfficiency.days ?? []),
+      // The whole-day cards used to be counted here as well. Their two figures
+      // are on the refiner and grinder cards above now, so they are still in
+      // this total and counted exactly once - which is the point of the merge.
     ];
     return cards.reduce((n, c) => n + c.metrics.filter((m) => m.offTarget).length, 0);
   }, [shiftEfficiency]);
@@ -196,6 +315,47 @@ export function EfficiencyPage() {
    * rather than the card's title, and with the two numbers that prompted it, so
    * a target raised next month leaves this record saying what it said.
    */
+  /**
+   * Files the breakdown that answers for a machine nobody logged.
+   *
+   * `downStart` is asked for rather than stamped now, because the manager is
+   * usually filling this in a day or two after the fact and "now" would put the
+   * machine down at the moment somebody noticed the hole rather than at the
+   * moment it stopped - and the whole point of the record is the downtime
+   * between those two. The shift's own day is offered as the default.
+   *
+   * The repair itself is not written here: that needs the cause, the fix and
+   * what stops it recurring, and it is the person who repaired it who knows.
+   * This marks the machine down and leaves it down, which is what makes it show
+   * as down on the shop floor until somebody closes it out.
+   */
+  const reportBreakdown = async () => {
+    if (!downFor) return;
+    if (!downCause.trim()) {
+      notify('Say what happened to it', 'warn');
+      return;
+    }
+    setSaving(true);
+    const result = await dispatch(
+      markDown({
+        machineId: downFor.machineId,
+        machine: downFor.machine,
+        downStart: downAt ? new Date(downAt).toISOString() : undefined,
+        rootCause: downCause.trim(),
+      }),
+    );
+    setSaving(false);
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? `${downFor.machine} marked down` : 'Could not mark it down', okay ? 'ok' : 'err');
+    if (okay) {
+      setDownFor(null);
+      setDownCause('');
+      // Re-read the shift so the machine moves out of "still to answer" without
+      // the manager having to work out that the screen is now stale.
+      if (date) void dispatch(fetchShiftEfficiency({ date, shift }));
+    }
+  };
+
   const saveVarianceReason = async () => {
     if (!varianceFor || !date) return;
     if (!reason.trim()) {
@@ -315,33 +475,36 @@ export function EfficiencyPage() {
                   {r.entered_by ? ` · ${r.entered_by}` : ''}:
                 </span>{' '}
                 {r.reason}{' '}
-                <button
-                  type="button"
-                  className="muted underline text-[11px]"
-                  onClick={() => openEdit(r)}
-                >
-                  edit
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="muted underline text-[11px]"
+                    onClick={() => openEdit(r)}
+                  >
+                    edit
+                  </button>
+                )}
               </div>
             )),
           )}
         </div>
 
-        {missed.map((m) => (
-          <button
-            key={`why-${m.key}`}
-            type="button"
-            className="btn ghost block mt-2.5"
-            onClick={() => {
-              setReason('');
-              setVarianceFor({ card: name, metric: m });
-            }}
-          >
-            ⚠ Why is {m.label.toLowerCase()} off the ideal?
-          </button>
-        ))}
+        {!readOnly &&
+          missed.map((m) => (
+            <button
+              key={`why-${m.key}`}
+              type="button"
+              className="btn ghost block mt-2.5"
+              onClick={() => {
+                setReason('');
+                setVarianceFor({ card: name, metric: m });
+              }}
+            >
+              ⚠ Why is {m.label.toLowerCase()} off the ideal?
+            </button>
+          ))}
 
-        {line && (
+        {line && !readOnly && (
           <button
             type="button"
             className="btn ghost block mt-2.5"
@@ -367,33 +530,12 @@ export function EfficiencyPage() {
   return (
     <>
       <div className="panel">
-        <label htmlFor="eff-day">Shift day</label>
-        <select id="eff-day" value={date} onChange={(e) => setDate(e.target.value)}>
-          {shifts.length ? (
-            shifts.map((s) => (
-              <option key={s.date} value={s.date}>
-                {dayLong(s.date)}
-              </option>
-            ))
-          ) : (
-            <option value="">No data</option>
+        {/* Picked above the tabs - see BackOfficeDay. This only says which. */}
+        <div className="sub">
+          {date ? dayLong(date) : 'No data'} · {shift} shift
+          {date && available.length > 0 && !available.includes(shift) && (
+            <span className="muted"> · nothing logged on this shift</span>
           )}
-        </select>
-
-        <div className="chips mt-2.5">
-          {(['Day', 'Night'] as Shift[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={cn('chip', shift === s && 'on')}
-              onClick={() => setShift(s)}
-            >
-              {s} shift
-              {available.length > 0 && !available.includes(s) && (
-                <span className="muted font-normal"> ·no data</span>
-              )}
-            </button>
-          ))}
         </div>
 
         <div className="kpis">
@@ -421,9 +563,12 @@ export function EfficiencyPage() {
           figure to see the arithmetic.
         </div>
         <div className="sub mt-1">
-          Each ideal is compared at the granularity it is set: production per shift, autoclave
-          charges and batch yield per batch, and the energy and labour figures over the whole day.
-          A figure marked “no ideal set” is not a pass — it is a target nobody has filled in.
+          Every figure here carries a comparison — there are no rows on this screen that are shown
+          without one. Each is compared at the granularity it is set at, and says which: production
+          per shift, autoclave charges and batch yield per batch, and the energy and labour figures
+          over the whole day. Those two are marked “· day” and carry the shift’s own figure
+          underneath, which is also why a grade or machine the other shift worked still has a card
+          here. A figure marked “no ideal set” is not a pass — it is a target nobody has filled in.
         </div>
 
         {shiftEfficiency && shiftEfficiency.idealsSet === false && (
@@ -439,8 +584,13 @@ export function EfficiencyPage() {
 
       {!loading && shiftEfficiency && (
         <>
+          {/*
+            One card per grade, and the grades are the day's rather than the
+            shift's - both figures on them are measured over the day, so a grade
+            the other shift worked belongs here too. Its card says which.
+          */}
           <div className="grouphead">
-            Refiner line · {dayLong(shiftEfficiency.date)} · {shiftEfficiency.shift} shift
+            Special line · {dayLong(shiftEfficiency.date)} · by grade
           </div>
           {shiftEfficiency.refiners.length ? (
             shiftEfficiency.refiners.map((card) =>
@@ -448,11 +598,11 @@ export function EfficiencyPage() {
                 card,
                 'refiner',
                 <span className="qchip">{card.quality}</span>,
-                card.batches?.length ? `Batch ${card.batches.join(', ')}` : null,
+                shiftAside(card),
               ),
             )
           ) : (
-            <div className="empty">No refiner activity in this shift.</div>
+            <div className="empty">Nothing came off the special line on this day.</div>
           )}
 
           {shiftEfficiency.yields.length > 0 && (
@@ -470,12 +620,14 @@ export function EfficiencyPage() {
           )}
 
           <div className="grouphead">
-            Grinding line · {dayLong(shiftEfficiency.date)} · {shiftEfficiency.shift} shift
+            Grinding line · {dayLong(shiftEfficiency.date)} · by machine
           </div>
           {shiftEfficiency.grinders.length ? (
-            shiftEfficiency.grinders.map((card) => renderCard(card, 'grind', <b>{card.machine}</b>))
+            shiftEfficiency.grinders.map((card) =>
+              renderCard(card, 'grind', <b>{card.machine}</b>, shiftAside(card)),
+            )
           ) : (
-            <div className="empty">No grinder output in this shift.</div>
+            <div className="empty">No grinder output on this day.</div>
           )}
 
           <div className="grouphead">
@@ -503,19 +655,54 @@ export function EfficiencyPage() {
           )}
 
           {/*
-            Energy and labour productivity are set as day figures, so they are
-            compared as day figures, and this is the only place either is
-            flagged. Both shifts are in each card - the shift cards above show
-            the same two figures because that is the span a supervisor works,
-            and they say plainly that the comparison is made down here.
+            Every machine is meant to be accounted for on every shift - it ran,
+            or it was down. This is the list that is neither, and it is on the
+            manager's screen because nobody else is looking for it: a machine
+            that was never logged has no card, and a screen with no card on it
+            reads exactly like a plant with nothing to answer for.
           */}
-          <div className="grouphead">
-            Energy & labour · {dayLong(shiftEfficiency.date)} · whole day, both shifts
-          </div>
-          {shiftEfficiency.days?.length ? (
-            shiftEfficiency.days.map((card) => renderCard(card, null, <b>{card.label}</b>))
-          ) : (
-            <div className="empty">Nothing weighed on this day.</div>
+          {unlogged.length > 0 && (
+            <>
+              <div className="grouphead">
+                Not accounted for · {unlogged.filter((m) => m.needsAnswer).length} of{' '}
+                {unlogged.length} still to answer
+              </div>
+              {unlogged.map((m) => (
+                <div key={m.machineId} className={cn('effcard', m.needsAnswer && 'flag')}>
+                  <div className="row">
+                    <div>
+                      <b>{m.machine}</b>
+                      <span className="muted ml-2 text-[11px]">{m.group}</span>
+                    </div>
+                    <div className="cardaside">
+                      {m.breakdown ? (
+                        <>
+                          <div>{m.breakdown.open ? 'down — not yet repaired' : 'was down'}</div>
+                          <div className="muted">
+                            {m.breakdown.rootCause || 'no cause written up yet'}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="offshift">nothing logged, and no breakdown against it</div>
+                      )}
+                    </div>
+                  </div>
+                  {m.needsAnswer && !readOnly && (
+                    <button
+                      type="button"
+                      className="btn ghost block mt-2.5"
+                      onClick={() => {
+                        setDownCause('');
+                        setDownAt(`${shiftEfficiency.date}T08:30`);
+                        setDownFor(m);
+                      }}
+                    >
+                      ⚠ Report {m.machine} as broken down
+                    </button>
+                  )}
+                </div>
+              ))}
+            </>
           )}
 
           {/*
@@ -584,6 +771,44 @@ export function EfficiencyPage() {
             {calc.note && <div className="sub mt-3">{calc.note}</div>}
           </>
         )}
+      </BoModal>
+
+      {/* the breakdown that answers for a machine nobody logged this shift */}
+      <BoModal
+        open={Boolean(downFor)}
+        title={`Report ${downFor?.machine ?? ''} as broken down`}
+        subtitle={`${dayLong(date)} · ${shift} shift`}
+        onClose={() => setDownFor(null)}
+        footer={
+          <button type="button" className="btn" onClick={reportBreakdown} disabled={saving}>
+            {saving ? 'Saving…' : 'Mark it down'}
+          </button>
+        }
+      >
+        <div className="field">
+          <label htmlFor="down-at">When did it stop?</label>
+          <input
+            id="down-at"
+            type="datetime-local"
+            value={downAt}
+            onChange={(e) => setDownAt(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="down-cause">What happened to it?</label>
+          <textarea
+            id="down-cause"
+            rows={3}
+            value={downCause}
+            onChange={(e) => setDownCause(e.target.value)}
+            placeholder="bearing seized, belt snapped, waiting on a part…"
+          />
+        </div>
+        <div className="sub">
+          This marks the machine down and leaves it down. It shows as down on the shop floor until a
+          supervisor writes up the repair — the cause, the fix, and what stops it happening again —
+          which is what closes it and lets the machine be logged again.
+        </div>
       </BoModal>
 
       {/* a free note against a card, as against answering for a missed target */}

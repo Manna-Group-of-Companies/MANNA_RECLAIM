@@ -49,7 +49,7 @@ Future<StopResult?> showStopSheet({
   final batches = context.read<BatchesStore>();
 
   final kind = machine?.kind ?? run.kind;
-  final withMeters = hasMeters(kind);
+  final withMeters = hasMeters(machine, kind: kind);
   final isAutoclave = kind == 'autoclave';
   final isPress = isPressKind(kind);
   final isMouldingBench = isMoulding(kind);
@@ -57,12 +57,18 @@ Future<StopResult?> showStopSheet({
   /// Both benches that are logged on a count rather than on a scale reading.
   final countsPieces = isPress || isMouldingBench;
 
+  /// A machine that weighs but has no meters on it - the Soorya Grinder.
+  ///
+  /// Its own branch because the crew count lives inside the meters block, as the
+  /// field beside the electricity reading. Switching the meters off would take
+  /// the crew with them, and the shift would go down with nobody on the machine.
+  final noMeters = !withMeters && !isAutoclave && !countsPieces;
+
   // The line the run was started on has the last word: a coarse-line machine
   // put on the special line for a batch is not a shiftwise run.
   final shiftwise = run.line != null
       ? lineIsShiftwise(run.line)
       : isShiftwiseKind(kind);
-  final isTod = run.machineId == todMachineId;
 
   /// The cracker, and only the cracker, is asked about picking - it is the gang
   /// that pulls scrap tyres out of the yard and feeds it. What they cost goes
@@ -247,9 +253,7 @@ Future<StopResult?> showStopSheet({
             FieldRow(
               left: TextFieldRow(
                 controller: elecEnd,
-                label: isTod
-                    ? 'Final TOD-meter reading'
-                    : 'Final electricity reading',
+                label: 'Final electricity reading',
                 note: run.elecStart != null
                     ? '— started at ${run.elecStart}'
                     : null,
@@ -271,8 +275,7 @@ Future<StopResult?> showStopSheet({
                     ? 'The electricity meter reads lower at the end than at '
                           'the start.'
                     : 'Consumed: $elecEndValue − ${run.elecStart} = '
-                          '$elecDelta units'
-                          '${isTod ? ' × 3 = ${round2(elecDelta * 3)} kWh' : ''}',
+                          '$elecDelta units',
                 bad: elecDelta < 0,
               ),
             TextFieldRow(
@@ -282,7 +285,6 @@ Future<StopResult?> showStopSheet({
               suffix: 'units',
               decimal: true,
               placeholder: 'units used',
-              hint: isTod ? todNote : null,
             ),
           ],
 
@@ -434,6 +436,16 @@ Future<StopResult?> showStopSheet({
               'lot the lab has passed can be dispatched.',
             ),
           ],
+
+          if (noMeters)
+            TextFieldRow(
+              controller: workers,
+              label: 'Workers',
+              note: '— no meters on this machine, so crew and weight are all '
+                  'it records',
+              integer: true,
+              placeholder: '0',
+            ),
 
           // Nothing comes off an autoclave to weigh - the batch is weighed once
           // the refiners have worked through it.

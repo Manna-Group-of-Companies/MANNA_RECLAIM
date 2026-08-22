@@ -1,4 +1,5 @@
-export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin';
+/** `md` is the managing director: the two summary screens, and no write. */
+export type Role = 'worker' | 'supervisor' | 'lab' | 'manager' | 'admin' | 'md';
 export type Shift = 'Day' | 'Night';
 export type Quality = 'Special' | 'SuperFine' | 'Fine' | 'Medium' | 'DRC' | 'Special DRC';
 export type DispatchGrade = Quality | 'Coarse' | 'Sillsheet';
@@ -74,6 +75,22 @@ export interface Machine {
   /** Runs on a tyre feedstock, and which one it is set up for by default. */
   tyre?: boolean;
   def_tyre?: string | null;
+  /**
+   * Whether this machine has an electricity meter and an hour meter on it.
+   *
+   * Null - which is every machine but the one this exists for - means nobody has
+   * answered the question, and the machine's `kind` keeps answering it. False
+   * means the machine genuinely has neither, whatever its kind: the Soorya
+   * Grinder is `kind: 'grind'` like the other two and has no meters at all, so
+   * its sheets asked for two readings that do not exist. See migrations/0015.
+   */
+  meters?: boolean | null;
+  /**
+   * Whether it is on the greasing schedule. Null falls back to the kind; false
+   * keeps it off the Bearing tab, which is the Soorya Grinder again - a grinder
+   * with nothing to grease, asking for four temperatures nobody takes.
+   */
+  bearings?: boolean | null;
   enabled: boolean;
   sort_order?: number;
   sub?: string | null;
@@ -1072,6 +1089,23 @@ export interface EfficiencyMetric {
    */
   context?: string | null;
   /**
+   * What the figure covers: the whole day, or the picked shift.
+   *
+   * A grinder card carries both at once - energy and labour over the day, output
+   * and utilisation over the shift - so the span cannot be left to the group
+   * heading. Drawn as a tag beside the name rather than appended to it, because
+   * "Production / man-hour · day" reads as the name of the metric.
+   */
+  span?: 'day' | 'shift' | null;
+  /**
+   * Which side of the ideal is the good side.
+   *
+   * More kg per man-hour is better; fewer kWh per kg is better. Both can sit
+   * above their target on the same card with only one of them in trouble, so the
+   * sign of the variance is not the verdict and must not be drawn as one.
+   */
+  lowerIsBetter?: boolean;
+  /**
    * A flag that is not about the manager's ideal. Only utilisation raises one -
    * it is measured against the twelve hours of the shift itself - and
    * `warnLabel` is what the pill says, so the screen never has to guess which
@@ -1089,10 +1123,10 @@ export interface EfficiencyMetric {
    *
    * `parameter` is the key a reason for the miss is filed under, and null says
    * something different from an unset `ideal`: null means this figure is not one
-   * a target is set against here at all - energy and labour productivity are set
-   * per day, so the shift card shows them and the day card compares them. A set
-   * `parameter` with a null `ideal` means a target belongs here and nobody has
-   * filled it in, which is worth nagging a manager about.
+   * a target is set against at all - a grade's output is the case, since the
+   * split between grades follows demand. A set `parameter` with a null `ideal`
+   * means a target belongs here and nobody has filled it in, which is worth
+   * nagging a manager about.
    */
   ideal?: number | null;
   variance?: number | null;
@@ -1109,6 +1143,23 @@ export interface EfficiencyMetric {
   } | null;
 }
 
+/** A machine with no entry on a shift, and the breakdown covering it if any. */
+export interface UnloggedMachine {
+  machineId: string;
+  machine: string;
+  group?: string | null;
+  kind?: string | null;
+  breakdown?: {
+    id: string;
+    downStart?: string | null;
+    repairedAt?: string | null;
+    rootCause?: string | null;
+    open: boolean;
+  } | null;
+  /** Nothing logged and no breakdown against it - this is what gets chased. */
+  needsAnswer: boolean;
+}
+
 export interface EfficiencyCard {
   key: string;
   metrics: EfficiencyMetric[];
@@ -1122,11 +1173,16 @@ export interface EfficiencyCard {
   batch?: string;
   charge?: number | null;
   out?: number | null;
-  workers?: number;
+  workers?: number | null;
   hours?: number | null;
   /** Coarse and autoclave cards name themselves - they are neither. */
   label?: string;
   line?: string;
+  /** What the whole day made on this line, which is what the comparison is of. */
+  dayOut?: number | null;
+  dayShifts?: number;
+  /** "2 shifts · 2,263 kg" — what a day figure is folded out of, said once. */
+  dayNote?: string | null;
 }
 
 export interface EfficiencyNote {
@@ -1171,14 +1227,16 @@ export interface ShiftEfficiency {
   coarse: EfficiencyCard[];
   /** Charges per vessel per day, which is the only count that is shift-proof. */
   autoclaves: EfficiencyCard[];
-  /**
-   * kWh/kg and kg/man-hour over the whole day, per grinder and per grade of the
-   * special line. Those two benchmarks are set against the day, so this is the
-   * only place they are compared with a target and the only place they are
-   * flagged - the shift cards show the same figures for context and say so.
-   */
-  days: EfficiencyCard[];
   yields: EfficiencyCard[];
+  /**
+   * Machines with nothing at all against this shift.
+   *
+   * Every machine is meant to be accounted for on every shift: it ran, or it was
+   * down, and either way somebody said so. An absent row says neither, and a
+   * screen that simply leaves the card out looks the same as a plant with
+   * nothing to answer for.
+   */
+  unlogged?: UnloggedMachine[];
   notes: EfficiencyNote[];
   varianceReasons: VarianceReason[];
   /** Whether any benchmark has been set at all - "no target yet" is not "on target". */

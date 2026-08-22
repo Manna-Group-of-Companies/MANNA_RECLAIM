@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   fetchPendingQuality,
+  fetchQualityRecord,
   fetchQualitySummary,
   removeTest,
 } from '@/features/quality/qualitySlice';
@@ -32,12 +33,20 @@ import type { Batch, QualityTest, Verdict } from '@/types/models';
  * it is admin-gated and why it says what it moved.
  */
 
-/** How far back the page looks. The lab tests daily, so a month is the default. */
+/**
+ * How far back the page looks. The lab tests daily, so a month is the default.
+ *
+ * `0` is the whole record. It is here because the question this page is most
+ * often opened with - what has been produced that nobody has checked - is not a
+ * question about the last thirty days: an untested batch does not become less
+ * untested by ageing out of a window, it just stops being visible.
+ */
 const WINDOWS = [
   { days: 7, label: 'Last 7 days' },
   { days: 30, label: 'Last 30 days' },
   { days: 90, label: 'Last 90 days' },
   { days: 365, label: 'Last year' },
+  { days: 0, label: 'Everything on record' },
 ];
 
 const testedAt = (test: QualityTest) => test.tested_at ?? test.ts ?? null;
@@ -58,7 +67,13 @@ const attention = (qc: BatchQc) => (qc.anyHold ? 0 : qc.allDone ? 2 : 1);
 export function AdminQualityPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
-  const { batches, tests, summary, loading, error } = useAppSelector((s) => s.quality);
+  const { record, recordLoading, summary, loading, error } = useAppSelector((s) => s.quality);
+  /**
+   * The batches and the verdicts this page reads, which are the back office's
+   * own window rather than the bench's working set - every charge in the
+   * window, open or closed, on any line. See fetchQualityRecord.
+   */
+  const { batches, tests } = record;
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
   /**
    * Whether this account may take a verdict off the record.
@@ -88,19 +103,29 @@ export function AdminQualityPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
+  /** `null` is the whole record - see WINDOWS. */
+  const from = useMemo(() => (days ? lastNDays(days).from : null), [days]);
+
+  useEffect(() => {
+    void dispatch(fetchQualityRecord({ from }));
+  }, [dispatch, from, refreshTick]);
+
+  /*
+   * Still fetched, and deliberately not merged with the read above: this is what
+   * keeps `held` current for Dispatch's warning and the bench's tab badge, and
+   * it is a different set of batches by design.
+   */
   useEffect(() => {
     void dispatch(fetchPendingQuality());
   }, [dispatch, refreshTick]);
 
   useEffect(() => {
-    void dispatch(fetchQualitySummary(lastNDays(days)));
+    void dispatch(fetchQualitySummary(days ? lastNDays(days) : {}));
   }, [dispatch, days, refreshTick]);
-
-  const from = useMemo(() => lastNDays(days).from, [days]);
 
   /** Every test in the window, before the grade and verdict picks narrow it. */
   const inWindow = useMemo(
-    () => tests.filter((t) => (testedAt(t) ?? '').slice(0, 10) >= from),
+    () => (from ? tests.filter((t) => (testedAt(t) ?? '').slice(0, 10) >= from) : tests),
     [tests, from],
   );
 
@@ -118,21 +143,41 @@ export function AdminQualityPage() {
     return { tests: inWindow.length, hold, pass: inWindow.length - hold, reports };
   }, [inWindow]);
 
-  /** Open batches with where each one's grades stand, the worrying ones first. */
-  const cards = useMemo(
-    () =>
-      batches
-        .map((batch) => ({ batch, qc: batchQc(batch, tests) }))
-        .sort(
-          (a, b) =>
-            attention(a.qc) - attention(b.qc) ||
-            (b.batch.opened_at ?? '').localeCompare(a.batch.opened_at ?? ''),
-        ),
-    [batches, tests],
-  );
+  /**
+   * Every batch charged in the window with where its grades stand, the worrying
+   * ones first.
+   *
+   * Open and closed alike. Whether a batch is still open says nothing about
+   * whether the lab has seen it, and reading only the open ones is what let a
+   * charge be produced, weighed, closed and never checked without appearing on
+   * this page at all.
+   *
+   * `perGrade` is false for a coarse or DRC charge. Those are not marked or
+   * certified grade by grade - coarse is sampled as a ten-day pool in the yard -
+   * so batchQc's fallback of "every grade, all untested" would invent six
+   * verdicts nobody owes. They are listed, because they were produced and the
+   * question is what has been produced, and the card says where their verdict
+   * actually lives instead of showing a made-up one.
+   */
+  const cards = useMemo(() => {
+    const opened = (b: Batch) => (b.opened_at ?? b.shift_date ?? '').slice(0, 10);
+    return batches
+      .filter((b) => !from || opened(b) >= from)
+      .map((batch) => ({ batch, qc: batchQc(batch, tests), perGrade: batch.line === 'special' }))
+      .sort(
+        (a, b) =>
+          Number(a.perGrade ? attention(a.qc) : 3) - Number(b.perGrade ? attention(b.qc) : 3) ||
+          (b.batch.opened_at ?? '').localeCompare(a.batch.opened_at ?? ''),
+      );
+  }, [batches, tests, from]);
 
-  const untestedBatches = cards.filter(({ qc }) => !qc.allDone).length;
-  const heldBatches = cards.filter(({ qc }) => qc.anyHold).length;
+  const graded = cards.filter(({ perGrade }) => perGrade);
+  const untestedBatches = graded.filter(({ qc }) => !qc.allDone).length;
+  const heldBatches = graded.filter(({ qc }) => qc.anyHold).length;
+  const closedUntested = graded.filter(
+    ({ batch, qc }) => batch.status === 'closed' && !qc.allDone,
+  ).length;
+  const poolCharges = cards.length - graded.length;
 
   /**
    * Take a test off the record, and say what it moved in the yard.
@@ -357,13 +402,21 @@ export function AdminQualityPage() {
         </div>
 
         <div className="sub mt-3">
-          {dayLong(from)} – {dayLong(todayISO())} · verdicts are filed at the bench, on the
-          shop-floor Quality tab, so this page reads them rather than records them.
+          {from ? `${dayLong(from)} – ${dayLong(todayISO())}` : 'Everything on record'} · verdicts
+          are filed at the bench, on the shop-floor Quality tab, so this page reads them rather
+          than records them.
+        </div>
+        <div className="sub mt-1">
+          Every batch charged in the window is listed, open or closed — a batch closes when its
+          grades are weighed, which is not the same as the lab having seen it. Anything the lab has
+          not reached reads <b>Not checked</b>.
         </div>
       </div>
 
       {error && <div className="errbox">{error}</div>}
-      {loading && !tests.length && <div className="spin">Loading the lab record…</div>}
+      {(loading || recordLoading) && !tests.length && (
+        <div className="spin">Loading the lab record…</div>
+      )}
 
       <div className="grouphead">Pass rate by grade</div>
       {!summary.length ? (
@@ -402,15 +455,23 @@ export function AdminQualityPage() {
       )}
 
       <div className="grouphead">
-        Open batches
+        Batches charged
         <span className="muted ml-2 text-[11px] font-normal">
-          {heldBatches} held · {untestedBatches} awaiting a verdict
+          {cards.length} in this window · {heldBatches} held · {untestedBatches} not checked
+          {closedUntested > 0 ? ` (${closedUntested} of them already closed)` : ''}
+          {poolCharges > 0 ? ` · ${poolCharges} sampled as pools` : ''}
         </span>
       </div>
+      {record.truncated && (
+        <div className="sub mb-2" style={{ color: 'var(--err)' }}>
+          There is more on record than this page will fetch in one go. Narrow the window — what is
+          shown below is the newest part of it, not all of it.
+        </div>
+      )}
       {!cards.length ? (
-        <div className="empty">No open batches.</div>
+        <div className="empty">Nothing was charged in this window.</div>
       ) : (
-        cards.map(({ batch, qc }) => {
+        cards.map(({ batch, qc, perGrade }) => {
           const chip = batchQcChip(qc);
           return (
             <button
@@ -423,24 +484,39 @@ export function AdminQualityPage() {
                 <div className="mn">
                   <span className="batchref">{batch.ref}</span>
                   {batch.formulation ? <span className="muted"> · {batch.formulation}</span> : ''}
+                  {/*
+                    Said on the row rather than left to be inferred. The whole
+                    point of listing closed batches is that closed and checked
+                    are different things, and a row that does not say which is
+                    which puts the reader back to guessing.
+                  */}
+                  {batch.status === 'closed' && (
+                    <span className="muted text-[11px]"> · closed</span>
+                  )}
                 </div>
                 <div className="mk">
                   {[
                     batch.machine_id,
                     batch.opened_at && `charged ${dayMonth(batch.opened_at)}`,
-                    `${qc.pass}/${qc.grades.length} passed`,
+                    perGrade
+                      ? `${qc.pass}/${qc.grades.length} passed`
+                      : `${batch.line ?? 'other'} charge — sampled as a pool in the yard`,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
                 </div>
               </div>
               <div className="row gap-2">
-                <span
-                  className={cn('badge', chip.tone === 'hold' && 'hot', chip.tone === 'ok' && 'ok',
-                    chip.tone === 'part' && 'warn', chip.tone === 'none' && 'none')}
-                >
-                  {chip.label}
-                </span>
+                {perGrade ? (
+                  <span
+                    className={cn('badge', chip.tone === 'hold' && 'hot', chip.tone === 'ok' && 'ok',
+                      chip.tone === 'part' && 'warn', chip.tone === 'none' && 'none')}
+                  >
+                    {chip.label}
+                  </span>
+                ) : (
+                  <span className="badge none">Not checked here</span>
+                )}
                 <span className="chev">›</span>
               </div>
             </button>

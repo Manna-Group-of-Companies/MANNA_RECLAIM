@@ -35,18 +35,27 @@ bool lineIsShiftwise(String? line) => line == 'grind' || line == 'coarse';
 /// and no packing path. What it records is a count of pieces against a product.
 bool isPressKind(String? kind) => kind == 'press';
 
+/// What the kind implies about meters.
+///
 /// Every machine but the autoclaves, the presses and the two moulding
 /// activities is metered, so its sheets ask for the two readings either side of
 /// the run. The autoclaves burn firewood and are timed by their load; a press,
 /// a sleeve bench and a loop bench record neither energy nor hours at all.
-bool hasMeters(String? kind) =>
+bool metersByKind(String? kind) =>
     kind != null &&
     kind.isNotEmpty &&
     kind != 'autoclave' &&
     kind != 'press' &&
     !isMoulding(kind);
 
-/// Why Soorya's readings are not kWh, on both of its sheets.
-const todNote =
-    'Soorya has no direct energy meter — this is the TOD meter (one phase); '
-    'energy is recorded as the difference × 3.';
+/// Whether a machine's sheets should ask for meter readings.
+///
+/// The machine has the last word, because the kind was wrong about one of them:
+/// the Soorya Grinder is `kind: 'grind'` like Grinder 1 and Grinder 2 and has no
+/// electricity meter and no hour meter on it. `meters == false` says so on the
+/// machine; null leaves the kind answering, which is every other machine.
+///
+/// `kind` is passed separately for the stop sheet, where a run may name a
+/// machine that is no longer on the list and only its own kind is left to go on.
+bool hasMeters(Machine? machine, {String? kind}) =>
+    machine?.meters ?? metersByKind(kind ?? machine?.kind);

@@ -52,7 +52,6 @@ import {
   QUALITIES,
   SHIFTS,
   SHIFT_HOURS,
-  TOD_MACHINE_ID,
   TYRES,
   autoclaveFormsFor,
   autoclaveWorkers,
@@ -149,13 +148,24 @@ const lineIsShiftwise = (line?: string | null) => line === 'grind' || line === '
 const isPress = (kind?: string | null) => kind === 'press';
 
 /**
- * Every machine but the autoclaves, the presses and the two moulding activities
- * is metered, so its sheets ask for the two readings either side of the run. The
- * autoclaves burn firewood and are timed by their load; a press, a sleeve bench
- * and a loop bench record neither energy nor hours at all.
+ * Whether a machine's sheets should ask for meter readings.
+ *
+ * The kind answers this for almost everything: the autoclaves burn firewood and
+ * are timed by their load, and a press, a sleeve bench and a loop bench record
+ * neither energy nor hours at all. Everything else is metered.
+ *
+ * The machine itself gets the last word, because the kind was wrong about one of
+ * them. The Soorya Grinder is `kind: 'grind'` like Grinder 1 and Grinder 2 and
+ * has no electricity meter and no hour meter on it - so its sheets asked the
+ * crew for two readings that do not exist, which is the likeliest reason it has
+ * never had a run logged against it. `meters === false` says so on the machine.
+ * Null leaves the kind answering, which is every other machine on the list.
  */
-const hasMeters = (kind?: string | null) =>
+const metersByKind = (kind?: string | null) =>
   Boolean(kind) && kind !== 'autoclave' && kind !== 'press' && !isMoulding(kind);
+
+const hasMeters = (machine?: { kind?: string | null; meters?: boolean | null } | null) =>
+  machine?.meters ?? metersByKind(machine?.kind);
 
 /** A figure the plant has not measured into the system yet reads as such. */
 const orNotSet = (value: number | null | undefined, unit: string) =>
@@ -217,14 +227,6 @@ const blankMouldStop = { remarks: '' };
  * beats an exact figure nobody has.
  */
 const blankPicking = { labourers: '', hours: '' };
-
-/** Why Soorya's readings are not kWh, on both of its sheets. */
-const TOD_NOTE = (
-  <>
-    Soorya has no direct energy meter — this is the <b>TOD meter</b> (one phase); energy is recorded as
-    the difference × 3.
-  </>
-);
 
 /**
  * The two lines under a batch number on the Batch pick.
@@ -445,10 +447,9 @@ export function MachinesPage() {
   // Set only for a machine that was asked which line it is on; every other
   // machine has one line and reads it off its kind.
   const startLine = sheet?.kind === 'start' ? sheet.line : null;
-  const startHasMeters = hasMeters(startMachine?.kind);
+  const startHasMeters = hasMeters(startMachine);
   const startShiftwise = startLine ? startLine === 'coarse' : isShiftwise(startMachine?.kind);
   const startSpecial = startLine === 'special';
-  const startIsTod = startMachine?.id === TOD_MACHINE_ID;
   /** The sheets that pick a batch off the open list rather than only typing one. */
   const startPicksBatch = Boolean(startMachine && (isRefiner(startMachine) || startSpecial));
   /**
@@ -542,7 +543,9 @@ export function MachinesPage() {
   const stopping = sheet?.kind === 'stop' ? sheet.run : undefined;
   const stopMachine = stopping ? machineById.get(stopping.machine_id) : undefined;
   const stopKind = stopMachine?.kind ?? stopping?.kind;
-  const stopsWithMeters = Boolean(stopping) && hasMeters(stopKind);
+  // The machine off the list where there is one, so its own `meters` answer is
+  // used; a run whose machine is no longer listed falls back to its kind.
+  const stopsWithMeters = Boolean(stopping) && hasMeters(stopMachine ?? { kind: stopKind });
   /** An autoclave is discharged rather than stopped: firewood, not meters. */
   const stopIsAutoclave = Boolean(stopping) && stopKind === 'autoclave';
   /** A press is stopped on what came out of the mould: pieces, weight, flash. */
@@ -551,10 +554,19 @@ export function MachinesPage() {
   const stopIsMoulding = Boolean(stopping) && isMoulding(stopKind);
   /** Both benches that are logged on a count rather than on a scale reading. */
   const stopCountsPieces = stopIsPress || stopIsMoulding;
+  /**
+   * A machine that weighs but has no meters on it - the Soorya Grinder.
+   *
+   * It needs its own branch because the crew count used to sit inside the meters
+   * block, as the field beside the electricity reading. Switching the meters off
+   * would otherwise take the crew with them, and the shift would be recorded
+   * with nobody on the machine.
+   */
+  const stopNoMeters =
+    Boolean(stopping) && !stopsWithMeters && !stopIsAutoclave && !stopCountsPieces;
   // The line the run was started on has the last word: a coarse-line machine
   // put on the special line for a batch is not a shiftwise run.
   const stopShiftwise = stopping?.line ? lineIsShiftwise(stopping.line) : isShiftwise(stopKind);
-  const stopIsTod = stopping?.machine_id === TOD_MACHINE_ID;
   /**
    * The cracker, and only the cracker, is asked about picking - it is the gang
    * that pulls scrap tyres out of the yard and feeds it. What they cost goes
@@ -854,7 +866,7 @@ export function MachinesPage() {
     if (sheet?.kind !== 'start') return;
     const machine = sheet.machine;
     if (machine.kind === 'autoclave') return confirmLoad();
-    const metered = hasMeters(machine.kind);
+    const metered = hasMeters(machine);
     const pressRun = isPress(machine.kind);
     const mouldRun = isMoulding(machine.kind);
     /** A press, a sleeve bench or a loop bench - all set up the same way. */
@@ -2052,7 +2064,7 @@ export function MachinesPage() {
             {startHasMeters && (
               <>
                 <TextField
-                  label={startIsTod ? 'Initial TOD-meter reading' : 'Initial electricity reading'}
+                  label="Initial electricity reading"
                   note={
                     previousRun?.elec_end != null
                       ? `— last end ${previousRun.elec_end}`
@@ -2065,7 +2077,6 @@ export function MachinesPage() {
                   value={elecStart}
                   onChange={(e) => setElecStart(e.target.value)}
                   fieldClassName={startShiftwise || sheet.machine.tyre ? 'mt-4' : undefined}
-                  hint={startIsTod ? TOD_NOTE : undefined}
                 />
                 <TextField
                   label="Hour-meter reading at start"
@@ -2196,7 +2207,7 @@ export function MachinesPage() {
             {stopsWithMeters && (
               <FieldRow>
                 <TextField
-                  label={stopIsTod ? 'Final TOD-meter reading' : 'Final electricity reading'}
+                  label="Final electricity reading"
                   note={stopping.elec_start != null ? `— started at ${stopping.elec_start}` : undefined}
                   type="number"
                   inputMode="decimal"
@@ -2208,12 +2219,6 @@ export function MachinesPage() {
                     elecDelta != null ? (
                       <span className={cn('diffout show', elecDelta < 0 && 'bad')}>
                         Consumed: <b>{elecEndValue}</b> − {stopping.elec_start} = <b>{elecDelta}</b> units
-                        {stopIsTod && elecDelta >= 0 && (
-                          <>
-                            {' '}
-                            × 3 = <b>{Math.round(elecDelta * 3 * 100) / 100}</b> kWh
-                          </>
-                        )}
                       </span>
                     ) : undefined
                   }
@@ -2238,7 +2243,6 @@ export function MachinesPage() {
                 placeholder="units used"
                 value={stop.elecDiff}
                 onChange={(e) => setStop({ ...stop, elecDiff: e.target.value })}
-                hint={stopIsTod ? TOD_NOTE : undefined}
               />
             )}
 
@@ -2440,6 +2444,18 @@ export function MachinesPage() {
 
             {/* Nothing comes off an autoclave to weigh - the batch is weighed
                 once the refiners have worked through it. */}
+            {stopNoMeters && (
+              <TextField
+                label="Workers"
+                note="— no meters on this machine, so crew and weight are all it records"
+                type="number"
+                inputMode="numeric"
+                placeholder="0"
+                value={stop.workers}
+                onChange={(e) => setStop({ ...stop, workers: e.target.value })}
+              />
+            )}
+
             {!stopIsAutoclave && !stopCountsPieces && (!stopsWithMeters || stopWeighs) && (
               <TextField
                 label="Output weight"

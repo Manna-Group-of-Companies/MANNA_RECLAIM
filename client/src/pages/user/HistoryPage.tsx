@@ -238,7 +238,7 @@ function RunSheet({
     if (!run || !draft) return null;
 
     const math = runMath(run, draft);
-    const { isAuto, isPress, isTod, elecPair, hourPair, elecDelta, hourDelta } = math;
+    const { isAuto, isPress, elecPair, hourPair, elecDelta, hourDelta } = math;
     const { isCracker, pickingLabourHours } = math;
     // Shiftwise: the lines whose output is measured by the shift rather than by
     // the batch, so there is no batch or grade against the run to correct.
@@ -396,9 +396,7 @@ function RunSheet({
               <div className={`diffout show${elecDelta < 0 ? ' bad' : ''}`}>
                 {elecDelta < 0
                   ? 'The electricity meter reads lower at the end than at the start.'
-                  : `Consumed: ${draft.elecEnd} − ${draft.elecStart} = ${elecDelta} units${
-                      isTod ? ` × 3 = ${round2(elecDelta * 3)} kWh` : ''
-                    }`}
+                  : `Consumed: ${draft.elecEnd} − ${draft.elecStart} = ${elecDelta} units`}
               </div>
             )}
             <TextField

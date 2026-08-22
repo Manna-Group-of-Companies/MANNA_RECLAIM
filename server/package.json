@@ -10,6 +10,7 @@
     "lint": "eslint src scripts test --ext .js --max-warnings 0",
     "test": "node --test \"test/**/*.test.js\"",
     "db:report": "node scripts/supabase-report.js",
+    "db:gaps": "node scripts/data-gaps.js",
     "db:migrate": "node scripts/apply-sql.js",
     "stock:qc-sync": "node scripts/stock-qc-sync.js",
     "stock:diagnose": "node scripts/stock-diagnose.js",

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as reports from '../controllers/report.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { adminOnly } from '../middlewares/role.middleware.js';
+import { adminOnly, summaryOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { dateRange } from '../validations/common.validation.js';
 import {
@@ -22,8 +22,20 @@ router.get('/filters', reports.filters);
 // the back office's own views
 router.get('/downtime', adminOnly, reports.downtime);
 router.get('/downtime/detail', adminOnly, reports.downtimeDetail);
-router.get('/shifts', adminOnly, reports.shiftOptions);
-router.get('/shift-efficiency', adminOnly, validate({ query: shiftQuery }), reports.shiftEfficiency);
+
+/**
+ * The three the managing director's screen is built from, and the only routes
+ * that role reaches: which shifts exist to pick from, one shift measured against
+ * the manager's ideals, and the plant overview. All three are GETs that compute
+ * and return; none of them writes.
+ */
+router.get('/shifts', summaryOnly, reports.shiftOptions);
+router.get(
+  '/shift-efficiency',
+  summaryOnly,
+  validate({ query: shiftQuery }),
+  reports.shiftEfficiency,
+);
 router.post(
   '/efficiency-notes',
   adminOnly,
@@ -39,7 +51,12 @@ router.post(
  * The PATCH takes the wording and nothing else. What a reason is *about* - the
  * day, the shift, the parameter, the two figures - is the record itself.
  */
-router.get('/variance-reasons', adminOnly, validate({ query: dateRange }), reports.varianceReasons);
+router.get(
+  '/variance-reasons',
+  summaryOnly,
+  validate({ query: dateRange }),
+  reports.varianceReasons,
+);
 router.post(
   '/variance-reasons',
   adminOnly,
@@ -56,6 +73,6 @@ router.patch(
 // it carries every run the plant has ever logged, with what each cost.
 router.get('/machine-log.csv', adminOnly, validate({ query: dateRange }), reports.machineLog);
 router.get('/costing', adminOnly, validate({ query: dateRange }), reports.costing);
-router.get('/dashboard', adminOnly, validate({ query: dateRange }), reports.dashboard);
+router.get('/dashboard', summaryOnly, validate({ query: dateRange }), reports.dashboard);
 
 export default router;

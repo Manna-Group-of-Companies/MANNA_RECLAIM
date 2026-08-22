@@ -16,9 +16,24 @@ export const efficiencyNoteSchema = z.object({
   enteredBy: z.string().max(120).optional().nullable(),
 });
 
-/** Replaces the whole cost-rate set; unknown keys are dropped by the service. */
+/**
+ * Replaces the whole cost-rate set; unknown keys are dropped by the service.
+ *
+ * The order of the union is load-bearing and was wrong. A zod union takes the
+ * first branch that accepts, and `z.coerce.number()` accepts null - Number(null)
+ * is 0 - so with coercion first, every unset figure on the sheet came back as a
+ * target of nought the moment the form was saved. `z.null()` never got a turn.
+ *
+ * A target of nought is not a small error. On a figure where less is better it
+ * puts the line permanently over target and flags every shift forever; on one
+ * where more is better nothing can ever fall below it, so a benchmark nobody has
+ * filled in reads as one the plant meets every day - a hole reported as a pass,
+ * which is the exact failure this sheet exists to prevent.
+ *
+ * So the two "this is blank" cases are tested before anything is coerced.
+ */
 export const costRatesSchema = z.object({
-  data: z.record(z.union([z.coerce.number(), z.literal(''), z.null()])),
+  data: z.record(z.union([z.null(), z.literal(''), z.coerce.number()])),
 });
 
 /**

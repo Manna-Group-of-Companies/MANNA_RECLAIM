@@ -1,4 +1,4 @@
-export { AdminLoginPage } from './AdminLoginPage';
+export { AdminLoginPage, MdLoginPage } from './AdminLoginPage';
 export { DashboardPage } from './DashboardPage';
 export { AdminHistoryPage } from './HistoryPage';
 export { AdminQualityPage } from './QualityPage';

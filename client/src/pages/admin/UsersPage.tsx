@@ -25,6 +25,10 @@ const roleTone: Record<Role, string> = {
   lab: '',
   manager: 'hot',
   admin: 'hot',
+  // Toned with the tablets rather than with the back office, because the tone
+  // is how far an account reaches and this one reaches two screens read-only.
+  // It is the least far-reaching account in the app, whatever the job title.
+  md: 'none',
 };
 
 /**
@@ -47,13 +51,22 @@ const activity = (user: User) => {
   return `${used} · ${login}`;
 };
 
-/** What each role reaches, shown under the picker so the choice is not a guess. */
+/**
+ * What each role reaches, shown under the picker so the choice is not a guess.
+ *
+ * Admin used to read word for word the same as manager, which made the one
+ * difference that matters invisible at the moment somebody picks between them.
+ * The two reach the same screens; what only admin can do is destroy - clearing a
+ * weighing, clearing an emptied stock group, taking a lab verdict off the
+ * record. See DELETE_ROLES in config/constants.
+ */
 const roleNote: Record<Role, string> = {
   worker: 'Shop floor, without Quality.',
   supervisor: 'Shop floor, without Quality.',
   lab: 'Quality only - no machines, batches or dispatch.',
-  manager: 'Shop floor and this back office.',
-  admin: 'Shop floor and this back office.',
+  manager: 'Shop floor and this back office. Can correct anything; cannot delete.',
+  admin: 'Everything a manager reaches, plus the deletes nobody can undo - clearing a weighing, clearing a stock group, removing a QC verdict.',
+  md: 'The plant overview and the shift efficiency, read-only. No shop floor, no rate card, no ideal values, and no way to write anything anywhere.',
 };
 
 /**

@@ -6,9 +6,36 @@ export const ROLES = {
   LAB: 'lab',
   MANAGER: 'manager',
   ADMIN: 'admin',
+  /**
+   * The managing director. Reads the plant's summary and nothing else - see
+   * SUMMARY_ROLES below, which is the only list this role appears in.
+   */
+  MD: 'md',
 };
 
 export const ADMIN_ROLES = [ROLES.MANAGER, ROLES.ADMIN];
+
+/**
+ * Who may read the plant's summary reports.
+ *
+ * The managing director's whole account. It is deliberately its own list rather
+ * than md being added to ADMIN_ROLES: ADMIN_ROLES is the back office, and the
+ * back office writes - it sets the rate card, moves an ideal, corrects a run,
+ * issues a dispatch and answers for a shift that came in short. An MD does none
+ * of that. Widening ADMIN_ROLES would have handed over every one of those in a
+ * single line, on a screen the MD never opens, which is the kind of grant nobody
+ * reviews because nobody sees it happen.
+ *
+ * So this gates the GETs that answer "how is the plant doing" - the overview and
+ * the shift efficiency - and every POST and PATCH on those same routes stays at
+ * adminOnly. The MD reads the reasons a supervisor wrote; they do not write one.
+ *
+ * Costing, the machine log and the whole rate card are not here either. The
+ * overview already carries the conversion cost and the dispatched value, which
+ * is the figure an MD is after; what is behind those two routes is every run the
+ * plant has ever logged with a price against it, which is a different question.
+ */
+export const SUMMARY_ROLES = [ROLES.MD, ...ADMIN_ROLES];
 
 /**
  * Who may delete, as opposed to who may correct.
@@ -572,8 +599,26 @@ export const IDEAL_PRODUCTION_LINES = [
   { key: 'COARSE', label: 'Coarse line' },
 ];
 
-/** The grinders, which get an efficiency benchmark each. */
+/**
+ * The grinders on their own, where something is about grinding specifically.
+ *
+ * Not the list to benchmark efficiency against - see IDEAL_EFFICIENCY_LINES.
+ */
 export const IDEAL_GRINDERS = IDEAL_PRODUCTION_LINES.filter((l) => l.key !== 'COARSE');
+
+/**
+ * The lines given an energy and a labour benchmark: the three grinders and the
+ * coarse line.
+ *
+ * The coarse line was left out of both until now, and there was no reason for it
+ * beyond the list being called "grinders". It weighs its output as one figure
+ * like a grinder does, its runs carry crew, hours and a meter reading like a
+ * grinder's do, and the arithmetic is the same - so the only thing the omission
+ * achieved was a line that could burn any amount of electricity per kg without
+ * the screen ever asking about it. Every other weighing line on the plant is
+ * answerable for those two.
+ */
+export const IDEAL_EFFICIENCY_LINES = IDEAL_PRODUCTION_LINES;
 
 /**
  * The autoclaves the plant runs, benchmarked on runs per day rather than per
@@ -667,9 +712,9 @@ export const IDEAL_VALUE_FIELDS = [
     unit: '%',
     lowerIsBetter: false,
   },
-  ...IDEAL_GRINDERS.map((grinder) => ({
-    key: idealKey.kwhPerKg(grinder.key),
-    label: `${grinder.label} — energy`,
+  ...IDEAL_EFFICIENCY_LINES.map((line) => ({
+    key: idealKey.kwhPerKg(line.key),
+    label: `${line.label} — energy`,
     unit: 'kWh/kg',
     lowerIsBetter: true,
   })),
@@ -679,9 +724,9 @@ export const IDEAL_VALUE_FIELDS = [
     unit: 'kWh/kg',
     lowerIsBetter: true,
   })),
-  ...IDEAL_GRINDERS.map((grinder) => ({
-    key: idealKey.perManHour(grinder.key),
-    label: `${grinder.label} — labour productivity`,
+  ...IDEAL_EFFICIENCY_LINES.map((line) => ({
+    key: idealKey.perManHour(line.key),
+    label: `${line.label} — labour productivity`,
     unit: 'kg/man-hour',
     lowerIsBetter: false,
   })),

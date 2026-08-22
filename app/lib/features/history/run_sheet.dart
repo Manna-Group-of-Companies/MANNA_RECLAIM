@@ -242,8 +242,7 @@ Future<RunSheetResult?> showRunSheet({
                     ? 'The electricity meter reads lower at the end than at '
                           'the start.'
                     : 'Consumed: ${draft.elecEnd} − ${draft.elecStart} = '
-                          '${math.elecDelta} units'
-                          '${math.isTod ? ' × 3 = ${round2(math.elecDelta! * 3)} kWh' : ''}',
+                          '${math.elecDelta} units',
                 bad: math.elecDelta! < 0,
               ),
             TextFieldRow(

@@ -63,11 +63,32 @@ export const adminPaths = {
 } as const;
 
 /**
+ * The managing director's two screens.
+ *
+ * Its own prefix rather than a thinner /admin: every route under /admin is
+ * behind a guard that means "the back office", and an MD that could pass that
+ * guard could reach the rate card by typing the address. Two addresses, two
+ * guards, and the narrow one cannot be widened by accident.
+ */
+export const mdPaths = {
+  root: '/md',
+  login: '/md/login',
+  overview: '/md/overview',
+  efficiency: '/md/efficiency',
+  /** The run record, read-only: no correction sheet and no costed export. */
+  history: '/md/history',
+} as const;
+
+/**
  * Where an account belongs when it lands on `/`, is bounced off a page it may
  * not have, or has just signed in. A lab account has no Machines tab, so
- * sending it there would only bounce it straight back.
+ * sending it there would only bounce it straight back - and the managing
+ * director has no shop-floor tab at all.
  */
-export const homeFor = (role?: Role | null): string =>
-  role === 'lab' ? userPaths.quality : userPaths.machines;
+export const homeFor = (role?: Role | null): string => {
+  if (role === 'md') return mdPaths.overview;
+  if (role === 'lab') return userPaths.quality;
+  return userPaths.machines;
+};
 
-export default { userPaths, adminPaths };
+export default { userPaths, adminPaths, mdPaths };

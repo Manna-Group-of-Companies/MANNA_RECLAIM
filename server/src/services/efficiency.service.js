@@ -37,6 +37,8 @@ import {
 const runs = crud(TABLES.runs, { defaultSort: 'shift_date' });
 const notes = crud(TABLES.efficiencyNotes, { defaultSort: 'created_at' });
 const reasons = crud(TABLES.varianceReasons, { defaultSort: 'created_at' });
+const machines = crud(TABLES.machines, { defaultSort: 'sort_order' });
+const breakdowns = crud(TABLES.maintenance, { defaultSort: 'down_start' });
 
 const num = (v) => {
   if (v == null || v === '') return null;
@@ -45,6 +47,18 @@ const num = (v) => {
 };
 
 const round = (n, d = 2) => (n == null ? null : +Number(n).toFixed(d));
+
+/**
+ * How many decimals a number is actually written to. 4.5 is one, 3 is nought.
+ *
+ * Read off the string rather than computed, so it answers "how precise is this
+ * figure as the manager typed it" rather than "what can a float represent".
+ */
+const decimalsOf = (n) => {
+  const s = String(n);
+  const dot = s.indexOf('.');
+  return dot === -1 || s.includes('e') ? 0 : s.length - dot - 1;
+};
 
 /**
  * Hours a run took. Prefers what the crew recorded over the sync timestamps -
@@ -215,6 +229,21 @@ function coarseUnits(rows) {
   const byKey = new Map();
   for (const r of rows) {
     if (r.line !== 'coarse') continue;
+    /*
+     * The two coarse machines, not the vessels that feed them.
+     *
+     * A coarse-form autoclave charge is logged with `line: 'coarse'` - correctly,
+     * it is coarse work - and there are 354 of them carrying 9,147 labour-hours
+     * against PR1 and R2's 4,777. Counted as the line's labour they put its
+     * productivity at about 51 kg/man-hour where the line itself runs at about
+     * 149: a vessel cooking for eight hours with one hand attending is not the
+     * same kind of labour-hour as a crew working a refiner, and a benchmark built
+     * on the mixture would be three times too lax on the crew it is meant to hold
+     * to account. A grinder is measured on its own crew and so is this.
+     *
+     * They carry no meter either, so they were never in the energy figure.
+     */
+    if (r.kind === 'autoclave') continue;
     const key = `${r.shift_date}|${r.shift ?? ''}`;
     const u = byKey.get(key) ?? {
       day: r.shift_date, shift: r.shift ?? '', out: 0, workers: 0, hours: 0, kwh: 0,
@@ -225,7 +254,17 @@ function coarseUnits(rows) {
     u.kwh += runKwh(r) ?? 0;
     byKey.set(key, u);
   }
-  return [...byKey.values()].filter((u) => u.out > 0);
+  // The same two rates every other line is judged on. The line has always
+  // carried the figures they are made of - crew, hours and the meter - and only
+  // ever reported what it weighed, so a shift could miss on energy or on labour
+  // and the screen had nothing to say about it.
+  return [...byKey.values()]
+    .filter((u) => u.out > 0)
+    .map((u) => ({
+      ...u,
+      pmh: u.out > 0 && u.workers > 0 && u.hours > 0 ? u.out / (u.workers * u.hours) : null,
+      kwhkg: u.out > 0 && u.kwh > 0 ? u.kwh / u.out : null,
+    }));
 }
 
 /**
@@ -267,13 +306,30 @@ function autoclaveRunsByDay(rows) {
  */
 function againstIdeal(value, ideal, { lowerIsBetter = false, digits = 2 } = {}) {
   const target = ideal == null || !Number.isFinite(Number(ideal)) ? null : Number(ideal);
+  /**
+   * Never round coarser than the target itself is written.
+   *
+   * `digits` is the precision the measured figure is worth showing at, and for a
+   * count of autoclave charges that is nought - you cannot take a third of a
+   * charge. But the target is an average over a day and 4.5 is a perfectly
+   * ordinary thing to ask for, and at nought decimals the screen reported it as
+   * 5 and a shift that took 3 as two charges short. It is one and a half short.
+   *
+   * The percentage was right throughout, which is what makes this the kind of
+   * error nobody catches: -33.3% beside "-2 runs" is arithmetic that does not
+   * check out, and the reader is left to work out which of the two to believe.
+   *
+   * Capped, because a target stored as 0.30000000000000004 would otherwise drag
+   * seventeen decimals onto the card.
+   */
+  const places = target == null ? digits : Math.min(4, Math.max(digits, decimalsOf(target)));
   if (value == null || target == null) {
-    return { ideal: round(target, digits), variance: null, variancePct: null, offTarget: false };
+    return { ideal: round(target, places), variance: null, variancePct: null, offTarget: false };
   }
   const variance = value - target;
   return {
-    ideal: round(target, digits),
-    variance: round(variance, digits),
+    ideal: round(target, places),
+    variance: round(variance, places),
     // A target of nought has no percentage to be off by - anything over it is
     // infinitely better, which is not a figure to put on a screen.
     variancePct: target === 0 ? null : round((variance / target) * 100, 1),
@@ -291,33 +347,41 @@ function againstIdeal(value, ideal, { lowerIsBetter = false, digits = 2 } = {}) 
  */
 function idealFor(key, value, ideals, digits = 2) {
   const field = idealFieldFor(key);
-  const comparison = againstIdeal(value, ideals?.[key], {
-    lowerIsBetter: field?.lowerIsBetter ?? false,
-    digits,
-  });
-  return { parameter: key, idealLabel: field?.label ?? null, ...comparison };
+  const lowerIsBetter = field?.lowerIsBetter ?? false;
+  const comparison = againstIdeal(value, ideals?.[key], { lowerIsBetter, digits });
+  return {
+    parameter: key,
+    idealLabel: field?.label ?? null,
+    /**
+     * Which way is good, sent to the screen rather than left for it to infer.
+     *
+     * Two figures on one card can both be above their target and only one of
+     * them be in trouble: 12.8 kg/man-hour against 12.5 is a crew beating its
+     * benchmark, and 0.214 kWh/kg against 0.202 is the same rubber costing more
+     * electricity to make. Without this the screen draws "+2.7%" and "+5.8%" the
+     * same way and colours one of them red for no reason a reader can see, which
+     * reads as a bug in the screen rather than a fact about the plant.
+     */
+    lowerIsBetter,
+    ...comparison,
+  };
 }
 
-/**
- * A figure that carries no target of its own, and why.
+/*
+ * There was a `noTargetHere` helper here, for a figure shown on a card with
+ * nothing to compare it against. It has no callers left and it is not coming
+ * back: every figure on this screen is now measured against something a manager
+ * set, or - utilisation alone - against the twelve hours of the shift itself.
  *
- * `parameter` is deliberately null rather than a key with nothing behind it. The
- * screen reads a null parameter as "this figure is not one a target is set
- * against" and a set parameter with a null ideal as "a target belongs here and
- * nobody has filled it in" - two different sentences, and the second is the one
- * that should nag a manager. Energy and labour productivity are the case: they
- * are benchmarked over the whole day, so the shift card shows the figure and the
- * day card below carries the comparison.
+ * The two that used it are gone for different reasons. Energy and labour used to
+ * be shown per shift and compared on a second card at the foot of the page; they
+ * are compared on the one card now. A grade's shift output used to be shown with
+ * no target on principle, since the split between grades follows demand rather
+ * than the crew - that figure is still on the card, in the line under the grade,
+ * but it is no longer dressed as a metric whose verdict column is permanently
+ * blank. A row on this screen that never has an answer teaches people to skim
+ * past the rows that do.
  */
-const noTargetHere = (why) => ({
-  parameter: null,
-  idealLabel: null,
-  ideal: null,
-  variance: null,
-  variancePct: null,
-  offTarget: false,
-  context: why,
-});
 
 export const efficiencyService = {
   notes,
@@ -358,147 +422,223 @@ export const efficiencyService = {
     const here = (u) => u.day === date && (u.shift ?? '') === shift;
     const shiftRows = all.filter((r) => r.shift_date === date && (r.shift ?? '') === shift);
 
-    const refiners = refAll.filter(here).sort((a, b) => (a.quality < b.quality ? -1 : 1)).map((u) => {
-      const dayCard = 'compared on the whole-day card below';
+    /**
+     * The picked day folded up per line, so a shift card can carry its own
+     * comparison instead of pointing at a second card underneath.
+     *
+     * These two benchmarks are still measured over the day, and that has not
+     * changed: a night shift that ran four hours on a line the day shift had
+     * already warmed up is not a worse crew, and holding each half of a day
+     * against a whole-day target would report it as one. What changed is where
+     * the answer is shown. There used to be a card up here with the shift's
+     * figures and no verdict, and a second card at the foot of the screen with
+     * the same two figures for the day and the verdict on them - so the one
+     * grade a manager was asking about was in two places, and neither was the
+     * whole answer. They are one card now: the day figure, the ideal beside it,
+     * and the shift's own figure in the line underneath.
+     */
+    const dayFold = (units, keyOf) =>
+      new Map(
+        dailyUnits(units, keyOf)
+          .filter((d) => d.day === date)
+          .map((d) => [d.key, d]),
+      );
+    const refDay = dayFold(refAll, (u) => u.quality);
+    const grindDay = dayFold(grindAll, (u) => u.machineId);
+
+    /**
+     * What a day figure is folded out of, said once per card rather than once
+     * per row.
+     *
+     * It used to be repeated under every metric, and on a card for a grade the
+     * other shift worked it also appeared in the corner - the same sentence
+     * three times on one card, in 11px grey. Three copies of a thing is how a
+     * reader learns to skip it.
+     */
+    const dayNote = (day) =>
+      `${day.shifts} shift${day.shifts === 1 ? '' : 's'} · ${round(day.out, 0)} kg`;
+
+    /** The shift's own figure, for the line under a day comparison. Nothing else. */
+    const mine = (shiftValue, digits) =>
+      shiftValue == null ? null : `this shift ${round(shiftValue, digits)}`;
+
+    /**
+     * A card for each grade or machine worked in the PICKED SHIFT, carrying the
+     * day fold it is judged against.
+     *
+     * The shift decides what is on the screen. This briefly worked the other way
+     * round - the day decided, and a grade the other shift had worked appeared
+     * anyway, marked "not worked this shift" - on the reasoning that the two
+     * benchmarks are day figures and so belong on both views. The plant read that
+     * as the screen contradicting the History tab: 20 August shows Special worked
+     * on the night shift, and the day shift's Efficiency tab listed Special.
+     * A row on a shift's screen is taken to mean that shift did it, and no label
+     * undoes that.
+     *
+     * So a shift shows its own work. The two day-measured figures still fold in
+     * the whole day - that is how the ideal is set, and the card says so - but
+     * the card only exists where there was a crew.
+     */
+    const dayCards = (dayMap, shiftUnits, matches) =>
+      [...dayMap.values()]
+        .sort((a, b) => (a.key < b.key ? -1 : 1))
+        .map((day) => ({ day, unit: shiftUnits.find((u) => here(u) && matches(u, day)) ?? null }))
+        .filter((c) => c.unit);
+
+    const refiners = dayCards(refDay, refAll, (u, d) => u.quality === d.key).map(({ day, unit }) => {
+      // Null on a grade that did not run in this shift - every per-shift figure
+      // below is written from this, so there is one place that decides.
+      const u = unit;
+      /**
+       * The batches THIS shift worked, not the day's.
+       *
+       * Gathered across the day while the cards were day-scoped, and it outlived
+       * that: the day shift's Fine card listed batch 3123, which is the batch the
+       * night shift refined. A batch number on a shift's card is read as "this
+       * shift touched this batch", and against the History tab - which has 3123
+       * on the night shift, correctly - it made the two screens disagree about a
+       * plain fact.
+       */
+      const batches = u.batches;
       return {
-        key: `refiner|${u.quality}`,
-        quality: u.quality,
-        batches: u.batches,
+        key: `refiner|${day.key}`,
+        quality: day.key,
+        batches,
+        /** Whether this grade was worked in the shift on the picker. */
         out: round(u.out, 0),
         workers: u.workers,
         hours: round(u.hours),
         kwh: round(u.kwh, 1),
+        /** The day's own totals, so the card can say what it is comparing. */
+        dayOut: round(day.out, 0),
+        dayShifts: day.shifts,
+        /** What the day figures are folded out of. Said here, not on every row. */
+        dayNote: dayNote(day),
         metrics: [
           {
             key: 'pmh',
             label: 'Production / man-hour',
             unit: 'kg/man-hour',
-            value: round(u.pmh),
+            // The day's figure, because that is what the ideal is set against.
+            // The shift's own is on the line underneath - a supervisor works a
+            // shift, not a day, and a card that dropped it would be hiding the
+            // number the conversation is actually about.
+            value: round(day.pmh, 1),
             warn: false,
-            // The manager's benchmark for this figure is set against the day, so
-            // the comparison - and the flag - are on the day card below. The
-            // shift's own figure stays here because a supervisor works a shift,
-            // not a day, and a card that hid it would be hiding the number the
-            // conversation is actually about.
-            ...noTargetHere(dayCard),
-            calc: u.pmh == null ? null : {
-              title: 'Production / man-hour',
-              formula: 'output ÷ (total crew × total hours)',
+            ...idealFor(idealKey.specialPerManHour(day.key), day.pmh, ideals, 1),
+            span: 'day',
+            context: mine(u.pmh, 1),
+            calc: day.pmh == null ? null : {
+              title: 'Production / man-hour · whole day',
+              formula: "the day's output ÷ the day's labour-hours",
               lines: [
-                `output = ${round(u.out, 0)} kg (R4 weighed)`,
-                `crew = ${u.workers} (summed over the refiner passes)`,
-                `hours = ${round(u.hours)} h (summed over the refiner passes)`,
-                `= ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.workers * u.hours)}`,
+                `output = ${round(day.out, 0)} kg (R4 weighed, ${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                // Crew × hours is worked out inside each shift and then added:
+                // summing crew across the day and multiplying would price 2 hands
+                // over 12 h and 3 over 4 h as eighty labour-hours, not thirty-six.
+                `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
+                `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
               ],
-              result: `${round(u.pmh)}`,
-              note: `The ideal for ${u.quality} labour productivity is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
+              result: `${round(day.pmh, 1)} kg/man-hour`,
+              note: `Measured over the whole day, which is how the ideal for ${day.key} is set - a shift that ran on a line the other shift had already warmed up is not a worse crew.`,
             },
           },
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
-            value: round(u.kwhkg, 3),
+            value: round(day.kwhkg, 3),
             warn: false,
-            ...noTargetHere(dayCard),
-            calc: u.kwhkg == null ? null : {
-              title: 'Electricity (kWh / kg)',
-              formula: 'total energy ÷ output',
+            ...idealFor(idealKey.specialKwhPerKg(day.key), day.kwhkg, ideals, 3),
+            span: 'day',
+            context: mine(u.kwhkg, 3),
+            calc: day.kwhkg == null ? null : {
+              title: 'Electricity (kWh / kg) · whole day',
+              formula: "the day's energy ÷ the day's output",
               lines: [
-                `energy = ${round(u.kwh, 1)} kWh (all refiner passes)`,
-                `output = ${round(u.out, 0)} kg`,
-                `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
+                `energy = ${round(day.kwh, 1)} kWh (all refiner passes, ${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                `output = ${round(day.out, 0)} kg`,
+                `= ${round(day.kwh, 1)} ÷ ${round(day.out, 0)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.kwh, 1)} ÷ ${round(u.out, 0)} = ${round(u.kwhkg, 3)}`,
               ],
-              result: `${round(u.kwhkg, 3)} kWh/kg`,
-              note: `The ideal for ${u.quality} energy is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
-            },
-          },
-          {
-            key: 'out',
-            label: 'Output',
-            value: round(u.out, 0),
-            unit: 'kg',
-            warn: false,
-            /**
-             * Shown, and deliberately not compared with anything.
-             *
-             * One charge is worked into several grades at once and the split
-             * between them is a market decision, so how much Special rather
-             * than SuperFine came off R4 this shift is an instruction the line
-             * followed, not a result it can be held to. A kg/shift target here
-             * would ask a supervisor to explain having made what he was told to
-             * make. What the line *is* answerable for - how efficiently it
-             * worked, whatever the split - is on the whole-day card below.
-             */
-            ...noTargetHere(
-              `${u.workers} crew · ${round(u.hours, 1)} h · grade split follows demand`,
-            ),
-            calc: {
-              title: 'Output',
-              formula: 'total weighed output of this grade in this shift',
-              lines: [`= sum of R4 weights over ${round(u.hours)} h with ${u.workers} crew`],
-              result: `${round(u.out, 0)} kg`,
-              note: '',
+              result: `${round(day.kwhkg, 3)} kWh/kg`,
+              note: `Measured over the whole day, which is how the ideal for ${day.key} is set.`,
             },
           },
         ],
       };
     });
 
-    const grinders = grindAll.filter(here).sort((a, b) => (a.machineId < b.machineId ? -1 : 1)).map((u) => {
-      const dayCard = 'compared on the whole-day card below';
+    const grinders = dayCards(grindDay, grindAll, (u, d) => u.machineId === d.key).map(({ day, unit }) => {
+      const u = unit;
+      const name = day.machine ?? day.key;
       const downMin = Math.max(0, SHIFT_MINUTES - u.hours * 60);
       return {
-        key: `grind|${u.machineId}`,
-        machineId: u.machineId,
-        machine: u.machine,
+        key: `grind|${day.key}`,
+        machineId: day.key,
+        machine: name,
         out: round(u.out, 0),
         workers: u.workers,
         hours: round(u.hours),
+        dayOut: round(day.out, 0),
+        dayShifts: day.shifts,
+        /** What the day figures are folded out of. Said here, not on every row. */
+        dayNote: dayNote(day),
         metrics: [
           {
             key: 'pmh',
             label: 'Production / man-hour',
             unit: 'kg/man-hour',
-            value: round(u.pmh, 1),
+            value: round(day.pmh, 1),
             warn: false,
-            // The benchmark for this one is per day - see the day card below.
-            ...noTargetHere(dayCard),
-            calc: u.pmh == null ? null : {
-              title: 'Production / man-hour',
-              formula: 'output ÷ (crew × hours)',
+            ...idealFor(idealKey.perManHour(day.key), day.pmh, ideals, 1),
+            span: 'day',
+            context: mine(u.pmh, 1),
+            calc: day.pmh == null ? null : {
+              title: 'Production / man-hour · whole day',
+              formula: "the day's output ÷ the day's labour-hours",
               lines: [
-                `output = ${round(u.out, 0)} kg`,
-                `crew = ${u.workers}`,
-                `hours = ${round(u.hours)} h`,
-                `= ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)})`,
+                `output = ${round(day.out, 0)} kg (${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
+                `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
               ],
-              result: `${round(u.pmh, 1)}`,
-              note: `The ideal for ${u.machine} labour productivity is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
+              result: `${round(day.pmh, 1)} kg/man-hour`,
+              note: `Measured over the whole day, which is how the ideal for ${name} is set - a shift that ran on a machine the other shift had already warmed up is not a worse crew.`,
             },
           },
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
-            value: round(u.kwhkg, 3),
+            value: round(day.kwhkg, 3),
             warn: false,
-            ...noTargetHere(dayCard),
-            calc: u.kwhkg == null ? null : {
-              title: 'Electricity (kWh / kg)',
-              formula: 'energy ÷ output',
+            ...idealFor(idealKey.kwhPerKg(day.key), day.kwhkg, ideals, 3),
+            span: 'day',
+            context: mine(u.kwhkg, 3),
+            calc: day.kwhkg == null ? null : {
+              title: 'Electricity (kWh / kg) · whole day',
+              formula: "the day's energy ÷ the day's output",
               lines: [
-                `energy = ${round(u.kwh, 1)} kWh`,
-                `output = ${round(u.out, 0)} kg`,
-                `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
+                `energy = ${round(day.kwh, 1)} kWh (${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                `output = ${round(day.out, 0)} kg`,
+                `= ${round(day.kwh, 1)} ÷ ${round(day.out, 0)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.kwh, 1)} ÷ ${round(u.out, 0)} = ${round(u.kwhkg, 3)}`,
               ],
-              result: `${round(u.kwhkg, 3)} kWh/kg`,
-              note: `The ideal for ${u.machine} energy is set per day, so this shift's figure is shown for context and the comparison is made on the whole-day card below.`,
+              result: `${round(day.kwhkg, 3)} kWh/kg`,
+              note: `Measured over the whole day, which is how the ideal for ${name} is set.`,
             },
           },
+          // Utilisation and the shift's own output are per-shift figures, so a
+          // grinder that did not run in this shift carries neither - a nought
+          // against a 12-hour shift it was never rostered for is a flag nobody
+          // can answer. The two day comparisons above stay, which is the whole
+          // reason the card is on the screen.
           {
             key: 'util',
             label: 'Time · utilisation',
+            span: 'shift',
             value: u.util == null ? null : round(u.util * 100, 0),
             unit: '%',
             /**
@@ -531,11 +671,12 @@ export const efficiencyService = {
           {
             key: 'out',
             label: 'Output (maximise)',
+            span: 'shift',
             value: round(u.out, 0),
             unit: 'kg',
             context: `labour: ${u.workers} crew · ${round(u.hours, 1)} h`,
             warn: false,
-            ...idealFor(idealKey.production(u.machineId), u.out, ideals, 0),
+            ...idealFor(idealKey.production(day.key), u.out, ideals, 0),
             calc: {
               title: 'Output',
               formula: 'total crumb weighed from this grinder this shift',
@@ -600,34 +741,96 @@ export const efficiencyService = {
      * made against what it was meant to make and leaves it there.
      */
     const coarseAll = coarseUnits(all);
-    const coarse = coarseAll.filter(here).map((u) => ({
-      key: 'coarse|line',
-      line: 'coarse',
-      label: 'Coarse line',
-      out: round(u.out, 0),
-      workers: u.workers,
-      hours: round(u.hours),
-      metrics: [
-        {
-          key: 'out',
-          label: 'Output',
-          value: round(u.out, 0),
-          unit: 'kg',
-          context: `${u.workers} crew · ${round(u.hours, 1)} h`,
-          warn: false,
-          ...idealFor(idealKey.production('COARSE'), u.out, ideals, 0),
-          calc: {
-            title: 'Coarse output',
-            formula: 'everything the coarse line weighed this shift',
-            lines: [
-              `= sum of the line's weighed runs over ${round(u.hours)} h with ${u.workers} crew`,
-            ],
-            result: `${round(u.out, 0)} kg`,
-            note: "Compared with the coarse line's shift production on the Ideal values tab.",
+    const coarseDay = dayFold(coarseAll, () => 'COARSE');
+    const coarse = coarseAll.filter(here).map((u) => {
+      const day = coarseDay.get('COARSE');
+      return {
+        key: 'coarse|line',
+        line: 'coarse',
+        label: 'Coarse line',
+        out: round(u.out, 0),
+        workers: u.workers,
+        hours: round(u.hours),
+        dayOut: round(day.out, 0),
+        dayShifts: day.shifts,
+        dayNote: dayNote(day),
+        metrics: [
+          {
+            key: 'out',
+            label: 'Output',
+            span: 'shift',
+            value: round(u.out, 0),
+            unit: 'kg',
+            context: `${u.workers} crew · ${round(u.hours, 1)} h`,
+            warn: false,
+            ...idealFor(idealKey.production('COARSE'), u.out, ideals, 0),
+            calc: {
+              title: 'Coarse output',
+              formula: 'everything the coarse line weighed this shift',
+              lines: [
+                `= sum of the line's weighed runs over ${round(u.hours)} h with ${u.workers} crew`,
+              ],
+              result: `${round(u.out, 0)} kg`,
+              note: "Compared with the coarse line's shift production on the Ideal values tab.",
+            },
           },
-        },
-      ],
-    }));
+          /*
+           * The same two rates the grinders and the special line answer for.
+           * The coarse line has always carried the figures they are made of and
+           * was benchmarked on neither, so it could burn any amount of power per
+           * kg without this screen ever asking - the one weighing line on the
+           * plant that could not come in short on anything but tonnage.
+           *
+           * Measured over the day, like every other kWh/kg and kg/man-hour here,
+           * because that is the span the ideal is set at.
+           */
+          {
+            key: 'pmh',
+            label: 'Production / man-hour',
+            span: 'day',
+            unit: 'kg/man-hour',
+            value: round(day.pmh, 1),
+            warn: false,
+            ...idealFor(idealKey.perManHour('COARSE'), day.pmh, ideals, 1),
+            context: mine(u.pmh, 1),
+            calc: day.pmh == null ? null : {
+              title: 'Production / man-hour · whole day',
+              formula: "the day's output ÷ the day's labour-hours",
+              lines: [
+                `output = ${round(day.out, 0)} kg (${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
+                `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
+              ],
+              result: `${round(day.pmh, 1)} kg/man-hour`,
+              note: 'PR1 and R2 together - the coarse line is crewed and measured as one line, not per machine.',
+            },
+          },
+          {
+            key: 'kwhkg',
+            label: 'Electricity (kWh/kg)',
+            span: 'day',
+            unit: 'kWh/kg',
+            value: round(day.kwhkg, 3),
+            warn: false,
+            ...idealFor(idealKey.kwhPerKg('COARSE'), day.kwhkg, ideals, 3),
+            context: mine(u.kwhkg, 3),
+            calc: day.kwhkg == null ? null : {
+              title: 'Electricity (kWh / kg) · whole day',
+              formula: "the day's energy ÷ the day's output",
+              lines: [
+                `energy = ${round(day.kwh, 1)} kWh (PR1 and R2, ${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
+                `output = ${round(day.out, 0)} kg (only R2 weighs)`,
+                `= ${round(day.kwh, 1)} ÷ ${round(day.out, 0)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.kwh, 1)} ÷ ${round(u.out, 0)} = ${round(u.kwhkg, 3)}`,
+              ],
+              result: `${round(day.kwhkg, 3)} kWh/kg`,
+              note: 'Both machines’ meters over the weight R2 put on the scale - PR1 breaks the charge down and only R2 weighs it.',
+            },
+          },
+        ],
+      };
+    });
 
     /**
      * The autoclaves, counted per day.
@@ -671,101 +874,66 @@ export const efficiencyService = {
       };
     });
 
+
     /**
-     * The two efficiency benchmarks, against the day.
+     * Every machine the plant runs that has nothing at all against this shift.
      *
-     * Per day and not per shift because that is what the plant sets them as, and
-     * the difference is not academic: a night shift that ran four hours on a line
-     * the day shift had already warmed up is not a worse crew, and holding each
-     * half of a day against a whole-day target would report it as one. The shift
-     * cards above still show both figures for the shift, because that is the
-     * span a supervisor works - but they carry no comparison, and this is the
-     * only place either figure is flagged.
+     * The plant's rule is that every machine is accounted for on every shift: it
+     * ran, or it was down, and either way somebody says so. An absent row says
+     * neither. Until now a machine that was never logged simply had no card, and
+     * a screen with no card on it looks exactly like a plant with nothing to
+     * answer for - which is how the Soorya Grinder went five months without a
+     * single run while carrying a 1,800 kg/shift target and nobody was ever
+     * asked about it.
      *
-     * Both lines are folded the same way and rendered from one list, so a grinder
-     * and a grade of the special line cannot end up compared by different
-     * arithmetic. Every card is keyed on the benchmark it is measured against.
+     * So the gap is put on the screen as the gap it is, and each one carries any
+     * open breakdown already covering it. A machine that is down is not a
+     * question - it has been answered - and the manager is chasing the rest.
      */
-    const dayOf = (units, keyOf, idealKeys, describe) => {
-      const daily = dailyUnits(units, keyOf);
+    const [machineRows, downRows] = await Promise.all([
+      machines.all({}, { sort: 'sort_order' }).catch(() => []),
+      breakdowns.all({}, { sort: 'down_start' }).catch(() => []),
+    ]);
 
-      return daily
-        .filter((d) => d.day === date)
-        .sort((a, b) => (a.key < b.key ? -1 : 1))
-        .map((d) => {
-          const spread = `${d.shifts} shift${d.shifts === 1 ? '' : 's'} · ${round(d.out, 0)} kg · ${round(d.labourHours, 1)} labour-h`;
-          return {
-            key: `day|${keyOf(d)}`,
-            line: 'day',
-            label: describe(d),
-            out: round(d.out, 0),
-            metrics: [
-              {
-                key: 'kwhkg',
-                label: 'Electricity (kWh/kg)',
-                unit: 'kWh/kg',
-                value: round(d.kwhkg, 3),
-                context: spread,
-                warn: false,
-                ...idealFor(idealKeys.kwh(d), d.kwhkg, ideals, 3),
-                calc: d.kwhkg == null ? null : {
-                  title: 'Electricity (kWh / kg) · whole day',
-                  formula: "the day's energy ÷ the day's output",
-                  lines: [
-                    `energy = ${round(d.kwh, 1)} kWh over ${d.shifts} shift${d.shifts === 1 ? '' : 's'}`,
-                    `output = ${round(d.out, 0)} kg`,
-                    `= ${round(d.kwh, 1)} ÷ ${round(d.out, 0)}`,
-                  ],
-                  result: `${round(d.kwhkg, 3)} kWh/kg`,
-                  note: 'Measured over the whole day, which is how the ideal is set.',
-                },
-              },
-              {
-                key: 'pmh',
-                label: 'Labour productivity',
-                unit: 'kg/man-hour',
-                value: round(d.pmh, 1),
-                context: spread,
-                warn: false,
-                ...idealFor(idealKeys.pmh(d), d.pmh, ideals, 1),
-                calc: d.pmh == null ? null : {
-                  title: 'Labour productivity · whole day',
-                  formula: "the day's output ÷ the day's labour-hours",
-                  lines: [
-                    `output = ${round(d.out, 0)} kg`,
-                    // Crew × hours is worked out inside each shift and then added.
-                    // Summing crew across the day and multiplying would price a
-                    // day of 2 hands over 12 h and 3 over 4 h as eighty
-                    // labour-hours, where the plant spent thirty-six.
-                    `labour = ${round(d.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
-                    `= ${round(d.out, 0)} ÷ ${round(d.labourHours, 1)}`,
-                  ],
-                  result: `${round(d.pmh, 1)} kg/man-hour`,
-                  note: 'Measured over the whole day, which is how the ideal is set.',
-                },
-              },
-            ],
-          };
-        });
-    };
+    const workedThisShift = new Set(
+      shiftRows.map((r) => r.machine_id).filter(Boolean),
+    );
+    const endOfDay = date ? Date.parse(date + 'T23:59:59Z') : null;
 
-    const days = [
-      ...dayOf(
-        grindAll,
-        (u) => u.machineId,
-        { kwh: (d) => idealKey.kwhPerKg(d.key), pmh: (d) => idealKey.perManHour(d.key) },
-        (d) => d.machine ?? d.key,
-      ),
-      ...dayOf(
-        refAll,
-        (u) => u.quality,
-        {
-          kwh: (d) => idealKey.specialKwhPerKg(d.key),
-          pmh: (d) => idealKey.specialPerManHour(d.key),
-        },
-        (d) => `Special line · ${d.key}`,
-      ),
-    ];
+    /** Open, or closed only after this shift's day - either way it covers it. */
+    const coveringBreakdown = (machineId) =>
+      downRows.find((b) => {
+        if (b.machine_id !== machineId) return false;
+        const started = Date.parse(b.down_start ?? b.created_at ?? '');
+        if (Number.isFinite(started) && endOfDay != null && started > endOfDay) return false;
+        if (!b.repaired_at) return true;
+        const fixed = Date.parse(b.repaired_at);
+        return Number.isFinite(fixed) && endOfDay != null && fixed >= Date.parse(date + 'T00:00:00Z');
+      }) ?? null;
+
+    const unlogged = machineRows
+      .filter((m) => m.enabled !== false && !workedThisShift.has(m.id))
+      .map((m) => {
+        const down = coveringBreakdown(m.id);
+        return {
+          machineId: m.id,
+          machine: m.name ?? m.id,
+          group: m.group_name ?? null,
+          kind: m.kind ?? null,
+          /** The breakdown that answers for it, if somebody has logged one. */
+          breakdown: down
+            ? {
+              id: down.id,
+              downStart: down.down_start ?? down.created_at ?? null,
+              repairedAt: down.repaired_at ?? null,
+              rootCause: down.root_cause ?? null,
+              open: !down.repaired_at,
+            }
+            : null,
+          /** Nothing logged and no breakdown against it - this is the ask. */
+          needsAnswer: !down,
+        };
+      });
 
     let kwh = 0;
     let out = 0;
@@ -778,17 +946,30 @@ export const efficiencyService = {
       date: date ?? null,
       shift: shift ?? null,
       totals: { runs: shiftRows.length, outKg: round(out, 0), kwh: round(kwh, 0) },
+      /**
+       * The refiner and grinder cards carry kWh/kg and kg/man-hour folded up
+       * over the whole day, which is the granularity the manager sets those two
+       * at, with the shift's own figure beside each as context.
+       *
+       * There used to be a second set of cards at the foot of the response - the
+       * same two figures per grade and per grinder, for the day, and the only
+       * place either was compared. It meant one grade appeared twice on the
+       * screen: once up here without a verdict and once down there without the
+       * shift, and a manager asking "how did Fine do on the day shift" had to
+       * read both and hold them together. There is one card each now.
+       */
       refiners,
       grinders,
       coarse,
       autoclaves,
-      /**
-       * kWh/kg and kg/man-hour for the whole day, per grinder and per grade of
-       * the special line - the granularity the manager sets those two at, and so
-       * the only place they are compared with a target.
-       */
-      days,
       yields,
+      /**
+       * Machines with nothing against this shift, and the breakdown covering
+       * each where there is one. What the manager chases: every machine is
+       * meant to be accounted for on every shift, either by work or by a
+       * breakdown, and this is the list that is neither.
+       */
+      unlogged,
       /**
        * The utilisation cut-off, and now nothing else. It is here so the screen
        * can say what the one non-ideal flag on it means without hard-coding the

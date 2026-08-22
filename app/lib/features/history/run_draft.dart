@@ -104,7 +104,6 @@ class Draft {
 /// What a correction works out, and what cannot be right about it.
 class RunMath {
   const RunMath({
-    required this.isTod,
     required this.isAuto,
     required this.isPress,
     required this.isCracker,
@@ -117,8 +116,6 @@ class RunMath {
     required this.issues,
   });
 
-  /// Soorya reads off a TOD meter showing one phase, so its energy is ×3.
-  final bool isTod;
   final bool isAuto;
 
   /// A moulding press, or a sleeve or loop bench: no meters, no hours -
@@ -148,7 +145,6 @@ class RunMath {
 }
 
 RunMath runMath(Run run, Draft draft) {
-  final isTod = run.machineId == todMachineId;
   final elecStart = asNumber(draft.elecStart);
   final elecEnd = asNumber(draft.elecEnd);
   final hourStart = asNumber(draft.hourStart);
@@ -209,7 +205,6 @@ RunMath runMath(Run run, Draft draft) {
   }
 
   return RunMath(
-    isTod: isTod,
     isAuto: run.kind == 'autoclave',
     isPress: isPress,
     isCracker: cracker,
@@ -219,7 +214,7 @@ RunMath runMath(Run run, Draft draft) {
     elecDelta: elecDelta,
     hourDelta: hourDelta,
     energy: elecDelta != null
-        ? round2(isTod ? elecDelta * 3 : elecDelta)
+        ? round2(elecDelta)
         : asNumber(draft.kwh),
     issues: issues,
   );

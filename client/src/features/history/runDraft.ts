@@ -65,8 +65,6 @@ export const changedFields = (draft: Draft, base: Draft) =>
   (Object.keys(base) as DraftField[]).filter((f) => draft[f] !== base[f]);
 
 export interface RunMath {
-  /** Soorya reads off a TOD meter showing one phase, so its energy is ×3. */
-  isTod: boolean;
   isAuto: boolean;
   /** A moulding press: no meters, no hours - pieces, weight and flash. */
   isPress: boolean;
@@ -94,7 +92,6 @@ export interface RunMath {
 }
 
 export function runMath(run: Run, draft: Draft): RunMath {
-  const isTod = run.machine_id === 'GRD_O';
   const elecStart = asNumber(draft.elecStart);
   const elecEnd = asNumber(draft.elecEnd);
   const hourStart = asNumber(draft.hourStart);
@@ -147,7 +144,6 @@ export function runMath(run: Run, draft: Draft): RunMath {
   }
 
   return {
-    isTod,
     isAuto: run.kind === 'autoclave',
     isPress,
     isCracker,
@@ -162,7 +158,7 @@ export function runMath(run: Run, draft: Draft): RunMath {
     hourPair,
     elecDelta,
     hourDelta,
-    energy: elecDelta != null ? round2(isTod ? elecDelta * 3 : elecDelta) : asNumber(draft.kwh),
+    energy: elecDelta != null ? round2(elecDelta) : asNumber(draft.kwh),
     runHours: hourDelta ?? asNumber(draft.hoursRun),
     output: asNumber(draft.outWeight),
     issues,

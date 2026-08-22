@@ -34,6 +34,11 @@ export const registry = {
   [TABLES.machines]: table('id', [
     'id', 'name', 'short', 'kind', 'group_name', 'sub', 'accent', 'capacity',
     'out_weight', 'needs_quality', 'weigh', 'tyre', 'def_tyre', 'enabled', 'sort_order',
+    // Null falls back to what the kind implies; false means no electricity and
+    // no hour meter on this machine at all - see migrations/0015.
+    'meters',
+    // Whether it is on the greasing schedule - see migrations/0015.
+    'bearings',
     'created_at', 'updated_at',
     // The finer name the back office lists it under, and - on a press - the
     // platen it moulds on. Null on everything that is not one.

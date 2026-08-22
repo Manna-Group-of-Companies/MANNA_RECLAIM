@@ -39,8 +39,11 @@
 create table if not exists public.users (
   id            text primary key default gen_random_uuid()::text,
   name          text not null,
+  -- 'md' is the managing director: the overview and the shift efficiency, and
+  -- no write anywhere in the app. Which roles may write is the API's question,
+  -- not this column's - see SUMMARY_ROLES in server/src/config/constants.js.
   role          text not null default 'supervisor'
-                  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin')),
+                  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin', 'md')),
   active        boolean not null default true,
   pin_hash      text not null,
   last_login_at  timestamptz,
@@ -56,6 +59,14 @@ create unique index if not exists users_name_lower_key on public.users (lower(na
 alter table if exists public.users add column if not exists last_login_at timestamptz;
 alter table if exists public.users add column if not exists last_seen_at timestamptz;
 alter table if exists public.users add column if not exists last_logout_at timestamptz;
+
+-- And for the ones created before 'md' was a role. The check above only runs on
+-- a table this file creates, so an existing project needs it restated - which is
+-- what migrations/0016 does on its own, and this keeps the two in step for
+-- anyone who runs the whole schema instead.
+alter table if exists public.users drop constraint if exists users_role_check;
+alter table if exists public.users add constraint users_role_check
+  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin', 'md'));
 
 
 -- -----------------------------------------------------------------------------
@@ -83,6 +94,13 @@ create table if not exists public.machines (
   -- The grinding line runs on a tyre feedstock, picked when the shift starts.
   tyre           boolean not null default false,
   def_tyre       text,
+  -- Whether this machine has an electricity meter and an hour meter on it.
+  -- Null falls back to what the kind implies; false means it has neither, so
+  -- its sheets ask for weight and crew only. See migrations/0015.
+  meters         boolean,
+  -- Whether this machine is on the greasing schedule. Null falls back to what
+  -- the kind implies; false leaves it off the Bearing tab entirely.
+  bearings       boolean,
   enabled        boolean not null default true,
   sort_order     integer not null default 0,
   created_at     timestamptz not null default now(),

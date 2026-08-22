@@ -8,15 +8,31 @@ import { cn } from '@/utils/cn';
 import { useOnApp } from '@/hooks/useOnApp';
 import { minsAgo } from '@/utils/presence';
 import { clock24 } from '@/utils/date';
+import { BackOfficeDay } from './BackOfficeDay';
 
-/** The six back.html tabs, plus the eight this port adds. */
-const tabs = [
+/**
+ * What a manager runs the plant from: how it did, and what it is being held
+ * to. Five tabs, and every one of them is about a shift.
+ */
+const MANAGER_TABS = [
   { to: adminPaths.dashboard, label: 'Overview' },
   { to: adminPaths.history, label: 'History' },
-  { to: adminPaths.quality, label: 'Quality' },
   { to: adminPaths.efficiency, label: 'Efficiency' },
   { to: adminPaths.rates, label: 'Rates' },
   { to: adminPaths.ideals, label: 'Ideal values' },
+];
+
+/**
+ * The setting-up, which is the admin account's.
+ *
+ * These are the tabs that change what the plant *is* rather than report on
+ * what it did: the machine list, the products, the customers and their rates,
+ * the accounts, and the costing that prices all of it. A manager reading a bad
+ * shift does not need any of them, and every one of them is a place where a
+ * wrong entry quietly rewrites months of figures rather than one row.
+ */
+const ADMIN_TABS = [
+  { to: adminPaths.quality, label: 'Quality' },
   { to: adminPaths.costing, label: 'Costing' },
   { to: adminPaths.maintenance, label: 'Maintenance' },
   { to: adminPaths.bearings, label: 'Bearings' },
@@ -43,6 +59,12 @@ export function AdminTopbar() {
    * on the app.
    */
   const onApp = useOnApp();
+  /*
+   * Hiding a tab is not a guard - the routes carry the same split, so typing
+   * the address gets a manager bounced rather than the page. This only keeps
+   * the strip to what the account can actually open.
+   */
+  const tabs = user?.role === 'admin' ? [...MANAGER_TABS, ...ADMIN_TABS] : MANAGER_TABS;
   /*
    * Every tab fetches from a different slice, and the header has no way of
    * knowing which one the current page is using - so it watches all of them.
@@ -129,6 +151,12 @@ export function AdminTopbar() {
           </button>
         </div>
       </div>
+
+      {/*
+        Above the tabs, because it governs all of them. Inside a tab it was
+        three separate copies of one question and they disagreed.
+      */}
+      <BackOfficeDay />
 
       <nav className="tabstrip" ref={strip}>
         {tabs.map(({ to, label }) => (

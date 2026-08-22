@@ -7,9 +7,41 @@ export const ROLES: Record<string, Role> = {
   LAB: 'lab',
   MANAGER: 'manager',
   ADMIN: 'admin',
+  MD: 'md',
 };
 
 export const ADMIN_ROLES: Role[] = ['manager', 'admin'];
+
+/**
+ * Who may open the tabs that set the plant up, as against the ones that report
+ * on it: the machine list, the products, the customers and their rates, the
+ * accounts, and the costing that prices all of it.
+ *
+ * The admin account alone. A manager reads how the plant did and what it is
+ * being held to - Overview, History, Efficiency, Rates and the ideals - and none
+ * of those rewrites anything but the shift they are about. What is behind this
+ * list does: a machine renamed, a rate moved or a product repriced quietly
+ * changes months of figures, which is a different kind of mistake and worth a
+ * different sign-in. Same reasoning as DELETE_ROLES, one door further out.
+ */
+export const SETUP_ROLES: Role[] = ['admin'];
+
+/**
+ * Who may read the plant's summary screens - the overview and the shift
+ * efficiency. The managing director's whole account, plus the back office
+ * because a manager reads the same two pages.
+ *
+ * Deliberately not md added to ADMIN_ROLES. That list is the back office, and
+ * the back office writes: the rate card, the ideal values, a run correction, a
+ * dispatch, the answer for a shift that came in short. Widening it would have
+ * handed the MD every one of those in a single line. Mirrors SUMMARY_ROLES on
+ * the server, which is where it is actually enforced - this one only decides
+ * which routes and which buttons a screen offers.
+ */
+export const SUMMARY_ROLES: Role[] = ['md', 'manager', 'admin'];
+
+/** The managing director reads; nobody else on that screen is read-only. */
+export const isReadOnly = (role?: Role | null): boolean => role === 'md';
 
 /**
  * Who may delete, as opposed to who may correct.
@@ -372,7 +404,6 @@ export const defaultWorkers = (machineId: string, shift: Shift, shiftwise: boole
 };
 
 /** Soorya is metered on one phase only - see the note on both its sheets. */
-export const TOD_MACHINE_ID = 'GRD_O';
 
 /**
  * Supervisors who sign for a shift, as the prototype hard-coded them.
@@ -555,8 +586,15 @@ export const IDEAL_PRODUCTION_LINES = [
   { key: 'COARSE', label: 'Coarse line' },
 ];
 
-/** The grinders, which get an energy and a labour benchmark each. */
+/** The grinders on their own, where something is about grinding specifically. */
 export const IDEAL_GRINDERS = IDEAL_PRODUCTION_LINES.filter((l) => l.key !== 'COARSE');
+
+/**
+ * The lines given an energy and a labour benchmark: the three grinders and the
+ * coarse line. Mirrors IDEAL_EFFICIENCY_LINES on the server - see the note there
+ * on why coarse was missing from both and should not have been.
+ */
+export const IDEAL_EFFICIENCY_LINES = IDEAL_PRODUCTION_LINES;
 
 /**
  * Autoclave A and M. N and O have been seeded disabled for the life of the
@@ -597,10 +635,10 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
     fields: [{ key: IDEAL_KEY.batchYield(), label: 'Batch yield', unit: '%' }],
   },
   {
-    title: 'Energy — grinders',
-    fields: IDEAL_GRINDERS.map((grinder) => ({
-      key: IDEAL_KEY.kwhPerKg(grinder.key),
-      label: grinder.label,
+    title: 'Energy — grinders & coarse',
+    fields: IDEAL_EFFICIENCY_LINES.map((line) => ({
+      key: IDEAL_KEY.kwhPerKg(line.key),
+      label: line.label,
       unit: 'kWh/kg',
     })),
   },
@@ -613,10 +651,10 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
     })),
   },
   {
-    title: 'Labour productivity — grinders',
-    fields: IDEAL_GRINDERS.map((grinder) => ({
-      key: IDEAL_KEY.perManHour(grinder.key),
-      label: grinder.label,
+    title: 'Labour productivity — grinders & coarse',
+    fields: IDEAL_EFFICIENCY_LINES.map((line) => ({
+      key: IDEAL_KEY.perManHour(line.key),
+      label: line.label,
       unit: 'kg/man-hour',
     })),
   },

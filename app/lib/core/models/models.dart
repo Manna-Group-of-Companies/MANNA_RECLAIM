@@ -22,6 +22,11 @@ String? _str(dynamic v) => v?.toString();
 bool _bool(dynamic v, [bool fallback = false]) =>
     v is bool ? v : (v == null ? fallback : v.toString() == 'true');
 
+/// A tri-state flag: absent stays absent rather than collapsing to false.
+/// `machines.meters` needs it - null there means "ask the kind", not "no".
+bool? _boolOrNull(dynamic v) =>
+    v == null ? null : (v is bool ? v : v.toString() == 'true');
+
 List<String> _strList(dynamic v) => v is List
     ? v.where((e) => e != null).map((e) => e.toString()).toList()
     : const [];
@@ -91,6 +96,7 @@ class Machine {
     this.outWeight = false,
     this.tyre = false,
     this.defTyre,
+    this.meters,
     this.sub,
     this.type,
     this.sortOrder,
@@ -119,6 +125,16 @@ class Machine {
   /// Runs on a tyre feedstock, and which one it is set up for by default.
   final bool tyre;
   final String? defTyre;
+
+  /// Whether this machine has an electricity meter and an hour meter on it.
+  ///
+  /// Null - every machine but the one this exists for - means nobody has
+  /// answered the question and the `kind` keeps answering it. False means the
+  /// machine has neither, whatever its kind: the Soorya Grinder is
+  /// `kind: 'grind'` like the other two grinders and has no meters at all, so
+  /// its sheets asked the crew for two readings that do not exist. That is the
+  /// likeliest reason it has never had a run logged. See migrations/0015.
+  final bool? meters;
   final String? sub;
   final String? type;
   final int? sortOrder;
@@ -137,6 +153,7 @@ class Machine {
     outWeight: _bool(j['out_weight']),
     tyre: _bool(j['tyre']),
     defTyre: _str(j['def_tyre']),
+    meters: _boolOrNull(j['meters']),
     sub: _str(j['sub']),
     type: _str(j['type']),
     sortOrder: _int(j['sort_order']),

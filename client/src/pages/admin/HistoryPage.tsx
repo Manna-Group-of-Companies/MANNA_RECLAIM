@@ -12,12 +12,11 @@ import {
   changedFields,
   deletedSummary,
   draftOf,
-  round2,
   runMath,
   text,
   type Draft,
 } from '@/features/history/runDraft';
-import { QUALITIES, SHIFTS } from '@/config/constants';
+import { QUALITIES, SHIFTS, isReadOnly } from '@/config/constants';
 import { clock, dayLong } from '@/utils/date';
 import { hours, kwhOf, num } from '@/utils/format';
 import { cn } from '@/utils/cn';
@@ -72,7 +71,7 @@ function RunDetail({
   const set = (field: keyof Draft, value: string) => setDraft({ ...draft, [field]: value });
 
   const math = runMath(run, draft);
-  const { isAuto, isPress, isTod, isCracker, pickingLabourHours } = math;
+  const { isAuto, isPress, isCracker, pickingLabourHours } = math;
   const { elecStart, elecEnd, hourStart, hourEnd } = math;
   const { elecPair, hourPair, elecDelta, hourDelta, energy, runHours, output, issues } = math;
 
@@ -247,7 +246,7 @@ function RunDetail({
         {/* No meters on a press, and no energy or hours to correct against them. */}
         {!isAuto && !isPress && (
           <>
-            <div className="grouphead">Electricity{isTod && <span className="muted font-normal"> (TOD meter, one phase)</span>}</div>
+            <div className="grouphead">Electricity</div>
             {field(<>Reading at start <span className="muted font-normal">(units)</span></>, numberInput('elecStart'))}
             {field(
               <>Reading at stop <span className="muted font-normal">(units)</span></>,
@@ -255,12 +254,6 @@ function RunDetail({
               elecDelta != null ? (
                 <div className={cn('diffout show mt-1.5', elecDelta < 0 && 'bad')}>
                   Consumed: <b>{elecEnd}</b> − {elecStart} = <b>{elecDelta}</b> units
-                  {isTod && elecDelta >= 0 && (
-                    <>
-                      {' '}
-                      × 3 = <b>{round2(elecDelta * 3)}</b> kWh
-                    </>
-                  )}
                 </div>
               ) : undefined,
             )}
@@ -429,9 +422,29 @@ function RunDetail({
 export function AdminHistoryPage() {
   const dispatch = useAppDispatch();
   const filters = useAppSelector((s) => s.reports.filters);
+  /**
+   * The managing director reads this page at /md/history.
+   *
+   * Two things come off it. A row no longer opens the correction sheet -
+   * every control on that sheet writes, and a modal whose buttons are all
+   * disabled is a worse answer than not opening one. And the CSV export goes:
+   * it is served by /reports/machine-log.csv, which stays the back office
+   * alone because it carries every run the plant has ever logged with a price
+   * against it, so the button could only ever have come back 403.
+   *
+   * Neither is the guard. The correction is a PATCH and the delete a DELETE,
+   * both refused at the routes for this account whatever the screen offers.
+   */
+  const readOnly = isReadOnly(useAppSelector((s) => s.auth.user?.role));
   const refreshTick = useAppSelector((s) => s.ui.refreshTick);
 
-  const [date, setDate] = useState('');
+  /*
+   * The day is the back office's, picked once above the tab strip - see
+   * BackOfficeDay. It used to be this page's own, defaulting to "All days",
+   * so a manager reading 20 August on Efficiency and switching here was
+   * silently handed five months of runs instead of the shift they were on.
+   */
+  const date = useAppSelector((s) => s.ui.backOfficeDay);
   const [machineId, setMachineId] = useState('');
   const [shift, setShift] = useState('');
   const [rows, setRows] = useState<Run[]>([]);
@@ -514,17 +527,7 @@ export function AdminHistoryPage() {
     <>
       <div className="panel">
         <div className="bar">
-          <div className="f">
-            <label htmlFor="h-day">Day</label>
-            <select id="h-day" value={date} onChange={(e) => setDate(e.target.value)}>
-              <option value="">All days</option>
-              {filters?.days.map((d) => (
-                <option key={d} value={d}>
-                  {dayLong(d)}
-                </option>
-              ))}
-            </select>
-          </div>
+
           <div className="f">
             <label htmlFor="h-machine">Machine</label>
             <select id="h-machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
@@ -559,6 +562,7 @@ export function AdminHistoryPage() {
             says it is showing. Every logged run matching the day, the machine
             and the shift goes into the file.
           */}
+          {!readOnly && (
           <button
             type="button"
             className="chip"
@@ -568,6 +572,7 @@ export function AdminHistoryPage() {
           >
             {exporting ? 'Preparing…' : '↓ Export CSV'}
           </button>
+          )}
         </div>
 
         <div className="kpis">
@@ -619,7 +624,11 @@ export function AdminHistoryPage() {
                   const k = kwhOf(r);
                   const w = r.weight_kg ?? r.out_weight ?? null;
                   return (
-                    <tr key={r.id} onClick={() => setSelected(r)} className="cursor-pointer">
+                    <tr
+                      key={r.id}
+                      onClick={readOnly ? undefined : () => setSelected(r)}
+                      className={readOnly ? undefined : 'cursor-pointer'}
+                    >
                       <td>
                         <b>{dayLong(r.shift_date)}</b>
                         {r.shift && <div className="muted text-[10px]">{r.shift} shift</div>}

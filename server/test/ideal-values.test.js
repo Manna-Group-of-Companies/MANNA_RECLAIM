@@ -128,7 +128,6 @@ const allMetrics = (shift) =>
     ...shift.grinders,
     ...shift.coarse,
     ...shift.autoclaves,
-    ...shift.days,
     ...shift.yields,
   ].flatMap((c) => c.metrics.map((m) => ({ card: c.key, ...m })));
 
@@ -171,6 +170,61 @@ test('the sheet keeps every declared benchmark and drops anything else', async (
   assert.equal(api.tables.ideal_values[0].data.nonsense, undefined);
 });
 
+test('a blank saved back stays blank, and does not become a target of nought', async () => {
+  /*
+   * The sheet is read, edited and written whole: the form loads every declared
+   * benchmark, unset ones as null, and PUTs the lot back. So a null in the
+   * payload is the ordinary case, not an odd one - it is what "nobody has set
+   * this yet" looks like on the wire every single time anybody saves.
+   *
+   * It was being stored as 0. The body schema is a union and a zod union takes
+   * the first branch that accepts; coercion came first and Number(null) is 0, so
+   * z.null() never got a turn. Every untouched figure on the sheet became a
+   * target of nought the moment a manager pressed Save.
+   *
+   * Which is the one outcome this sheet exists to prevent. On a figure where
+   * less is better, a target of nought flags every shift forever; on one where
+   * more is better nothing can fall below it, so a benchmark nobody filled in
+   * reads as one the plant meets every day.
+   *
+   * Asserted through the route rather than against the service, because the
+   * service was always right - it skips null. The coercion happened in front of
+   * it, and a service-level test cannot see that.
+   */
+  const api = await startApi({ tables: seed(null) });
+
+  const saved = await api.call('/rates/ideal-values', {
+    method: 'PUT',
+    body: {
+      data: {
+        'prod.GRD_K': 1200,
+        'pmh.GRD_K': null,        // never set
+        'kwhkg.GRD_K': '',        // cleared by hand on the form
+        'prod.GRD_S': '2000',     // a form sends numbers as text
+      },
+    },
+  });
+  assert.equal(saved.status, 200);
+
+  const { data } = (await saved.json()).data;
+  assert.equal(data['prod.GRD_K'], 1200);
+  assert.equal(data['prod.GRD_S'], 2000, 'a numeric string is still coerced');
+  assert.equal(data['pmh.GRD_K'], null, 'a null stays unset - it is not a target of nought');
+  assert.equal(data['kwhkg.GRD_K'], null, 'and neither is a cleared field');
+
+  // And nothing was written under those keys, rather than merely read back null.
+  const stored = api.tables.ideal_values[0].data;
+  assert.ok(!('pmh.GRD_K' in stored), 'the unset benchmark is absent from the row');
+  assert.ok(!('kwhkg.GRD_K' in stored), 'and so is the cleared one');
+
+  // The screen must then say "no ideal set" rather than compare against nought.
+  const shift = await shiftOf(api);
+  const pmh = metric(shift.grinders, 'grind|GRD_K', 'pmh');
+  assert.equal(pmh.ideal, null);
+  assert.equal(pmh.offTarget, false, 'an unset benchmark flags nothing');
+});
+
+
 test('production is compared per shift, which is how it is set', async () => {
   const api = await startApi({
     tables: seed({
@@ -190,11 +244,16 @@ test('production is compared per shift, which is how it is set', async () => {
   // rather than to a card on a screen that may be laid out differently later.
   assert.equal(out.parameter, 'prod.GRD_K');
 
-  // And the two day-level benchmarks are not also compared here, or the same
-  // target would be answered for twice under one key - once for each shift.
+  // The two day-level benchmarks sit on this same card, and are compared - the
+  // figure they carry is the day's, not this shift's. One card per machine, with
+  // its ideal on it; there is no second card down the page for the same thing.
   const pmh = metric(shift.grinders, 'grind|GRD_K', 'pmh');
-  assert.equal(pmh.ideal, null, 'labour productivity is judged over the day');
-  assert.equal(pmh.parameter, null, 'and it is not a figure a reason is filed against here');
+  assert.equal(pmh.parameter, 'pmh.GRD_K', 'labour productivity is answered for here');
+  // Asserted on the field rather than on the label, because the label is copy
+  // and this is the contract: a card mixes day figures with shift figures and
+  // every row has to say which it is.
+  assert.equal(pmh.span, 'day', 'and says the figure is the day’s, not the shift’s');
+  assert.equal(metric(shift.grinders, 'grind|GRD_K', 'out').span, 'shift');
 });
 
 test('energy and labour productivity are compared over the whole day', async () => {
@@ -211,9 +270,9 @@ test('energy and labour productivity are compared over the whole day', async () 
     },
   });
 
-  const day = (await shiftOf(api)).days;
-  const kwh = metric(day, 'day|GRD_K', 'kwhkg');
-  const pmh = metric(day, 'day|GRD_K', 'pmh');
+  const day = (await shiftOf(api)).grinders;
+  const kwh = metric(day, 'grind|GRD_K', 'kwhkg');
+  const pmh = metric(day, 'grind|GRD_K', 'pmh');
 
   assert.equal(kwh.value, 0.8, '1200 kWh over 1500 kg, both shifts');
   assert.equal(kwh.ideal, 0.6);
@@ -238,14 +297,14 @@ test('a day’s labour-hours are worked out inside each shift, then added', asyn
     },
   });
 
-  const pmh = metric((await shiftOf(api)).days, 'day|GRD_K', 'pmh');
+  const pmh = metric((await shiftOf(api)).grinders, 'grind|GRD_K', 'pmh');
   assert.equal(pmh.value, 30, '1080 kg over 36 labour-hours');
 });
 
 test('energy under the target is a win, not a miss', async () => {
   const api = await startApi({ tables: seed({ 'kwhkg.GRD_K': 0.6 }) });
 
-  const kwh = metric((await shiftOf(api)).days, 'day|GRD_K', 'kwhkg');
+  const kwh = metric((await shiftOf(api)).grinders, 'grind|GRD_K', 'kwhkg');
   assert.equal(kwh.value, 0.5, '500 kWh over 1000 kg');
   assert.equal(kwh.variance, -0.1);
   assert.equal(kwh.offTarget, false, 'under the energy target is a win');
@@ -256,7 +315,7 @@ test('an unset benchmark compares to nothing rather than to nought', async () =>
   const shift = await shiftOf(api);
 
   assert.equal(shift.idealsSet, false, 'the screen has to tell "no target yet" from "on target"');
-  const flagged = [...shift.grinders, ...shift.coarse, ...shift.autoclaves, ...shift.days]
+  const flagged = [...shift.grinders, ...shift.coarse, ...shift.autoclaves]
     .flatMap((c) => c.metrics)
     .filter((m) => m.offTarget);
   assert.deepEqual(flagged, [], 'an empty sheet flags nothing');
@@ -290,6 +349,84 @@ test('the coarse line gets a card of its own, and the autoclaves are counted per
   const idle = metric(shift.autoclaves, 'autoclave|AC_M', 'runs');
   assert.equal(idle.value, 0);
 });
+
+test('a target with a half in it keeps its half', async () => {
+  /*
+   * A vessel takes whole charges, so the count is shown at nought decimals - and
+   * the target is an average over a day, where 4.5 is an ordinary thing to ask
+   * for. Rounded to the figure's precision, a 4.5 target rendered as 5 and a day
+   * that took 3 charges was reported as two short. It is one and a half short.
+   *
+   * The percentage stayed correct the whole time, which is what made it quietly
+   * wrong rather than obviously wrong: "-2 runs (-33.3%)" is arithmetic that does
+   * not check out, and the reader has to guess which half to believe.
+   */
+  const api = await startApi({ tables: seed({ 'runs.AC_A': 4.5 }) });
+  const shift = await shiftOf(api);
+
+  // The seed charges AC_A once on each shift, so the day took 2.
+  const charges = metric(shift.autoclaves, 'autoclave|AC_A', 'runs');
+  assert.equal(charges.value, 2, 'a count of charges stays a whole number');
+  assert.equal(charges.ideal, 4.5, 'the target is shown as it was set, not rounded to 5');
+  assert.equal(charges.variance, -2.5, 'and the gap keeps the half');
+  assert.equal(charges.variancePct, -55.6);
+
+  // A whole-number target is still shown whole - the precision follows the
+  // target, and does not simply add decimals to everything.
+  const whole = await startApi({ tables: seed({ 'runs.AC_A': 3 }) });
+  const w = metric((await shiftOf(whole)).autoclaves, 'autoclave|AC_A', 'runs');
+  assert.equal(w.ideal, 3);
+  assert.equal(w.variance, -1, 'no stray .0 on a target nobody wrote a decimal on');
+});
+
+
+test('the coarse line is judged on energy and labour, not tonnage alone', async () => {
+  /*
+   * It was benchmarked on output and nothing else - the one weighing line on the
+   * plant that could come in short on nothing but tonnage. It carries crew,
+   * hours and a meter on every run exactly as a grinder does, so it now answers
+   * for the same two rates.
+   *
+   * The autoclave in the seed is the reason this test has one. A coarse-form
+   * charge is logged with line 'coarse', correctly, and there are more
+   * labour-hours in those charges across the record than in PR1 and R2 together
+   * - counted as the line's own labour they put its productivity at a third of
+   * what the line actually runs at, which would make any benchmark set from it
+   * three times too lax on the crew.
+   */
+  const api = await startApi({
+    tables: {
+      ...seed({ 'pmh.COARSE': 40, 'kwhkg.COARSE': 0.5 }),
+      runs: [
+        // 800 kg on 2 hands over 10 h at 400 kWh: 40 kg/man-hour, 0.5 kWh/kg.
+        coarseRun({ kwh: 400 }),
+        // A coarse-form charge, 1 hand for 8 h. Not the line's labour.
+        autoclaveRun({ id: 'run-ac-coarse', line: 'coarse', workers: 1, hours_run: 8 }),
+      ],
+    },
+  });
+
+  const shift = await shiftOf(api);
+
+  const pmh = metric(shift.coarse, 'coarse|line', 'pmh');
+  assert.equal(pmh.value, 40, '800 kg over 20 labour-hours - the vessel is not in it');
+  assert.equal(pmh.ideal, 40);
+  assert.equal(pmh.offTarget, false, 'exactly on target is on target');
+  assert.equal(pmh.parameter, 'pmh.COARSE', 'and it can be answered for');
+  assert.equal(pmh.lowerIsBetter, false, 'more kg per man-hour is better');
+
+  const kwh = metric(shift.coarse, 'coarse|line', 'kwhkg');
+  assert.equal(kwh.value, 0.5, '400 kWh over 800 kg');
+  assert.equal(kwh.ideal, 0.5);
+  assert.equal(kwh.lowerIsBetter, true, 'fewer kWh per kg is better');
+
+  // And the benchmarks exist to be set, or the card would nag for a target the
+  // Ideal values tab never offers.
+  const sheet = (await (await api.call('/rates/ideal-values')).json()).data.data;
+  assert.ok('pmh.COARSE' in sheet, 'the sheet offers the coarse labour benchmark');
+  assert.ok('kwhkg.COARSE' in sheet, 'and the coarse energy benchmark');
+});
+
 
 test('nothing on the screen is compared with the plant’s own history', async () => {
   const api = await startApi({
@@ -358,7 +495,7 @@ test('batch yield is judged against the manager’s figure', async () => {
   assert.equal(y.parameter, 'yield.BATCH', 'a reason for it files under the benchmark’s own key');
 });
 
-test('energy and labour on a shift card carry no target, and say where theirs is', async () => {
+test('energy and labour are compared on the machine’s own card, once', async () => {
   const api = await startApi({
     tables: {
       ...seed({ 'pmh.GRD_K': 40, 'kwhkg.GRD_K': 0.4 }),
@@ -370,18 +507,85 @@ test('energy and labour on a shift card carry no target, and say where theirs is
 
   for (const key of ['pmh', 'kwhkg']) {
     const m = metric(shift.grinders, 'grind|GRD_K', key);
-    // Null, not merely unset. "No target is set against this figure here" and "a
-    // target belongs here and nobody filled it in" are different sentences, and
-    // only the second should nag anyone.
-    assert.equal(m.parameter, null, `${key} is not benchmarked per shift`);
-    assert.equal(m.ideal, null);
-    assert.equal(m.offTarget, false);
-    assert.match(m.context, /whole-day card/, `${key} says where it is compared`);
+    assert.ok(m.parameter, `${key} carries the key a reason is filed under`);
+    assert.ok(m.ideal != null, `${key} carries the ideal it is judged against`);
+    // The shift's own figure is still on the card, in the line under the value -
+    // a supervisor works a shift, and a card that dropped it would be hiding the
+    // number the conversation is about.
+    assert.match(m.context, /this shift/, `${key} still shows the shift's own figure`);
   }
 
-  // And the day card does carry them.
-  assert.equal(metric(shift.days, 'day|GRD_K', 'pmh').parameter, 'pmh.GRD_K');
-  assert.equal(metric(shift.days, 'day|GRD_K', 'kwhkg').parameter, 'kwhkg.GRD_K');
+  // And there is no second card for the same machine anywhere in the response.
+  assert.equal(shift.days, undefined, 'the whole-day cards are gone; the figures moved onto the card');
+  const all = [...shift.refiners, ...shift.grinders, ...shift.coarse, ...shift.autoclaves];
+  const keys = all.map((c) => c.key);
+  assert.equal(new Set(keys).size, keys.length, 'one card per machine or grade, not two');
+});
+
+test('a shift shows the grades that shift worked, and no others', async () => {
+  /*
+   * 20 August 2026 is what this is written from. Fine was worked on the day
+   * shift and Special on the night, and the day shift's screen listed Special -
+   * labelled "not worked this shift", but listed. Against a History tab that
+   * says plainly it was a night batch, that reads as the two screens
+   * contradicting each other, and a row on a shift's screen is taken to mean
+   * that shift did it, whatever the label underneath says.
+   *
+   * The shift decides what is on the screen. The day still decides what the two
+   * benchmarked figures are measured over, which is a different question and one
+   * the card answers in its own corner.
+   */
+  const api = await startApi({
+    tables: {
+      ...seed({ 'pmh.SPECIAL.Fine': 20, 'pmh.SPECIAL.Special': 12, 'kwhkg.SPECIAL.Special': 0.2 }),
+      runs: [
+        refinerRun({ id: 'r-fine-day', quality: 'Fine', weight_kg: 800 }),
+        refinerRun({ id: 'r-spec-night', quality: 'Special', shift: 'Night', weight_kg: 900 }),
+      ],
+    },
+  });
+
+  const view = async (shift) =>
+    (await (await api.call(`/reports/shift-efficiency?date=${DAY}&shift=${shift}`)).json()).data;
+
+  const day = await view('Day');
+  assert.deepEqual(day.refiners.map((c) => c.quality), ['Fine'], 'the day shift worked Fine only');
+
+  const night = await view('Night');
+  assert.deepEqual(
+    night.refiners.map((c) => c.quality),
+    ['Special'],
+    'the night shift worked Special only',
+  );
+
+  // Every card on a screen was worked by that shift, so every one of them has
+  // that shift's own figures - no nulls standing in for a crew never there.
+  for (const [shift, s] of [['Day', day], ['Night', night]]) {
+    for (const card of s.refiners) {
+      assert.ok(card.out > 0, `${card.quality} on the ${shift} view has its own output`);
+      assert.ok(card.workers > 0, `${card.quality} on the ${shift} view has its own crew`);
+      const pmh = card.metrics.find((m) => m.key === 'pmh');
+      assert.ok(pmh.parameter, `${card.quality} can still be answered for`);
+      assert.ok(card.dayNote, 'and still says what the day figures are folded out of');
+    }
+  }
+});
+
+test('no figure is shown on this screen without something to compare it to', async () => {
+  const api = await startApi({
+    tables: {
+      ...seed({ 'prod.GRD_K': 1200, 'pmh.GRD_K': 40, 'kwhkg.GRD_K': 0.4, 'prod.COARSE': 700 }),
+      runs: [grinderRun(), coarseRun(), autoclaveRun(), refinerRun()],
+    },
+  });
+
+  const shift = await shiftOf(api);
+  for (const m of allMetrics(shift)) {
+    // Either a manager's benchmark, or the one fixed standard on the screen -
+    // utilisation against the twelve hours of the shift, which names itself.
+    const compared = m.parameter != null || m.warnLabel != null;
+    assert.ok(compared, `${m.card} · ${m.label} is on the screen with nothing to judge it by`);
+  }
 });
 
 test('a reason keeps the two numbers it was written about', async () => {

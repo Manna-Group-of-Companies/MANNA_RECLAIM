@@ -1,6 +1,7 @@
 import { createSlice, nanoid, type PayloadAction } from '@reduxjs/toolkit';
 import { storageKeys } from '@/config/env';
 import { SUPERVISORS } from '@/config/constants';
+import type { Shift } from '@/types/models';
 import { storage } from '@/utils/storage';
 
 export type ToastKind = 'ok' | 'err' | 'warn';
@@ -62,6 +63,13 @@ interface UiState {
    * hooks/useSupervisor.
    */
   signers: string[];
+  /**
+   * The day and shift every back-office tab reads, rather than one copy per
+   * tab. Blank day means nothing has been picked yet, and the first tab that
+   * knows which days exist fills it in.
+   */
+  backOfficeDay: string;
+  backOfficeShift: Shift;
 }
 
 const initialState: UiState = {
@@ -73,6 +81,8 @@ const initialState: UiState = {
   supervisor: storage.get<string | null>(storageKeys.supervisor, null),
   supervisorFor: storage.get<string | null>(storageKeys.supervisorFor, null),
   signers: storage.get<string[]>(storageKeys.signers, SUPERVISORS),
+  backOfficeDay: storage.get<string>(storageKeys.backOfficeDay, ''),
+  backOfficeShift: storage.get<Shift>(storageKeys.backOfficeShift, 'Day'),
 };
 
 const uiSlice = createSlice({
@@ -134,6 +144,22 @@ const uiSlice = createSlice({
       state.signers = names;
       storage.set(storageKeys.signers, names);
     },
+    /**
+     * Fix the day the back office is reading, for every tab at once.
+     *
+     * Held here rather than in each page because it is one question - "how did
+     * this shift go" - asked three ways, and a copy per tab meant that moving
+     * from Efficiency to History silently re-asked it about a different day.
+     */
+    setBackOfficeDay: (state, action: PayloadAction<string>) => {
+      state.backOfficeDay = action.payload;
+      if (action.payload) storage.set(storageKeys.backOfficeDay, action.payload);
+      else storage.remove(storageKeys.backOfficeDay);
+    },
+    setBackOfficeShift: (state, action: PayloadAction<Shift>) => {
+      state.backOfficeShift = action.payload;
+      storage.set(storageKeys.backOfficeShift, action.payload);
+    },
     unlockCosting: (state) => {
       state.costingUnlocked = true;
     },
@@ -152,6 +178,8 @@ export const {
   requestRefresh,
   setSupervisor,
   setSigners,
+  setBackOfficeDay,
+  setBackOfficeShift,
   unlockCosting,
   lockCosting,
 } = uiSlice.actions;

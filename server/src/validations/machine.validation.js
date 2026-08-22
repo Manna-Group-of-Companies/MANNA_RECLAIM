@@ -30,6 +30,14 @@ export const createMachineSchema = z.object({
   weigh: flag,
   tyre: flag,
   def_tyre: text(40),
+  /**
+   * Whether this machine has meters on it. Nullable on purpose - see
+   * migrations/0015. Null is not "no": it means nobody has answered the
+   * question for this machine, and its kind keeps answering until somebody does.
+   */
+  meters: flag,
+  /** Whether it is on the greasing schedule. Nullable for the same reason. */
+  bearings: flag,
   enabled: z.boolean().optional(),
   sort_order: z.coerce.number().int().min(0).optional(),
 

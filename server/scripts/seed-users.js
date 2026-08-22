@@ -27,12 +27,19 @@ const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const RESET_PIN = args.includes('--reset-pin');
 
+// Mirrors SEED_PINS in src/config/devSeed.js - see the note there on why Admin
+// is its own account rather than something Manager was widened to do.
 const SEED_USERS = [
   { name: 'Mathai', role: ROLES.SUPERVISOR, pin: '1111' },
   { name: 'Rahul', role: ROLES.SUPERVISOR, pin: '2222' },
   { name: 'Devanand', role: ROLES.SUPERVISOR, pin: '3333' },
   { name: 'Lab', role: ROLES.LAB, pin: '4444' },
   { name: 'Manager', role: ROLES.MANAGER, pin: '2525' },
+  { name: 'Admin', role: ROLES.ADMIN, pin: '9999' },
+  // The managing director: the overview and the shift efficiency, read-only.
+  // Needs migrations/0016 applied first - `users.role` is a checked column and
+  // an insert with 'md' is refused by Postgres until it is.
+  { name: 'MD', role: ROLES.MD, pin: '3567' },
 ];
 
 async function seed({ name, role, pin }) {

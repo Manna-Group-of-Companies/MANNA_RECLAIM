@@ -1,4 +1,4 @@
-import { axiosClient, requestPaged } from '../axiosClient';
+import { axiosClient, drainPaged, requestPaged } from '../axiosClient';
 import { endpoints } from '../endpoints';
 import type { ApiEnvelope, ListQuery } from '@/types/api';
 import type {
@@ -61,6 +61,21 @@ export interface ReportPayload {
 
 export const qualityService = {
   list: (params?: ListQuery) => requestPaged<QualityTest>(endpoints.quality.root, params),
+
+  /**
+   * Every verdict filed on or after `from`, newest first; null is the whole
+   * record.
+   *
+   * The lab record used to ask for `limit: 200` and filter the window out of
+   * whatever came back, which is fine until the plant has filed more than 200
+   * tests - after that the oldest of them silently stop existing, and a batch
+   * tested last spring reads as untested. See drainPaged.
+   */
+  listSince: (from: string | null) =>
+    drainPaged<QualityTest>(endpoints.quality.root, {
+      since: from,
+      dateOf: (t) => t.tested_at ?? t.ts,
+    }),
 
   /** Every test filed against one batch number, oldest first. */
   forBatch: (batchNo: string) =>

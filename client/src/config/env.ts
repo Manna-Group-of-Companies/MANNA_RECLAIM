@@ -36,6 +36,16 @@ export const storageKeys = {
    * names. See hooks/useSupervisor.
    */
   signers: 'manna.signers',
+  /**
+   * The day and shift the back office is looking at.
+   *
+   * Persisted because the point of it is that it does not move. A manager
+   * reading one shift across Efficiency, History and the ideals was having it
+   * reset to the newest day by every tab that owned its own copy, so the
+   * question being asked changed underneath them halfway through asking it.
+   */
+  backOfficeDay: 'manna.backOfficeDay',
+  backOfficeShift: 'manna.backOfficeShift',
 } as const;
 
 export default appEnv;

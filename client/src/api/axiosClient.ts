@@ -191,4 +191,52 @@ export async function requestPaged<T>(
   return { rows: res.data.data ?? [], meta: res.data.meta };
 }
 
+/**
+ * Pages a newest-first list back as far as a cutoff date.
+ *
+ * Every list route caps a page at 200 rows and none of them takes a date
+ * filter, so a screen wanting "everything since March" and asking in one go
+ * gets the newest 200 and nothing to say it is looking at a slice. That is the
+ * failure this exists to prevent: a screen whose whole job is to show what has
+ * been missed must not itself miss things quietly.
+ *
+ * Rows come back newest first, so it stops at the first page that reaches past
+ * the cutoff rather than draining the table - a 30-day window on a plant with
+ * two years of history is one request. `since` of null means the whole record,
+ * bounded by `maxPages`.
+ *
+ * `truncated` is true when that ceiling was reached with rows still to come.
+ * The caller is expected to say so on screen. A silent cap here would put the
+ * screen back exactly where it started.
+ */
+export async function drainPaged<T>(
+  url: string,
+  {
+    dateOf,
+    since,
+    params = {},
+    limit = 200,
+    maxPages = 25,
+  }: {
+    dateOf: (row: T) => string | null | undefined;
+    since: string | null;
+    params?: Record<string, unknown>;
+    limit?: number;
+    maxPages?: number;
+  },
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const rows: T[] = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const { rows: batch } = await requestPaged<T>(url, { ...params, page, limit });
+    rows.push(...batch);
+    // A short page is the end of the table, whatever the cutoff says.
+    if (batch.length < limit) return { rows, truncated: false };
+    // Reached past the window: everything older is somebody else's question.
+    if (since && batch.some((row) => (dateOf(row) ?? '').slice(0, 10) < since)) {
+      return { rows, truncated: false };
+    }
+  }
+  return { rows, truncated: true };
+}
+
 export default axiosClient;
