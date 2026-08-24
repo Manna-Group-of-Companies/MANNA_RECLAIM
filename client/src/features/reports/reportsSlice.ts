@@ -137,6 +137,17 @@ export const fetchVarianceReasons = createAsyncThunk(
   },
 );
 
+export const approveVarianceReason = createAsyncThunk(
+  'reports/approveVarianceReason',
+  async ({ id, managerNote }: { id: string; managerNote?: string | null }, { rejectWithValue }) => {
+    try {
+      return await reportService.approveVarianceReason(id, managerNote);
+    } catch (err) {
+      return rejectWithValue(fail(err));
+    }
+  },
+);
+
 export const updateVarianceReason = createAsyncThunk(
   'reports/updateVarianceReason',
   async (

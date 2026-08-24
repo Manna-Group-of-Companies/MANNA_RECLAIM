@@ -70,6 +70,9 @@ const SUMMARY_READS = [
 const FLOOR_READS = [
   '/reports/shifts',
   `/reports/shift-efficiency?date=${DAY}&shift=Day`,
+  // The shift writes the reason for a miss, so the shift reads back whether
+  // the office accepted it. Writing one is narrower - supervisors only.
+  `/reports/variance-reasons?from=${DAY}&to=${DAY}`,
 ];
 
 /**
@@ -79,10 +82,7 @@ const FLOOR_READS = [
  * value - and the variance reasons are the answers supervisors are asked to
  * give for a miss, which is a record kept about them rather than for them.
  */
-const OFFICE_ONLY_READS = [
-  `/reports/dashboard?from=${DAY}&to=${DAY}`,
-  `/reports/variance-reasons?from=${DAY}&to=${DAY}`,
-];
+const OFFICE_ONLY_READS = [`/reports/dashboard?from=${DAY}&to=${DAY}`];
 
 /**
  * Everything the account is not. Two kinds, and both matter:

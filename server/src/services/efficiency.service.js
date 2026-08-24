@@ -1,4 +1,5 @@
 import { crud } from './base.service.js';
+import { ApiError } from '../utils/ApiError.js';
 import { rateService } from './rate.service.js';
 import {
   TABLES,
@@ -1057,6 +1058,51 @@ export const efficiencyService = {
       reason: payload.reason,
       entered_by: payload.enteredBy ?? null,
     }),
+
+  /**
+   * The office accepting a reason the shift wrote, and adding its own if it has
+   * one.
+   *
+   * The two texts stay in two columns. A manager who edits a supervisor's
+   * sentence leaves a record that reads as the supervisor's words and is not,
+   * and months later - when the incentive is being argued over, which is the
+   * only time anybody reads these back - there is no way to tell what the shift
+   * actually said. `manager_note` is beside `reason`, never over it.
+   *
+   * Approving is not a toggle. There is no un-approve here on purpose: a
+   * sign-off that can be quietly withdrawn is not a sign-off, and an acceptance
+   * given in error is corrected by the note beside it saying so.
+   */
+  async approveVarianceReason(id, payload = {}) {
+    const row = await reasons.update(id, {
+      approved_at: payload.approvedAt ?? new Date().toISOString(),
+      approved_by: payload.approvedBy ?? null,
+      // Only written when there is something to write, so approving without a
+      // note leaves an earlier one where it was rather than clearing it.
+      ...(payload.managerNote == null ? {} : { manager_note: payload.managerNote || null }),
+    });
+    /**
+     * Refuse to report a sign-off that was not stored.
+     *
+     * A write naming a column the project does not have is pruned and goes
+     * through - see pruneBody in config/supabase.js - which is right for a
+     * tablet running ahead of a migration and wrong here. Approving is the one
+     * action on this record that somebody relies on afterwards: a manager who is
+     * told "approved", on a shift whose incentive turns on it, and finds nothing
+     * stored has been lied to by the screen.
+     *
+     * So the answer is read back. If the column is absent the approval did not
+     * happen and this says so, naming the migration rather than failing as a
+     * mystery.
+     */
+    if (!row || row.approved_at == null) {
+      throw ApiError.unavailable(
+        'Approvals need supabase/migrations/0017_variance_reason_approval.sql - '
+        + 'the sign-off columns are not on this project yet, so nothing was saved.',
+      );
+    }
+    return row;
+  },
 
   /**
    * `ideal` and `actual` are stored as the screen had them, not looked up again

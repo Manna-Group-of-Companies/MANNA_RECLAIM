@@ -1215,6 +1215,17 @@ export interface VarianceReason {
   reason: string;
   entered_by?: string | null;
   created_at?: string;
+  /**
+   * The sign-off. A null `approved_at` means nobody has looked yet, which is a
+   * different sentence from rejected - there is no reject and no un-approve.
+   *
+   * `manager_note` sits beside the shift's own words, never over them. These
+   * records are read back when an incentive is being argued over, and a
+   * manager's sentence must not be mistakable for the supervisor's.
+   */
+  approved_at?: string | null;
+  approved_by?: string | null;
+  manager_note?: string | null;
 }
 
 export interface ShiftEfficiency {

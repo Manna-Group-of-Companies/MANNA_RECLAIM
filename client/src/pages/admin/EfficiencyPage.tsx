@@ -3,6 +3,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   addEfficiencyNote,
   addVarianceReason,
+  approveVarianceReason,
   fetchShiftEfficiency,
   fetchShiftOptions,
   fetchVarianceReasons,
@@ -222,6 +223,9 @@ export function EfficiencyPage() {
   /** The machine being reported down from this screen, and what is said about it. */
   const [downFor, setDownFor] = useState<UnloggedMachine | null>(null);
   const [downCause, setDownCause] = useState('');
+  /** The reason being signed off, and whatever the office wants to add to it. */
+  const [approving, setApproving] = useState<VarianceReason | null>(null);
+  const [managerNote, setManagerNote] = useState('');
   const [downAt, setDownAt] = useState('');
 
   const unlogged = useMemo(
@@ -356,6 +360,33 @@ export function EfficiencyPage() {
     }
   };
 
+  /**
+   * Accepting a reason the shift wrote, with the office's own note beside it.
+   *
+   * The note is optional and most sign-offs will not have one - the
+   * supervisor's sentence stands and the manager agrees with it. When there is
+   * one it goes in its own column, never over the supervisor's words.
+   *
+   * There is no un-approve, here or on the server. A sign-off that can be
+   * quietly withdrawn is not a sign-off; one given in error is corrected by
+   * the note beside it saying so.
+   */
+  const approve = async () => {
+    if (!approving) return;
+    setSaving(true);
+    const result = await dispatch(
+      approveVarianceReason({ id: approving.id, managerNote: managerNote.trim() || null }),
+    );
+    setSaving(false);
+    const okay = result.meta.requestStatus === 'fulfilled';
+    notify(okay ? 'Reason approved' : 'Could not approve it', okay ? 'ok' : 'err');
+    if (okay) {
+      setApproving(null);
+      setManagerNote('');
+      if (date) void dispatch(fetchShiftEfficiency({ date, shift }));
+    }
+  };
+
   const saveVarianceReason = async () => {
     if (!varianceFor || !date) return;
     if (!reason.trim()) {
@@ -482,6 +513,37 @@ export function EfficiencyPage() {
                     onClick={() => openEdit(r)}
                   >
                     edit
+                  </button>
+                )}
+                {/*
+                  The office's own words, on their own line and never merged into
+                  the sentence above. A manager who edits a supervisor's reason
+                  leaves a record that reads as the supervisor's and is not, and
+                  these are read back exactly when that matters - months later,
+                  with an incentive being argued over.
+                */}
+                {r.manager_note && (
+                  <div className="mgrnote">
+                    <span className="muted">{r.approved_by || 'office'} added:</span>{' '}
+                    {r.manager_note}
+                  </div>
+                )}
+                {r.approved_at ? (
+                  <span className="okpill">
+                    approved{r.approved_by ? ` · ${r.approved_by}` : ''}
+                  </span>
+                ) : readOnly ? (
+                  <span className="muted ml-1 text-[10px]">not approved yet</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn ghost block mt-1.5"
+                    onClick={() => {
+                      setManagerNote('');
+                      setApproving(r);
+                    }}
+                  >
+                    ✓ Approve this reason
                   </button>
                 )}
               </div>
@@ -769,6 +831,46 @@ export function EfficiencyPage() {
               </div>
             </div>
             {calc.note && <div className="sub mt-3">{calc.note}</div>}
+          </>
+        )}
+      </BoModal>
+
+      {/* the office signing off what the shift said about a miss */}
+      <BoModal
+        open={Boolean(approving)}
+        title="Approve this reason"
+        subtitle={approving?.label ?? ''}
+        onClose={() => setApproving(null)}
+        footer={
+          <button type="button" className="btn" onClick={approve} disabled={saving}>
+            {saving ? 'Saving…' : 'Approve'}
+          </button>
+        }
+      >
+        {approving && (
+          <>
+            <div className="calc">
+              <div>
+                <b>{approving.entered_by || 'The shift'} said:</b> {approving.reason}
+              </div>
+              <div className="muted">
+                ideal {approving.ideal ?? '—'} · actual {approving.actual ?? '—'}
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="mgr-note">Anything to add? (optional)</label>
+              <textarea
+                id="mgr-note"
+                rows={3}
+                value={managerNote}
+                onChange={(e) => setManagerNote(e.target.value)}
+                placeholder="agreed, the feed was short all week…"
+              />
+            </div>
+            <div className="sub">
+              Your note is kept beside the shift’s words, not over them. Approving cannot be
+              undone — if it was given in error, say so in the note.
+            </div>
           </>
         )}
       </BoModal>

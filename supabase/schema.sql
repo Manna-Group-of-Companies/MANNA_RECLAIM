@@ -1203,11 +1203,23 @@ create table if not exists public.variance_reasons (
   actual     numeric,
   reason     text not null,
   entered_by text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Written by the shift, signed off by the office. Null `approved_at` means
+  -- nobody has looked yet, which is not the same as rejected, and `manager_note`
+  -- is kept apart from `reason` so a manager's sentence is never read back as
+  -- the supervisor's. See migrations/0017.
+  approved_at  timestamptz,
+  approved_by  text,
+  manager_note text
 );
 
 create index if not exists variance_reasons_shift_idx
   on public.variance_reasons (shift_date, shift);
+
+-- For projects whose table was created before the sign-off existed.
+alter table if exists public.variance_reasons add column if not exists approved_at timestamptz;
+alter table if exists public.variance_reasons add column if not exists approved_by text;
+alter table if exists public.variance_reasons add column if not exists manager_note text;
 
 alter table public.variance_reasons enable row level security;
 

@@ -1,12 +1,19 @@
 import { Router } from 'express';
 import * as reports from '../controllers/report.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { adminOnly, shiftReview, summaryOnly } from '../middlewares/role.middleware.js';
+import {
+  adminOnly,
+  authorize,
+  shiftReview,
+  summaryOnly,
+} from '../middlewares/role.middleware.js';
+import { SIGNER_ROLES } from '../config/constants.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { dateRange } from '../validations/common.validation.js';
 import {
   efficiencyNoteSchema,
   shiftQuery,
+  varianceApprovalSchema,
   varianceReasonEditSchema,
   varianceReasonSchema,
 } from '../validations/report.validation.js';
@@ -43,29 +50,48 @@ router.post(
   reports.addEfficiencyNote,
 );
 /**
- * Why an actual missed its ideal. A shift's own reasons come back with it on
- * /shift-efficiency; the GET here is the review across a window of days, which
- * is what the record is kept for. Written and corrected by the back office only
- * - the benchmark is the manager's and so is the answer for missing it.
+ * Why an actual missed its ideal - written by the shift, signed off by the
+ * office.
+ *
+ * The POST moved to the supervisor, which is where it should have been: the
+ * person who can say why a belt was slipping is the person who was standing
+ * next to it, and a manager writing that sentence two days later is writing
+ * down what somebody told them on the phone. Workers are not on this list -
+ * a shift is answered for by whoever signed it.
+ *
+ * The approval is the other half and is the office's alone. The plant pays an
+ * incentive on these figures, so a reason is not merely an explanation - it is
+ * a request to discount a miss, and a request that grants itself is not a
+ * control. There is no un-approve: a sign-off that can be quietly withdrawn is
+ * not a sign-off, and one given in error is corrected by the note beside it.
+ *
+ * The GET is wider than either, because the supervisor has to be able to read
+ * back what they wrote and whether it was accepted.
  *
  * The PATCH takes the wording and nothing else. What a reason is *about* - the
  * day, the shift, the parameter, the two figures - is the record itself.
  */
 router.get(
   '/variance-reasons',
-  summaryOnly,
+  shiftReview,
   validate({ query: dateRange }),
   reports.varianceReasons,
 );
 router.post(
   '/variance-reasons',
-  adminOnly,
+  authorize(...SIGNER_ROLES),
   validate({ body: varianceReasonSchema }),
   reports.addVarianceReason,
 );
+router.post(
+  '/variance-reasons/:id/approve',
+  adminOnly,
+  validate({ body: varianceApprovalSchema }),
+  reports.approveVarianceReason,
+);
 router.patch(
   '/variance-reasons/:id',
-  adminOnly,
+  authorize(...SIGNER_ROLES),
   validate({ body: varianceReasonEditSchema }),
   reports.updateVarianceReason,
 );

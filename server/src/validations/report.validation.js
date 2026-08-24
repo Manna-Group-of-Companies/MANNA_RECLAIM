@@ -76,6 +76,17 @@ export const varianceReasonEditSchema = z.object({
 });
 
 /**
+ * The office signing off a reason the shift wrote.
+ *
+ * The note is optional because most sign-offs have nothing to add - the
+ * supervisor's sentence stands and the manager agrees with it. It is its own
+ * field rather than an edit to `reason` so the two people's words stay apart.
+ */
+export const varianceApprovalSchema = z.object({
+  managerNote: z.string().max(1000).optional().nullable(),
+});
+
+/**
  * A labour rate coming into force on a date.
  *
  * Either half prices it: rupees an hour outright, or the day wage over the

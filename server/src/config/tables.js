@@ -119,6 +119,9 @@ export const registry = {
   [TABLES.varianceReasons]: table('id', [
     'id', 'shift_date', 'shift', 'parameter', 'label', 'ideal', 'actual',
     'reason', 'entered_by', 'created_at',
+    // Written by the shift, signed off by the office - see migrations/0017.
+    // A null approved_at is 'nobody has looked yet', not 'rejected'.
+    'approved_at', 'approved_by', 'manager_note',
   ]),
 
   // ---- quality ----

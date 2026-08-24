@@ -113,6 +113,18 @@ export const reportService = {
   varianceReasons: (range?: DateRange) =>
     get<VarianceReason[]>(endpoints.reports.varianceReasons, range),
 
+  /**
+   * The office accepting a reason the shift wrote, with its own note if it has
+   * one. Who approved it is taken from the session on the server, not sent.
+   */
+  async approveVarianceReason(id: string, managerNote?: string | null): Promise<VarianceReason> {
+    const res = await axiosClient.post<ApiEnvelope<VarianceReason>>(
+      endpoints.reports.approveVarianceReason(id),
+      { managerNote: managerNote ?? null },
+    );
+    return res.data.data;
+  },
+
   /** Corrects the wording. What the reason is about is not editable. */
   async updateVarianceReason(
     id: string,

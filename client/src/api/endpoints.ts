@@ -144,6 +144,7 @@ export const endpoints = {
      */
     varianceReasons: '/reports/variance-reasons',
     varianceReasonById: (id: string) => `/reports/variance-reasons/${id}`,
+    approveVarianceReason: (id: string) => `/reports/variance-reasons/${id}/approve`,
     /**
      * The machine log as a spreadsheet - every logged run, one column set for
      * the whole plant. The only route that answers with a file rather than the

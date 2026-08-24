@@ -2402,6 +2402,35 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  /* A reason the shift wrote, under the figure it is about. */
+  .effreason {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-left: 2px solid var(--line);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  /* The office's own words, visibly not the shift's. */
+  .effreason .effmgr {
+    margin-top: 4px;
+    padding-left: 8px;
+    border-left: 2px solid var(--accent);
+  }
+  .effwhy {
+    margin-top: 7px;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--t-err-line);
+    background: var(--t-err-bg);
+    color: var(--err);
+    font-size: 12.5px;
+    text-align: left;
+  }
+  .back-office .mgrnote {
+    margin-top: 3px;
+    padding-left: 8px;
+    border-left: 2px solid var(--accent);
+  }
   .effhit,
   .effmiss,
   .effnote {

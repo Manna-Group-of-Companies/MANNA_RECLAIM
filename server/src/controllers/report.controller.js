@@ -102,6 +102,22 @@ export const updateVarianceReason = asyncHandler(async (req, res) =>
   ),
 );
 
+/**
+ * The office accepting a reason, with its own note beside it if it has one.
+ * The approver is the signed-in account and is not taken from the body: a
+ * sign-off names whoever actually gave it.
+ */
+export const approveVarianceReason = asyncHandler(async (req, res) =>
+  ok(
+    res,
+    await efficiencyService.approveVarianceReason(req.params.id, {
+      managerNote: req.body?.managerNote,
+      approvedBy: req.user?.name ?? null,
+    }),
+    'Reason approved',
+  ),
+);
+
 export const addVarianceReason = asyncHandler(async (req, res) =>
   created(
     res,

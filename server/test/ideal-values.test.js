@@ -691,15 +691,31 @@ test('the benchmarks are the back office’s, to read and to move', async () => 
     });
     assert.equal(write.status, 403, `${role} may not move the targets`);
 
+    // Answering for a miss is the shift's now - the person who can say why a
+    // belt was slipping was standing next to it. A worker is still out: a
+    // shift is answered for by whoever signed it. So is the lab, which is not
+    // on the floor.
     const reason = await api.call('/reports/variance-reasons', {
       role,
       method: 'POST',
       body: { date: DAY, parameter: 'prod.GRD_K', reason: 'anything' },
     });
-    assert.equal(reason.status, 403, `${role} may not answer for them`);
+    const mayAnswer = role === 'supervisor';
+    assert.equal(
+      reason.status === 403,
+      !mayAnswer,
+      `${role} answering for a target came back ${reason.status}`,
+    );
 
+    // And reading them back is wider still, because a supervisor has to see
+    // whether what they wrote was accepted. The lab reads nothing here.
     const review = await api.call('/reports/variance-reasons', { role });
-    assert.equal(review.status, 403, `${role} may not read the answers back`);
+    const mayRead = role === 'supervisor' || role === 'worker';
+    assert.equal(
+      review.status === 403,
+      !mayRead,
+      `${role} reading the answers came back ${review.status}`,
+    );
   }
 
   assert.equal(api.tables.ideal_values[0].data['prod.GRD_K'], 1200, 'nothing moved');
