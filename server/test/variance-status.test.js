@@ -44,11 +44,13 @@ const grinderRun = (over = {}) => ({
 });
 
 /** 1000 kg against a 1200 target, so `prod.GRD_K` is a miss and the rest are not. */
-const seed = (reasons = []) => ({
+const seed = (reasons = [], roster = []) => ({
   runs: [grinderRun()],
   ideal_values: [{ id: 'current', data: { 'prod.GRD_K': 1200 } }],
   efficiency_notes: [],
   variance_reasons: reasons,
+  operators: [{ id: 'op-1', name: 'Suresh', active: true }],
+  shift_operators: roster,
 });
 
 const reason = (over = {}) => ({
@@ -152,4 +154,51 @@ test('the three who need to see it can, and the MD cannot sign', async (t) => {
     body: {},
   });
   assert.equal(signed.status, 403, 'observing is not approving');
+});
+
+test('a miss names whoever was on that line', async (t) => {
+  const api = await startApi({
+    tables: seed(
+      [],
+      [
+        {
+          id: 'slot-1',
+          shift_date: DAY,
+          shift: 'Day',
+          station: 'GRD_K',
+          operator_id: 'op-1',
+          operator: 'Suresh',
+        },
+        // The same line, the other shift. Matched on the station alone it would
+        // have named this one too.
+        {
+          id: 'slot-2',
+          shift_date: DAY,
+          shift: 'Night',
+          station: 'GRD_K',
+          operator_id: 'op-1',
+          operator: 'Ramesh',
+        },
+      ],
+    ),
+  });
+  t.after(() => api.stop());
+
+  const s = await statusOf(api);
+  assert.equal(s.items[0].operator, 'Suresh');
+});
+
+test('a line with nobody on it says so rather than staying quiet', async (t) => {
+  const api = await startApi({ tables: seed() });
+  t.after(() => api.stop());
+
+  const s = await statusOf(api);
+  const miss = s.items.find((i) => i.parameter === 'prod.GRD_K');
+  /*
+   * Null, and present. It is a line nobody is on, which is a gap somebody
+   * should go and fill - as against a figure that is not a line's at all, where
+   * the key is absent and the screen shows nothing rather than inventing a gap.
+   */
+  assert.ok(Object.hasOwn(miss, 'operator'));
+  assert.equal(miss.operator, null);
 });

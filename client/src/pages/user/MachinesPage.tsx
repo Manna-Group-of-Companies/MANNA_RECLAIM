@@ -21,6 +21,7 @@ import {
 import { createBatch, fetchOpenBatches } from '@/features/batches/batchesSlice';
 import { fetchProducts } from '@/features/products/productsSlice';
 import { MachineCard } from '@/features/machines/MachineCard';
+import { ShiftRoster } from '@/features/operators/ShiftRoster';
 import {
   BottomSheet,
   Button,
@@ -1381,6 +1382,13 @@ export function MachinesPage() {
   return (
     <>
       <ViewHead title="Machines" />
+
+      {/*
+        Who is on each line, above the machines rather than below them, because
+        it is the first thing a shift settles and the last thing anybody
+        remembers. It folds itself away once every line has a name.
+      */}
+      <ShiftRoster />
 
       {Object.entries(groups).map(([group, machines]) => {
         const runningHere = machines.filter((m) => runByMachine.has(m.id)).length;

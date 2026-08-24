@@ -82,6 +82,18 @@ export const DELETE_ROLES: Role[] = ['admin'];
 export const DISPATCH_ROLES: Role[] = ['supervisor', 'manager', 'admin'];
 
 /**
+ * Who may put a name against a shift - the roster on the Machines tab.
+ *
+ * The supervisor running the shift, and the back office. It is a fact about
+ * the shift they are standing in the middle of, and they are the one there
+ * when somebody swaps at 2am; a worker reads the roster and does not set it.
+ *
+ * Mirrors SIGNER_ROLES on the server, which is where it is actually enforced.
+ * This one only keeps a screen from offering a tap that comes back 403.
+ */
+export const SIGNER_ROLES: Role[] = ['supervisor', 'manager', 'admin'];
+
+/**
  * Who gets which half of the shop-floor app.
  *
  * Quality is the bench's page: the lab tests what the plant made and signs the

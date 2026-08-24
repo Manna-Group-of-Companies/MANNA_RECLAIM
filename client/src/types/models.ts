@@ -1191,6 +1191,12 @@ export interface VarianceStatusItem {
   approvedAt?: string | null;
   approvedBy?: string | null;
   managerNote?: string | null;
+  /**
+   * Who was on that line for that shift. Absent - not null - where the figure
+   * is not a line's: a batch yield belongs to a batch, and a figure counted
+   * over a whole day was worked by two crews and cannot name one.
+   */
+  operator?: string | null;
   state: 'unexplained' | 'waiting' | 'approved';
 }
 

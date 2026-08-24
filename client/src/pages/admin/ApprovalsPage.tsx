@@ -3,6 +3,7 @@ import { useAppSelector } from '@/app/hooks';
 import { reportService } from '@/api/services/report.service';
 import { toRequestError } from '@/api/axiosClient';
 import { BoModal } from '@/components/ui';
+import { OperatorChip } from '@/features/operators/OperatorChip';
 import { isReadOnly } from '@/config/constants';
 import { useToast } from '@/hooks/useToast';
 import { dayLong, lastNDays } from '@/utils/date';
@@ -175,6 +176,10 @@ export function ApprovalsPage() {
                   <div className="row">
                     <div>
                       <b>{item.label}</b>
+                      {/* Whose line it was, because a figure the plant pays on
+                          is somebody’s - see OperatorChip for the cards that
+                          are nobody’s. */}
+                      <OperatorChip operator={item.operator} />
                       <div className="muted text-[11px]">
                         {dayLong(item.date)}
                         {item.shift ? ` · ${item.shift} shift` : ' · whole day'}

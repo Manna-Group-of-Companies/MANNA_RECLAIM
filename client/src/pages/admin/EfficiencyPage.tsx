@@ -12,6 +12,7 @@ import {
 import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
+import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
 import { cn } from '@/utils/cn';
@@ -480,7 +481,16 @@ export function EfficiencyPage() {
     return (
       <div key={card.key} className={cn('effcard', flagged && 'flag')}>
         <div className="row">
-          <div>{title}</div>
+          {/*
+            The name beside the title, because this screen is where a miss is
+            argued about and the argument is with somebody. A card that is not a
+            line - a batch yield - carries no name and is given none, see
+            OperatorChip.
+          */}
+          <div>
+            {title}
+            <OperatorChip operator={card.operator} />
+          </div>
           {aside && <div className="muted text-[11px]">{aside}</div>}
         </div>
 

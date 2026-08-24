@@ -13,7 +13,7 @@ import {
   SelectField,
   ViewHead,
 } from '@/components/ui';
-import { operatorService } from '@/api/services/operator.service';
+import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { dayLong } from '@/utils/date';
@@ -21,9 +21,7 @@ import { cn } from '@/utils/cn';
 import type {
   EfficiencyCard,
   EfficiencyMetric,
-  Operator,
   Shift,
-  ShiftRosterSlot,
   VarianceReason,
 } from '@/types/models';
 
@@ -150,43 +148,11 @@ export function UserEfficiencyPage() {
   const [ask, setAsk] = useState<AskTarget>(null);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
-  /**
-   * The plant roll, and who is on each line this shift.
-   *
-   * Fetched here rather than through the store: it is read on one screen and
-   * written from one screen, so a slice would be three files carrying a list
-   * nothing else asks for.
-   */
-  const [people, setPeople] = useState<Operator[]>([]);
-  const [roster, setRoster] = useState<ShiftRosterSlot[]>([]);
-  const [rostering, setRostering] = useState(false);
 
   useEffect(() => {
     void dispatch(fetchShiftOptions());
   }, [dispatch, refreshTick]);
 
-  useEffect(() => {
-    let live = true;
-    operatorService
-      .list()
-      .then((rows) => live && setPeople(rows))
-      .catch(() => live && setPeople([]));
-    return () => {
-      live = false;
-    };
-  }, [refreshTick]);
-
-  useEffect(() => {
-    if (!date) return undefined;
-    let live = true;
-    operatorService
-      .roster(date, shift)
-      .then((rows) => live && setRoster(rows))
-      .catch(() => live && setRoster([]));
-    return () => {
-      live = false;
-    };
-  }, [date, shift, refreshTick]);
 
   // Open on the newest shift on record if nothing has been picked anywhere yet.
   useEffect(() => {
@@ -206,26 +172,6 @@ export function UserEfficiencyPage() {
   const reasonsFor = (parameter?: string | null) =>
     (shiftEfficiency?.varianceReasons ?? []).filter((r) => parameter && r.parameter === parameter);
 
-  /**
-   * Put somebody on a line, or take them off it.
-   *
-   * The shift is re-read afterwards because the cards carry the operator with
-   * the figures - so a name assigned here has to come back down with them
-   * rather than being stitched together on the screen.
-   */
-  const assign = async (station: string, operatorId: string) => {
-    if (!date) return;
-    setRostering(true);
-    try {
-      await operatorService.assign({ date, shift, station, operatorId: operatorId || null });
-      setRoster(await operatorService.roster(date, shift));
-      void dispatch(fetchShiftEfficiency({ date, shift }));
-    } catch {
-      notify('Could not save that assignment', 'err');
-    } finally {
-      setRostering(false);
-    }
-  };
 
   const save = async () => {
     if (!ask || !date) return;
@@ -297,17 +243,9 @@ export function UserEfficiencyPage() {
         <div className="effhead">
           <b>
             {title}
-            {/*
-              Whose shift this was. The plant pays on these figures, so a card
-              that reports one and cannot say whose it is cannot be paid on -
-              and an unassigned line says so rather than leaving a blank, since
-              that is a thing to fix and not a thing to skip past.
-            */}
-            {card.operator ? (
-              <span className="effop">{card.operator}</span>
-            ) : (
-              <span className="effop none">no operator set</span>
-            )}
+            {/* Named on the Machines tab, which the chip says: a reader who
+                does not know where to go treats it as a blank after all. */}
+            <OperatorChip operator={card.operator} where="Machines" />
           </b>
           {off > 0 ? (
             <span className="effmiss">{off} off target</span>
@@ -375,44 +313,6 @@ export function UserEfficiencyPage() {
           </SelectField>
         </FieldRow>
       </div>
-
-      {/*
-        Who is on what, at the top, because it is filled in when the shift
-        starts and read every time somebody looks at the figures underneath.
-      */}
-      {roster.length > 0 && (
-        <>
-          <div className="msec">
-            <b>Operators this shift</b>
-            <div className="ln" />
-          </div>
-          <div className="panel">
-            {roster.map((slot) => (
-              <SelectField
-                key={slot.station}
-                label={slot.label}
-                value={slot.operatorId ?? ''}
-                disabled={rostering}
-                onChange={(e) => void assign(slot.station, e.target.value)}
-                note={slot.assignedBy ? `— set by ${slot.assignedBy}` : undefined}
-              >
-                <option value="">— nobody set —</option>
-                {people.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </SelectField>
-            ))}
-            {!people.length && (
-              <div className="sub">
-                Nobody is on the operator list yet — the back office adds them on the Users
-                tab.
-              </div>
-            )}
-          </div>
-        </>
-      )}
 
       {error && <div className="errbox">Couldn’t load the shift: {error}</div>}
       {loading && <PageLoader label="Working out the shift" />}

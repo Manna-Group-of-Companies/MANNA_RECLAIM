@@ -432,12 +432,25 @@ export const efficiencyService = {
    * one question.
    */
   async varianceStatus({ from, to } = {}) {
-    const [all, idealSheet, reasonRows] = await Promise.all([
+    const [all, idealSheet, reasonRows, rosterRows] = await Promise.all([
       runs.all({}, { sort: 'shift_date' }),
       rateService.idealValues(),
       reasons.all({}, { sort: 'created_at' }).catch(() => []),
+      operatorService.shiftsFor({ from, to }).catch(() => []),
     ]);
     const ideals = idealSheet?.data ?? {};
+
+    /*
+     * Who was on each line, read once for the whole window rather than per
+     * shift. forShift would have been the obvious call and would have queried
+     * once for each of a month's sixty shifts.
+     */
+    const operatorAt = new Map(
+      rosterRows.map((r) => [
+        `${String(r.shift_date ?? '').slice(0, 10)}|${r.shift ?? ''}|${r.station}`,
+        r.operator ?? null,
+      ]),
+    );
 
     const inWindow = (day) => {
       if (!day) return false;
@@ -446,7 +459,14 @@ export const efficiencyService = {
 
     /** A benchmarked figure that came in on the wrong side of its target. */
     const misses = [];
-    const consider = (day, shift, key, value, label) => {
+    /*
+     * `station` is passed in rather than worked back out of the parameter key,
+     * because the loop below already knows it and a key is a string somebody
+     * would eventually have to parse. Null for a figure that is not a line's -
+     * a batch yield belongs to a batch - and a day-scoped figure names nobody
+     * either, because two crews worked it and the record cannot say which.
+     */
+    const consider = (day, shift, key, value, label, station = null) => {
       if (!inWindow(day) || value == null) return;
       const verdict = idealFor(key, value, ideals);
       if (!verdict.offTarget) return;
@@ -457,29 +477,35 @@ export const efficiencyService = {
         label,
         ideal: verdict.ideal,
         actual: verdict.variance == null ? value : round(value, 3),
+        operator:
+          station && shift ? (operatorAt.get(`${day}|${shift}|${station}`) ?? null) : undefined,
       });
     };
 
     for (const u of refinerUnits(all)) {
       consider(u.day, u.shift, idealKey.specialPerManHour(u.quality), u.pmh,
-        `Special line ${u.quality} · production per man-hour`);
+        `Special line ${u.quality} · production per man-hour`, SPECIAL_LINE_KEY);
       consider(u.day, u.shift, idealKey.specialKwhPerKg(u.quality), u.kwhkg,
-        `Special line ${u.quality} · electricity`);
+        `Special line ${u.quality} · electricity`, SPECIAL_LINE_KEY);
     }
 
     for (const u of grinderUnits(all)) {
       const name = u.machine ?? u.machineId;
-      consider(u.day, u.shift, idealKey.production(u.machineId), u.out, `${name} · output`);
+      const at = STATION_OF_MACHINE[u.machineId] ?? null;
+      consider(u.day, u.shift, idealKey.production(u.machineId), u.out, `${name} · output`, at);
       consider(u.day, u.shift, idealKey.perManHour(u.machineId), u.pmh,
-        `${name} · production per man-hour`);
-      consider(u.day, u.shift, idealKey.kwhPerKg(u.machineId), u.kwhkg, `${name} · electricity`);
+        `${name} · production per man-hour`, at);
+      consider(u.day, u.shift, idealKey.kwhPerKg(u.machineId), u.kwhkg,
+        `${name} · electricity`, at);
     }
 
     for (const u of coarseUnits(all)) {
-      consider(u.day, u.shift, idealKey.production('COARSE'), u.out, 'Coarse line · output');
+      consider(u.day, u.shift, idealKey.production('COARSE'), u.out, 'Coarse line · output',
+        'COARSE');
       consider(u.day, u.shift, idealKey.perManHour('COARSE'), u.pmh,
-        'Coarse line · production per man-hour');
-      consider(u.day, u.shift, idealKey.kwhPerKg('COARSE'), u.kwhkg, 'Coarse line · electricity');
+        'Coarse line · production per man-hour', 'COARSE');
+      consider(u.day, u.shift, idealKey.kwhPerKg('COARSE'), u.kwhkg, 'Coarse line · electricity',
+        'COARSE');
     }
 
     /*

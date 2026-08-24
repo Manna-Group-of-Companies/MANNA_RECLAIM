@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppSelector } from '@/app/hooks';
 import { userService } from '@/api/services/user.service';
+import { OperatorRoll } from '@/features/operators/OperatorRoll';
 import { toRequestError } from '@/api/axiosClient';
 import { BoModal } from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
@@ -202,9 +203,9 @@ export function UsersPage() {
       <div className="mx-0.5 mt-3">
         <h1 className="text-lg">Users</h1>
         <div className="sub">
-          Which supervisor is on the app and when, and underneath, everyone who can sign in and
-          what they reach. Manager and admin also get this back office; a lab account gets the
-          Quality tab and nothing else.
+          Which supervisor is on the app and when, then everyone who can sign in and what they
+          reach, then the operators who run the lines. The difference between the last two is a
+          login: an operator does not sign into anything, so the roll is names and nothing else.
         </div>
       </div>
 
@@ -281,6 +282,8 @@ export function UsersPage() {
       <button type="button" className="btn block mt-2.5" onClick={() => setDraft(newDraft())}>
         + Add user
       </button>
+
+      <OperatorRoll />
 
       <BoModal
         open={Boolean(draft)}
