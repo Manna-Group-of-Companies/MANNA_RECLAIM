@@ -70,7 +70,7 @@ export interface StopRunPayload {
    */
   pressureAt?: string;
   doorOpenAt?: string;
-  doorCloseAt?: string;
+
   /** What came off a press: the pieces moulded, and the flash trimmed away. */
   pieces?: number | null;
   flashKg?: number | null;

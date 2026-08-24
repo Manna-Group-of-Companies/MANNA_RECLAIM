@@ -248,7 +248,7 @@ alter table public.runs add column if not exists paused_ms   bigint default 0;
 -- is shut and hot, and a figure the plant has never had. See migrations/0018.
 alter table public.runs add column if not exists pressure_at   timestamptz;
 alter table public.runs add column if not exists door_open_at  timestamptz;
-alter table public.runs add column if not exists door_close_at timestamptz;
+
 
 -- The special line's rare non-production pass: metered like any other run, but
 -- it yields nothing to weigh, so it never reaches the Weigh or Packing tabs.

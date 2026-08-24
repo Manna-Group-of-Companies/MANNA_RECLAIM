@@ -254,7 +254,7 @@ export interface Batch {
    */
   pressure_at?: string | null;
   door_open_at?: string | null;
-  door_close_at?: string | null;
+
   unloaded_at?: string | null;
   /** The grade x stage grid, one row per quality the plant makes. */
   grades?: BatchGrade[];

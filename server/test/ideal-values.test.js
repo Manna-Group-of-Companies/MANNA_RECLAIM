@@ -244,22 +244,19 @@ test('production is compared per shift, which is how it is set', async () => {
   // rather than to a card on a screen that may be laid out differently later.
   assert.equal(out.parameter, 'prod.GRD_K');
 
-  // The two day-level benchmarks sit on this same card, and are compared - the
-  // figure they carry is the day's, not this shift's. One card per machine, with
-  // its ideal on it; there is no second card down the page for the same thing.
+  // Energy and labour sit on this same card and are compared on the same span
+  // as the output: this shift. One card per machine, every row about the shift
+  // in front of you.
   const pmh = metric(shift.grinders, 'grind|GRD_K', 'pmh');
   assert.equal(pmh.parameter, 'pmh.GRD_K', 'labour productivity is answered for here');
-  // Asserted on the field rather than on the label, because the label is copy
-  // and this is the contract: a card mixes day figures with shift figures and
-  // every row has to say which it is.
-  assert.equal(pmh.span, 'day', 'and says the figure is the day’s, not the shift’s');
+  assert.equal(pmh.span, 'shift');
   assert.equal(metric(shift.grinders, 'grind|GRD_K', 'out').span, 'shift');
 });
 
-test('energy and labour productivity are compared over the whole day', async () => {
-  // Two shifts on the one grinder: 1000 kg on 20 labour-hours at 500 kWh, then
-  // 500 kg on 20 at 700 kWh. The day is 1500 kg, 40 labour-hours, 1200 kWh -
-  // 0.8 kWh/kg and 37.5 kg/man-hour, neither of which is either shift's figure.
+test("energy and labour are the picked shift's own, not the day's", async () => {
+  // Two shifts on the one grinder. The day shift made 1000 kg on 20
+  // labour-hours at 500 kWh; the night made 500 kg on 20 at 700. The day view
+  // must read the day shift and nothing else.
   const api = await startApi({
     tables: {
       ...seed({ 'kwhkg.GRD_K': 0.6, 'pmh.GRD_K': 40 }),
@@ -270,17 +267,56 @@ test('energy and labour productivity are compared over the whole day', async () 
     },
   });
 
-  const day = (await shiftOf(api)).grinders;
-  const kwh = metric(day, 'grind|GRD_K', 'kwhkg');
-  const pmh = metric(day, 'grind|GRD_K', 'pmh');
+  const cards = (await shiftOf(api)).grinders;
+  const kwh = metric(cards, 'grind|GRD_K', 'kwhkg');
+  const pmh = metric(cards, 'grind|GRD_K', 'pmh');
 
-  assert.equal(kwh.value, 0.8, '1200 kWh over 1500 kg, both shifts');
+  assert.equal(kwh.value, 0.5, '500 kWh over 1000 kg - the day shift alone');
   assert.equal(kwh.ideal, 0.6);
-  assert.equal(kwh.offTarget, true, 'over the energy target is a miss, not a win');
+  assert.equal(kwh.offTarget, false, 'under the energy target is a win');
 
-  assert.equal(pmh.value, 37.5, '1500 kg over 40 labour-hours');
-  assert.equal(pmh.offTarget, true);
+  assert.equal(pmh.value, 50, '1000 kg over 20 labour-hours');
   assert.equal(pmh.parameter, 'pmh.GRD_K');
+  // The day fold would have said 37.5 and 0.8 here, which is neither shift.
+});
+
+test('a shift that logged the weight but not the work reads high, on that shift', async () => {
+  /*
+   * 22 August 2026 is what this is written from. Fine weighed 810 kg off R4 on
+   * the day shift with an R3 pass behind it, and 737 kg on the night with no R3
+   * pass logged at all - so the night showed 737 kg against 6.9 labour-hours,
+   * which is 107 kg per man-hour and cannot be true.
+   *
+   * Folded into a day figure that read 45.6 against a target of 21.7 and looked
+   * like a triumph. The arithmetic was right and the input was not, and the
+   * fold hid which shift the hole was on.
+   *
+   * Per shift, the impossible number lands on the shift that owns it. That is
+   * not a fix for the missing entry - nothing here can invent it - but it puts
+   * it where somebody will ask about it.
+   */
+  const api = await startApi({
+    tables: {
+      ...seed({ 'pmh.GRD_K': 40 }),
+      runs: [
+        grinderRun(),
+        grinderRun({
+          id: 'run-grd-n',
+          shift: 'Night',
+          weight_kg: 900,
+          workers: 1,
+          hours_run: 1,
+        }),
+      ],
+    },
+  });
+
+  const day = metric((await shiftOf(api)).grinders, 'grind|GRD_K', 'pmh');
+  assert.equal(day.value, 50, 'the day shift reads its own honest figure');
+
+  const res = await api.call(`/reports/shift-efficiency?date=${DAY}&shift=Night`);
+  const night = metric((await res.json()).data.grinders, 'grind|GRD_K', 'pmh');
+  assert.equal(night.value, 900, 'and the night carries its own impossible one, where it can be asked about');
 });
 
 test('a day’s labour-hours are worked out inside each shift, then added', async () => {
@@ -509,10 +545,10 @@ test('energy and labour are compared on the machine’s own card, once', async (
     const m = metric(shift.grinders, 'grind|GRD_K', key);
     assert.ok(m.parameter, `${key} carries the key a reason is filed under`);
     assert.ok(m.ideal != null, `${key} carries the ideal it is judged against`);
-    // The shift's own figure is still on the card, in the line under the value -
-    // a supervisor works a shift, and a card that dropped it would be hiding the
-    // number the conversation is about.
-    assert.match(m.context, /this shift/, `${key} still shows the shift's own figure`);
+    // No sub-line repeating the shift's figure: the shift's figure is the
+    // headline now, so a line under it saying the same number would be the card
+    // telling you twice.
+    assert.equal(m.context ?? null, null, `${key} does not repeat itself`);
   }
 
   // And there is no second card for the same machine anywhere in the response.

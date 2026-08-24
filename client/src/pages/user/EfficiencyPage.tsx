@@ -6,7 +6,13 @@ import {
   fetchShiftOptions,
 } from '@/features/reports/reportsSlice';
 import { setBackOfficeDay, setBackOfficeShift } from '@/features/ui/uiSlice';
-import { BottomSheet, PageLoader, ViewHead } from '@/components/ui';
+import {
+  BottomSheet,
+  FieldRow,
+  PageLoader,
+  SelectField,
+  ViewHead,
+} from '@/components/ui';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { dayLong } from '@/utils/date';
@@ -254,10 +260,15 @@ export function UserEfficiencyPage() {
       <ViewHead title="Efficiency" meta={date ? dayLong(date) : 'no data'} />
 
       <div className="panel">
-        <div className="field">
-          <label htmlFor="ue-day">Shift day</label>
-          <select
-            id="ue-day"
+        {/*
+          Two selects in a row, which is how every other sheet on the floor asks
+          for a day and a shift. It was a pair of `.chip` buttons copied off the
+          back office, and that class is declared under `.back-office` alone - so
+          on the tablet they drew as bare text with nothing between them.
+        */}
+        <FieldRow>
+          <SelectField
+            label="Shift day"
             value={date}
             onChange={(e) => dispatch(setBackOfficeDay(e.target.value))}
           >
@@ -270,24 +281,24 @@ export function UserEfficiencyPage() {
             ) : (
               <option value="">No data</option>
             )}
-          </select>
-        </div>
-
-        <div className="chips">
-          {(['Day', 'Night'] as Shift[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={cn('chip', shift === s && 'on')}
-              onClick={() => dispatch(setBackOfficeShift(s))}
-            >
-              {s} shift
-              {available.length > 0 && !available.includes(s) && (
-                <span className="muted font-normal"> ·no data</span>
-              )}
-            </button>
-          ))}
-        </div>
+          </SelectField>
+          <SelectField
+            label="Shift"
+            value={shift}
+            onChange={(e) => dispatch(setBackOfficeShift(e.target.value as Shift))}
+            note={
+              available.length > 0 && !available.includes(shift)
+                ? '— nothing logged on this shift'
+                : undefined
+            }
+          >
+            {(['Day', 'Night'] as Shift[]).map((s) => (
+              <option key={s} value={s}>
+                {s} shift
+              </option>
+            ))}
+          </SelectField>
+        </FieldRow>
       </div>
 
       {error && <div className="errbox">Couldn’t load the shift: {error}</div>}

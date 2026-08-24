@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { startApi } from './helpers/app.js';
 
 /**
- * The three clock times an autoclave cycle turns on.
+ * The clock times an autoclave cycle turns on.
  *
  * A charge already recorded when it went in and when it came out, which is the
- * whole cook and says nothing about where the time went. These three split it:
- * how long the heat-up took, and how long the vessel stood open being emptied
- * and re-charged - which is dead time on a machine that only earns while it is
- * shut and hot, and a figure the plant has never had.
+ * whole cook and says nothing about where the time went. Two more split it:
+ * when the vessel reached 21 bar, and when the discharge door was opened.
+ *
+ * There is deliberately no third. A cycle runs: door closed on a fresh charge,
+ * heat to 21 bar, cook, door opened to discharge, emptied and re-charged, door
+ * closed again - and that last moment is where the next cycle begins. The plant
+ * already records it as the discharge, so asking for it a second time under
+ * another name would let one charge disagree with itself. Door opened to
+ * discharge is the vessel standing open being emptied and re-charged, which is
+ * dead time on a machine that only earns while it is shut and hot.
  *
  * Three ways to get it wrong:
  *
@@ -46,16 +52,15 @@ const seed = (over = {}) => ({ runs: [charge(over)], batches: [], stock_groups: 
 
 const stop = (api, body) => api.call('/runs/run-ac/stop', { role: 'supervisor', method: 'POST', body });
 
-test('a discharge records the three cycle times', async (t) => {
+test('a discharge records the cycle times', async (t) => {
   const api = await startApi({ tables: seed() });
   t.after(() => api.stop());
 
   const res = await stop(api, {
-    stoppedAt: '2026-08-20T11:00:00.000Z',
+    stoppedAt: '2026-08-20T11:40:00.000Z',
     firewoodKg: 400,
     pressureAt: '2026-08-20T04:30:00.000Z',
     doorOpenAt: '2026-08-20T11:00:00.000Z',
-    doorCloseAt: '2026-08-20T11:40:00.000Z',
   });
   assert.equal(res.status, 200);
 
@@ -64,7 +69,10 @@ test('a discharge records the three cycle times', async (t) => {
   // are one subtraction away and these can be read back against the shift.
   assert.equal(new Date(row.pressure_at).toISOString(), '2026-08-20T04:30:00.000Z');
   assert.equal(new Date(row.door_open_at).toISOString(), '2026-08-20T11:00:00.000Z');
-  assert.equal(new Date(row.door_close_at).toISOString(), '2026-08-20T11:40:00.000Z');
+  // And the door closing is the discharge, recorded once - not a fourth field
+  // holding the same instant under another name.
+  assert.equal(new Date(row.ended_at).toISOString(), '2026-08-20T11:40:00.000Z');
+  assert.equal('door_close_at' in row, false, 'there is no separate column for it');
 });
 
 test('and a charge can still be closed without them', async (t) => {

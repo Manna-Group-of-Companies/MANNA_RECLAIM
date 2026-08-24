@@ -80,7 +80,7 @@ export const registry = {
     'conv_out_kg', 'conv_in_kg', 'leftout_in', 'leftout_out', 'packed_sacks',
     'loaded_at', 'unloaded_at', 'pickcut_workers', 'pickcut_hours',
     // An autoclave cycle, in three clock times - see migrations/0018.
-    'pressure_at', 'door_open_at', 'door_close_at',
+    'pressure_at', 'door_open_at',
     // Why the picking gang was the size it was - see migrations/0004.
     'pickcut_remarks',
     // Added by supabase/schema.sql - the tablets never had these.

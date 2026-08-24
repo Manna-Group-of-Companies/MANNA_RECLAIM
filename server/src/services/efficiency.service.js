@@ -459,9 +459,12 @@ export const efficiencyService = {
     const dayNote = (day) =>
       `${day.shifts} shift${day.shifts === 1 ? '' : 's'} · ${round(day.out, 0)} kg`;
 
-    /** The shift's own figure, for the line under a day comparison. Nothing else. */
-    const mine = (shiftValue, digits) =>
-      shiftValue == null ? null : `this shift ${round(shiftValue, digits)}`;
+    /*
+     * There was a `mine()` helper here, for the sub-line that carried the
+     * shift's own figure under a day comparison. Energy and labour are judged on
+     * the shift itself now, so the shift's figure is the headline and a sub-line
+     * repeating it would be the card saying the same number twice.
+     */
 
     /**
      * A card for each grade or machine worked in the PICKED SHIFT, carrying the
@@ -524,47 +527,42 @@ export const efficiencyService = {
             // The shift's own is on the line underneath - a supervisor works a
             // shift, not a day, and a card that dropped it would be hiding the
             // number the conversation is actually about.
-            value: round(day.pmh, 1),
+            value: round(u.pmh, 1),
             warn: false,
-            ...idealFor(idealKey.specialPerManHour(day.key), day.pmh, ideals, 1),
-            span: 'day',
-            context: mine(u.pmh, 1),
-            calc: day.pmh == null ? null : {
-              title: 'Production / man-hour · whole day',
-              formula: "the day's output ÷ the day's labour-hours",
+            ...idealFor(idealKey.specialPerManHour(day.key), u.pmh, ideals, 1),
+            span: 'shift',
+            calc: u.pmh == null ? null : {
+              title: 'Production / man-hour · this shift',
+              formula: "this shift's output ÷ this shift's labour-hours",
               lines: [
-                `output = ${round(day.out, 0)} kg (R4 weighed, ${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
-                // Crew × hours is worked out inside each shift and then added:
-                // summing crew across the day and multiplying would price 2 hands
-                // over 12 h and 3 over 4 h as eighty labour-hours, not thirty-six.
-                `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
-                `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
-                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
+                `output = ${round(u.out, 0)} kg (R4 weighed)`,
+                `labour = ${u.workers} crew × ${round(u.hours, 1)} h = ${round(u.workers * u.hours, 1)} labour-hours`,
+                `= ${round(u.out, 0)} ÷ ${round(u.workers * u.hours, 1)}`,
+                `the whole day made ${round(day.out, 0)} kg over ${day.shifts} shift${day.shifts === 1 ? '' : 's'}`,
               ],
-              result: `${round(day.pmh, 1)} kg/man-hour`,
-              note: `Measured over the whole day, which is how the ideal for ${day.key} is set - a shift that ran on a line the other shift had already warmed up is not a worse crew.`,
+              result: `${round(u.pmh, 1)} kg/man-hour`,
+              note: 'Measured over this shift alone. A shift that weighs out material it did not log the passes for will read impossibly high here - which is the point: the gap shows on the shift that owns it rather than being averaged away.',
             },
           },
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
-            value: round(day.kwhkg, 3),
+            value: round(u.kwhkg, 3),
             warn: false,
-            ...idealFor(idealKey.specialKwhPerKg(day.key), day.kwhkg, ideals, 3),
-            span: 'day',
-            context: mine(u.kwhkg, 3),
-            calc: day.kwhkg == null ? null : {
-              title: 'Electricity (kWh / kg) · whole day',
-              formula: "the day's energy ÷ the day's output",
+            ...idealFor(idealKey.specialKwhPerKg(day.key), u.kwhkg, ideals, 3),
+            span: 'shift',
+            calc: u.kwhkg == null ? null : {
+              title: 'Electricity (kWh / kg) · this shift',
+              formula: "this shift's energy ÷ this shift's output",
               lines: [
-                `energy = ${round(day.kwh, 1)} kWh (all refiner passes, ${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
-                `output = ${round(day.out, 0)} kg`,
-                `= ${round(day.kwh, 1)} ÷ ${round(day.out, 0)}`,
-                `this ${shift || 'shift'} on its own = ${round(u.kwh, 1)} ÷ ${round(u.out, 0)} = ${round(u.kwhkg, 3)}`,
+                `energy = ${round(u.kwh, 1)} kWh (all refiner passes)`,
+                `output = ${round(u.out, 0)} kg`,
+                `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
+                `the whole day used ${round(day.kwh, 1)} kWh over ${round(day.out, 0)} kg`,
               ],
-              result: `${round(day.kwhkg, 3)} kWh/kg`,
-              note: `Measured over the whole day, which is how the ideal for ${day.key} is set.`,
+              result: `${round(u.kwhkg, 3)} kWh/kg`,
+              note: 'Measured over this shift alone. A shift that weighs out material it did not log the passes for will read impossibly high here - which is the point: the gap shows on the shift that owns it rather than being averaged away.',
             },
           },
         ],
@@ -591,11 +589,10 @@ export const efficiencyService = {
             key: 'pmh',
             label: 'Production / man-hour',
             unit: 'kg/man-hour',
-            value: round(day.pmh, 1),
+            value: round(u.pmh, 1),
             warn: false,
-            ...idealFor(idealKey.perManHour(day.key), day.pmh, ideals, 1),
-            span: 'day',
-            context: mine(u.pmh, 1),
+            ...idealFor(idealKey.perManHour(day.key), u.pmh, ideals, 1),
+            span: 'shift',
             calc: day.pmh == null ? null : {
               title: 'Production / man-hour · whole day',
               formula: "the day's output ÷ the day's labour-hours",
@@ -613,11 +610,10 @@ export const efficiencyService = {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
             unit: 'kWh/kg',
-            value: round(day.kwhkg, 3),
+            value: round(u.kwhkg, 3),
             warn: false,
-            ...idealFor(idealKey.kwhPerKg(day.key), day.kwhkg, ideals, 3),
-            span: 'day',
-            context: mine(u.kwhkg, 3),
+            ...idealFor(idealKey.kwhPerKg(day.key), u.kwhkg, ideals, 3),
+            span: 'shift',
             calc: day.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg) · whole day',
               formula: "the day's energy ÷ the day's output",
@@ -788,12 +784,11 @@ export const efficiencyService = {
           {
             key: 'pmh',
             label: 'Production / man-hour',
-            span: 'day',
+            span: 'shift',
             unit: 'kg/man-hour',
-            value: round(day.pmh, 1),
+            value: round(u.pmh, 1),
             warn: false,
-            ...idealFor(idealKey.perManHour('COARSE'), day.pmh, ideals, 1),
-            context: mine(u.pmh, 1),
+            ...idealFor(idealKey.perManHour('COARSE'), u.pmh, ideals, 1),
             calc: day.pmh == null ? null : {
               title: 'Production / man-hour · whole day',
               formula: "the day's output ÷ the day's labour-hours",
@@ -810,12 +805,11 @@ export const efficiencyService = {
           {
             key: 'kwhkg',
             label: 'Electricity (kWh/kg)',
-            span: 'day',
+            span: 'shift',
             unit: 'kWh/kg',
-            value: round(day.kwhkg, 3),
+            value: round(u.kwhkg, 3),
             warn: false,
-            ...idealFor(idealKey.kwhPerKg('COARSE'), day.kwhkg, ideals, 3),
-            context: mine(u.kwhkg, 3),
+            ...idealFor(idealKey.kwhPerKg('COARSE'), u.kwhkg, ideals, 3),
             calc: day.kwhkg == null ? null : {
               title: 'Electricity (kWh / kg) · whole day',
               formula: "the day's energy ÷ the day's output",

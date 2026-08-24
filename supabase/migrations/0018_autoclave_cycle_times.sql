@@ -29,7 +29,7 @@
 
 alter table public.runs add column if not exists pressure_at timestamptz;
 alter table public.runs add column if not exists door_open_at timestamptz;
-alter table public.runs add column if not exists door_close_at timestamptz;
+
 
 comment on column public.runs.pressure_at is
   'When the vessel reached working pressure (21 bar). started_at to here is the '
@@ -38,7 +38,4 @@ comment on column public.runs.pressure_at is
 comment on column public.runs.door_open_at is
   'When the discharge door was opened. See 0018_autoclave_cycle_times.sql.';
 
-comment on column public.runs.door_close_at is
-  'When the discharge door was closed again. door_open_at to here is the vessel '
-  'standing open being emptied and re-charged - the plant''s loading time. '
-  'See 0018_autoclave_cycle_times.sql.';
+

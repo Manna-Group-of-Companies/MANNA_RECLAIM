@@ -83,7 +83,7 @@ export const stopRunSchema = z.object({
    */
   pressureAt: z.string().datetime().optional().nullable(),
   doorOpenAt: z.string().datetime().optional().nullable(),
-  doorCloseAt: z.string().datetime().optional().nullable(),
+
   /**
    * What came out of a press: the pieces moulded, and the flash trimmed off
    * them. Neither may be negative, and a press that made no pieces at all made

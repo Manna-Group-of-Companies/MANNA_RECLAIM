@@ -212,7 +212,6 @@ const blankUnload = {
   unloadTime: '',
   pressureTime: '',
   doorOpenTime: '',
-  doorCloseTime: '',
 };
 
 /**
@@ -1164,9 +1163,7 @@ export function MachinesPage() {
           doorOpenAt: stopIsAutoclave
             ? atLocal(unload.dischargeDate, unload.doorOpenTime) ?? undefined
             : undefined,
-          doorCloseAt: stopIsAutoclave
-            ? atLocal(unload.dischargeDate, unload.doorCloseTime) ?? undefined
-            : undefined,
+
           // The reading itself when there is one; the difference is what the
           // crew falls back to when only the units used are known.
           elecEnd: stopsWithMeters ? elecEndValue : null,
@@ -2257,42 +2254,46 @@ export function MachinesPage() {
                   value={unload.dischargeDate}
                   onChange={(e) => setUnload({ ...unload, dischargeDate: e.target.value })}
                 />
+                {/*
+                  This is the door closing time, and it is called that.
+
+                  A cycle runs: door closed on a fresh charge, heat to 21 bar,
+                  cook, door opened to discharge, emptied and re-charged, door
+                  closed again - and that last moment is where the next cycle
+                  begins. So the end of this charge and the start of the next
+                  are one instant, already recorded here. Asking for it twice
+                  would let one charge disagree with itself.
+                */}
                 <TextField
-                  label="Unloading time"
+                  label="Door closing time"
                   note={`— loaded ${clock24(stopping.started_at)}; blank = now`}
                   type="time"
                   value={unload.unloadTime}
                   onChange={(e) => setUnload({ ...unload, unloadTime: e.target.value })}
                 />
                 {/*
-                  The cycle. Read against the discharge date above, so a night
-                  charge that crosses midnight keeps the day it was emptied on.
+                  The rest of the cycle. Read against the discharge date above, so
+                  a night charge that crosses midnight keeps the day it was
+                  emptied on.
                 */}
-                <TextField
-                  label="Reached 21 bar at"
-                  note="— how long the heat-up took, against the loading time"
-                  type="time"
-                  value={unload.pressureTime}
-                  onChange={(e) => setUnload({ ...unload, pressureTime: e.target.value })}
-                />
                 <FieldRow>
+                  <TextField
+                    label="Reached 21 bar at"
+                    type="time"
+                    value={unload.pressureTime}
+                    onChange={(e) => setUnload({ ...unload, pressureTime: e.target.value })}
+                  />
                   <TextField
                     label="Door opened at"
                     type="time"
                     value={unload.doorOpenTime}
                     onChange={(e) => setUnload({ ...unload, doorOpenTime: e.target.value })}
                   />
-                  <TextField
-                    label="Door closed at"
-                    type="time"
-                    value={unload.doorCloseTime}
-                    onChange={(e) => setUnload({ ...unload, doorCloseTime: e.target.value })}
-                  />
                 </FieldRow>
                 <div className="sub">
-                  Door open to door closed is the vessel standing open being emptied and
-                  re-charged — the loading time. Leave any of the three blank if it was not
-                  noted.
+                  Loading to 21 bar is the heat-up; door opened to door closed above is the
+                  vessel standing open being emptied and re-charged. Leave either blank if it
+                  was not noted.
                 </div>
               </>
             )}

@@ -1200,7 +1200,7 @@ export const runService = {
        */
       pressure_at: payload.pressureAt ?? run.pressure_at,
       door_open_at: payload.doorOpenAt ?? run.door_open_at,
-      door_close_at: payload.doorCloseAt ?? run.door_close_at,
+
       weight_kg: payload.outWeight ?? run.weight_kg,
       workers: payload.workers ?? run.workers,
       remarks: payload.remarks ?? run.remarks,
