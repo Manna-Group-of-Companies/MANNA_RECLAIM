@@ -1,7 +1,7 @@
 import { Navigate, type RouteObject } from 'react-router-dom';
 import { MdLayout } from '@/components/layout';
 import { ProtectedRoute } from './ProtectedRoute';
-import { AdminHistoryPage, EfficiencyPage } from '@/pages/admin';
+import { AdminHistoryPage, ApprovalsPage, EfficiencyPage } from '@/pages/admin';
 import { MdOverviewPage } from '@/pages/md';
 import { mdPaths } from '@/config/paths';
 import { SUMMARY_ROLES } from '@/config/constants';
@@ -30,6 +30,9 @@ export const mdRoutes: RouteObject[] = [
           { index: true, element: <Navigate to={mdPaths.overview} replace /> },
           { path: 'overview', element: <MdOverviewPage /> },
           { path: 'efficiency', element: <EfficiencyPage /> },
+          // The approvals board, read-only. The managing director watches the
+          // process run without being able to sign anything off.
+          { path: 'approvals', element: <ApprovalsPage /> },
           // The back office's own History, read-only for this account - see the
           // note in HistoryPage on what comes off it and what still guards it.
           { path: 'history', element: <AdminHistoryPage /> },

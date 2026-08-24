@@ -10,6 +10,7 @@ import {
   CustomerDetailPage,
   CustomersPage,
   DashboardPage,
+  ApprovalsPage,
   EfficiencyPage,
   IdealValuesPage,
   MaintenancePage,
@@ -35,6 +36,7 @@ export const adminRoutes: RouteObject[] = [
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'history', element: <AdminHistoryPage /> },
           { path: 'efficiency', element: <EfficiencyPage /> },
+          { path: 'approvals', element: <ApprovalsPage /> },
           { path: 'rates', element: <RatesPage /> },
           { path: 'ideals', element: <IdealValuesPage /> },
           // The accounts, back with the manager: adding the supervisor who

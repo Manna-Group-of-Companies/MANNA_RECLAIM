@@ -143,6 +143,8 @@ export const endpoints = {
      * the record is kept for. The PATCH corrects the wording only.
      */
     varianceReasons: '/reports/variance-reasons',
+    /** Every miss over a window, and how far along its explanation is. */
+    varianceStatus: '/reports/variance-status',
     varianceReasonById: (id: string) => `/reports/variance-reasons/${id}`,
     approveVarianceReason: (id: string) => `/reports/variance-reasons/${id}/approve`,
     /**

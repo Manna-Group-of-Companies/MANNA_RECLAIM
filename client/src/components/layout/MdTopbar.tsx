@@ -10,6 +10,7 @@ import { BackOfficeDay } from './BackOfficeDay';
 const tabs = [
   { to: mdPaths.overview, label: 'Overview' },
   { to: mdPaths.efficiency, label: 'Efficiency' },
+  { to: mdPaths.approvals, label: 'Approvals' },
   { to: mdPaths.history, label: 'History' },
 ];
 

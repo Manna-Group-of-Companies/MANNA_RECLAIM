@@ -71,6 +71,17 @@ router.post(
  * The PATCH takes the wording and nothing else. What a reason is *about* - the
  * day, the shift, the parameter, the two figures - is the record itself.
  */
+/**
+ * The state of the rule, for the three people it is a rule for: the shift sees
+ * what it still owes, the office sees what is waiting on it, and the managing
+ * director sees whether the process is running at all.
+ */
+router.get(
+  '/variance-status',
+  shiftReview,
+  validate({ query: dateRange }),
+  reports.varianceStatus,
+);
 router.get(
   '/variance-reasons',
   shiftReview,

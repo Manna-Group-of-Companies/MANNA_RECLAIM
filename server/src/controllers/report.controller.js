@@ -118,6 +118,15 @@ export const approveVarianceReason = asyncHandler(async (req, res) =>
   ),
 );
 
+/**
+ * Every miss over a window and how far along its explanation is - unexplained,
+ * waiting on the office, or approved. What makes the rule visible to the three
+ * people it is a rule for.
+ */
+export const varianceStatus = asyncHandler(async (req, res) =>
+  ok(res, await efficiencyService.varianceStatus(req.query)),
+);
+
 export const addVarianceReason = asyncHandler(async (req, res) =>
   created(
     res,

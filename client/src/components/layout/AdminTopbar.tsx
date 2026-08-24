@@ -18,6 +18,7 @@ const MANAGER_TABS = [
   { to: adminPaths.dashboard, label: 'Overview' },
   { to: adminPaths.history, label: 'History' },
   { to: adminPaths.efficiency, label: 'Efficiency' },
+  { to: adminPaths.approvals, label: 'Approvals' },
   { to: adminPaths.rates, label: 'Rates' },
   { to: adminPaths.ideals, label: 'Ideal values' },
   // Who is on the plant, and the PINs they sign with. A manager runs the

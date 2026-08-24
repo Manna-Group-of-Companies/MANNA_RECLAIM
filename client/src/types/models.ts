@@ -1171,6 +1171,35 @@ export interface UnloggedMachine {
   needsAnswer: boolean;
 }
 
+/**
+ * A benchmarked figure that missed, and how far along its explanation is.
+ *
+ * Three states and no fourth: the shift has not said why yet, it has and the
+ * office has not signed it off, or it is done. There is no rejected - see the
+ * note on approving in the API.
+ */
+export interface VarianceStatusItem {
+  date: string;
+  shift?: string | null;
+  parameter: string;
+  label: string;
+  ideal?: number | null;
+  actual?: number | null;
+  reason?: string | null;
+  enteredBy?: string | null;
+  reasonId?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  managerNote?: string | null;
+  state: 'unexplained' | 'waiting' | 'approved';
+}
+
+export interface VarianceStatus {
+  window: { from: string | null; to: string | null };
+  totals: { misses: number; unexplained: number; waiting: number; approved: number };
+  items: VarianceStatusItem[];
+}
+
 /** One of the seven lines an operator is put on. */
 export interface OperatorStation {
   key: string;

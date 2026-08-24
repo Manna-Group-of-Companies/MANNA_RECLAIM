@@ -12,6 +12,7 @@ import type {
   ShiftEfficiency,
   ShiftOption,
   VarianceReason,
+  VarianceStatus,
 } from '@/types/models';
 
 export interface DateRange {
@@ -110,6 +111,13 @@ export const reportService = {
    * miss"; this answers "what has been going wrong", which is the question worth
    * asking at a month's end.
    */
+  /**
+   * The state of the rule: every miss over a window, each unexplained, waiting
+   * on the office, or approved.
+   */
+  varianceStatus: (range?: DateRange) =>
+    get<VarianceStatus>(endpoints.reports.varianceStatus, range),
+
   varianceReasons: (range?: DateRange) =>
     get<VarianceReason[]>(endpoints.reports.varianceReasons, range),
 

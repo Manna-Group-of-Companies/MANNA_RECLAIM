@@ -3,6 +3,7 @@ export { DashboardPage } from './DashboardPage';
 export { AdminHistoryPage } from './HistoryPage';
 export { AdminQualityPage } from './QualityPage';
 export { EfficiencyPage } from './EfficiencyPage';
+export { ApprovalsPage } from './ApprovalsPage';
 export { RatesPage } from './RatesPage';
 export { IdealValuesPage } from './IdealValuesPage';
 export { CostingPage } from './CostingPage';

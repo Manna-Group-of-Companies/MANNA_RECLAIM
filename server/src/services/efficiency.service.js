@@ -410,6 +410,142 @@ export const efficiencyService = {
    * whether the shift came in short. `calc` spells out the arithmetic so the
    * screen can show its working rather than asking anyone to trust a number.
    */
+  /**
+   * Every figure that missed its benchmark over a window, and how far along its
+   * explanation is.
+   *
+   * The plant pays an incentive on these figures, and the rule the plant set is
+   * that a miss is explained by the shift that worked it and signed off by the
+   * office. A rule nobody can see the state of is a wish: a supervisor does not
+   * know what they still owe, a manager does not know what is waiting, and the
+   * managing director cannot tell whether the process is running at all.
+   *
+   * So a miss is in exactly one of three states, and this counts them:
+   *
+   *   unexplained  the shift has not said why yet
+   *   waiting      explained, and the office has not signed it off
+   *   approved     done
+   *
+   * Computed off one read of the runs rather than by asking forShift once per
+   * shift. A month is around sixty shifts and forShift reads the whole run
+   * history each time, so the obvious loop would read it sixty times to answer
+   * one question.
+   */
+  async varianceStatus({ from, to } = {}) {
+    const [all, idealSheet, reasonRows] = await Promise.all([
+      runs.all({}, { sort: 'shift_date' }),
+      rateService.idealValues(),
+      reasons.all({}, { sort: 'created_at' }).catch(() => []),
+    ]);
+    const ideals = idealSheet?.data ?? {};
+
+    const inWindow = (day) => {
+      if (!day) return false;
+      return (!from || day >= from) && (!to || day <= to);
+    };
+
+    /** A benchmarked figure that came in on the wrong side of its target. */
+    const misses = [];
+    const consider = (day, shift, key, value, label) => {
+      if (!inWindow(day) || value == null) return;
+      const verdict = idealFor(key, value, ideals);
+      if (!verdict.offTarget) return;
+      misses.push({
+        date: day,
+        shift: shift || null,
+        parameter: key,
+        label,
+        ideal: verdict.ideal,
+        actual: verdict.variance == null ? value : round(value, 3),
+      });
+    };
+
+    for (const u of refinerUnits(all)) {
+      consider(u.day, u.shift, idealKey.specialPerManHour(u.quality), u.pmh,
+        `Special line ${u.quality} · production per man-hour`);
+      consider(u.day, u.shift, idealKey.specialKwhPerKg(u.quality), u.kwhkg,
+        `Special line ${u.quality} · electricity`);
+    }
+
+    for (const u of grinderUnits(all)) {
+      const name = u.machine ?? u.machineId;
+      consider(u.day, u.shift, idealKey.production(u.machineId), u.out, `${name} · output`);
+      consider(u.day, u.shift, idealKey.perManHour(u.machineId), u.pmh,
+        `${name} · production per man-hour`);
+      consider(u.day, u.shift, idealKey.kwhPerKg(u.machineId), u.kwhkg, `${name} · electricity`);
+    }
+
+    for (const u of coarseUnits(all)) {
+      consider(u.day, u.shift, idealKey.production('COARSE'), u.out, 'Coarse line · output');
+      consider(u.day, u.shift, idealKey.perManHour('COARSE'), u.pmh,
+        'Coarse line · production per man-hour');
+      consider(u.day, u.shift, idealKey.kwhPerKg('COARSE'), u.kwhkg, 'Coarse line · electricity');
+    }
+
+    /*
+     * Charges are counted per day and a batch yield belongs to the shift its
+     * output was weighed in - so each is attributed the way its own card is,
+     * rather than being forced onto a shift to make this loop tidier.
+     */
+    for (const u of autoclaveRunsByDay(all)) {
+      const vessel = IDEAL_AUTOCLAVES.find((v) => v.key === u.machineId);
+      if (!vessel) continue;
+      consider(u.day, null, idealKey.autoclaveRuns(vessel.key), u.runs,
+        `${vessel.label} · charges a day`);
+    }
+
+    for (const y of batchYields(all)) {
+      consider(y.outDay, y.outShift, idealKey.batchYield(), y.pct, `Batch ${y.batch} · yield`);
+    }
+
+    /*
+     * A reason is matched to a miss on the day, the shift and the parameter -
+     * the three things that say which figure it is about. Not on the label,
+     * which is wording and may be reworded.
+     */
+    const slot = (m) => `${m.date}|${m.shift ?? ''}|${m.parameter}`;
+    const bySlot = new Map();
+    for (const r of reasonRows) {
+      const key = `${String(r.shift_date ?? '').slice(0, 10)}|${r.shift ?? ''}|${r.parameter}`;
+      // The newest wins if a shift wrote twice about the same figure.
+      const held = bySlot.get(key);
+      if (!held || String(r.created_at ?? '') > String(held.created_at ?? '')) bySlot.set(key, r);
+    }
+
+    const items = misses
+      .map((m) => {
+        const reason = bySlot.get(slot(m)) ?? null;
+        return {
+          ...m,
+          reason: reason?.reason ?? null,
+          enteredBy: reason?.entered_by ?? null,
+          reasonId: reason?.id ?? null,
+          approvedAt: reason?.approved_at ?? null,
+          approvedBy: reason?.approved_by ?? null,
+          managerNote: reason?.manager_note ?? null,
+          state: !reason ? 'unexplained' : reason.approved_at ? 'approved' : 'waiting',
+        };
+      })
+      .sort(
+        (a, b) =>
+          String(b.date).localeCompare(String(a.date))
+          || String(a.shift ?? '').localeCompare(String(b.shift ?? ''))
+          || String(a.label).localeCompare(String(b.label)),
+      );
+
+    const count = (state) => items.filter((i) => i.state === state).length;
+    return {
+      window: { from: from ?? null, to: to ?? null },
+      totals: {
+        misses: items.length,
+        unexplained: count('unexplained'),
+        waiting: count('waiting'),
+        approved: count('approved'),
+      },
+      items,
+    };
+  },
+
   async forShift({ date, shift } = {}) {
     // The benchmarks are one small row and the runs are the whole history, so
     // they are fetched together rather than one after the other.

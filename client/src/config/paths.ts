@@ -47,6 +47,11 @@ export const adminPaths = {
    */
   quality: '/admin/quality',
   efficiency: '/admin/efficiency',
+  /**
+   * Whether the rule is running: every figure that missed its benchmark, and
+   * whether the shift has explained it and the office signed it off.
+   */
+  approvals: '/admin/approvals',
   rates: '/admin/rates',
   /**
    * What a shift should make, as the manager sets it - the benchmarks the
@@ -81,6 +86,8 @@ export const mdPaths = {
   login: '/md/login',
   overview: '/md/overview',
   efficiency: '/md/efficiency',
+  /** The same approvals board, read-only - the process, observed. */
+  approvals: '/md/approvals',
   /** The run record, read-only: no correction sheet and no costed export. */
   history: '/md/history',
 } as const;
