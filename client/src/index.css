@@ -2632,15 +2632,24 @@
     border-radius: 20px 20px 0 0;
     box-shadow: var(--shadow-sheet);
     padding: 8px 18px calc(20px + var(--safe-b));
-    max-height: 88vh;
+    /*
+     * 88% of what is visible, not of the screen. `vh` does not shrink when a
+     * tablet keyboard opens, so a sheet capped in `vh` kept its full height and
+     * put the field being typed into behind the keyboard. `--vv` is the visual
+     * viewport, measured by BottomSheet; the `vh` is the fallback for browsers
+     * that cannot tell us and for desktops, where there is no keyboard to dodge.
+     */
+    max-height: min(88vh, calc(var(--vv, 100vh) * 0.88));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .app-sheet {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 0;
+    /* Sits on top of the keyboard rather than behind it - see BottomSheet. */
+    bottom: var(--kb, 0px);
     z-index: 51;
     max-width: var(--content-max);
     margin: 0 auto;

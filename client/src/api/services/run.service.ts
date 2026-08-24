@@ -60,6 +60,17 @@ export interface StopRunPayload {
   kwh?: number | null;
   hoursRun?: number | null;
   firewoodKg?: number | null;
+  /**
+   * The three moments inside an autoclave cycle, taken at the discharge.
+   *
+   * `pressureAt` splits the heat-up off the cook; the two door times are a pair
+   * and the gap between them is the vessel standing open being emptied and
+   * re-charged, which is what the plant calls its loading time. Only the
+   * autoclave sheet sends them.
+   */
+  pressureAt?: string;
+  doorOpenAt?: string;
+  doorCloseAt?: string;
   /** What came off a press: the pieces moulded, and the flash trimmed away. */
   pieces?: number | null;
   flashKg?: number | null;

@@ -67,6 +67,24 @@ export const stopRunSchema = z.object({
   hoursRun: z.coerce.number().min(0).optional().nullable(),
   firewoodKg: z.coerce.number().min(0).optional().nullable(),
   /**
+   * The three moments inside an autoclave cycle, filled in as it is discharged
+   * because that is when somebody is standing at the vessel with the tablet.
+   *
+   * `pressureAt` splits the heat-up off the cook - without it a long cook and a
+   * slow start are the same number. The two door times are a pair, and the gap
+   * between them is the point: the vessel standing open while it is emptied and
+   * the next charge is put in, which is dead time on a machine that only earns
+   * while it is shut and hot, and a figure the plant has never had.
+   *
+   * Clock times rather than durations. A duration is one subtraction away and
+   * cannot be checked afterwards; these are figures the plant will be measured
+   * on, so they have to be something somebody can point at on a shift. All
+   * optional - a charge from before anybody was recording them has no answer.
+   */
+  pressureAt: z.string().datetime().optional().nullable(),
+  doorOpenAt: z.string().datetime().optional().nullable(),
+  doorCloseAt: z.string().datetime().optional().nullable(),
+  /**
    * What came out of a press: the pieces moulded, and the flash trimmed off
    * them. Neither may be negative, and a press that made no pieces at all made
    * nothing to cost - so the count has to be a real one.

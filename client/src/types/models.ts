@@ -244,6 +244,17 @@ export interface Batch {
   closed_by?: string | null;
   remarks?: string | null;
   loaded_at?: string | null;
+  /**
+   * The three moments inside an autoclave cycle - see migrations/0018.
+   *
+   * started_at to pressure_at is the heat-up; door_open_at to door_close_at is
+   * the vessel standing open being emptied and re-charged, which is what the
+   * plant calls its loading time. Null on every charge logged before the crew
+   * was asked for them.
+   */
+  pressure_at?: string | null;
+  door_open_at?: string | null;
+  door_close_at?: string | null;
   unloaded_at?: string | null;
   /** The grade x stage grid, one row per quality the plant makes. */
   grades?: BatchGrade[];

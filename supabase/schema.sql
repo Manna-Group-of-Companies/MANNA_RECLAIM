@@ -240,6 +240,16 @@ alter table public.runs add column if not exists paused_at   timestamptz;
 -- clock between start and stop less this.
 alter table public.runs add column if not exists paused_ms   bigint default 0;
 
+-- The three moments inside an autoclave cycle. A charge already records when it
+-- went in and when it was discharged, which is the whole cook and says nothing
+-- about where the time went: `pressure_at` splits the heat-up off the cook, and
+-- the gap between the door opening and closing again is the vessel standing open
+-- being emptied and re-charged - dead time on a machine that only earns while it
+-- is shut and hot, and a figure the plant has never had. See migrations/0018.
+alter table public.runs add column if not exists pressure_at   timestamptz;
+alter table public.runs add column if not exists door_open_at  timestamptz;
+alter table public.runs add column if not exists door_close_at timestamptz;
+
 -- The special line's rare non-production pass: metered like any other run, but
 -- it yields nothing to weigh, so it never reaches the Weigh or Packing tabs.
 -- Rows recorded before this column existed read null, and all of those were

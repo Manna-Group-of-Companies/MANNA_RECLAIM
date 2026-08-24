@@ -191,8 +191,29 @@ const blankStop = { workers: '', elecEnd: '', elecDiff: '', hourEnd: '', hourDif
  */
 const blankLoad = { paired: true, shiftDate: '', loadDate: '', loadTime: '' };
 
-/** The autoclave unload sheet - firewood burned, and when it was discharged. */
-const blankUnload = { firewood: '', dischargeDate: '', unloadTime: '' };
+/**
+ * The autoclave unload sheet - firewood burned, when it was discharged, and
+ * the three clock times the cycle turns on.
+ *
+ * `pressureTime` splits the heat-up off the cook: without it a long cook and a
+ * slow start are the same number. The two door times are a pair, and the gap
+ * between them is what the plant calls its loading time - the vessel standing
+ * open while it is emptied and the next charge is put in, which is dead time on
+ * a machine that only earns while it is shut and hot.
+ *
+ * All three are asked for here rather than at the load, because this is the
+ * moment somebody is actually standing at the vessel with the tablet. All three
+ * are optional - a shift that did not note one down should not be stopped from
+ * closing the charge over it.
+ */
+const blankUnload = {
+  firewood: '',
+  dischargeDate: '',
+  unloadTime: '',
+  pressureTime: '',
+  doorOpenTime: '',
+  doorCloseTime: '',
+};
 
 /**
  * The press start sheet. The product decides the cure and the mould, so both are
@@ -1127,6 +1148,25 @@ export function MachinesPage() {
           outWeight: stopIsAutoclave ? null : weightValue,
           workers: asNumber(stop.workers),
           firewoodKg: stopIsAutoclave ? asNumber(unload.firewood) : null,
+          /*
+           * The cycle's three clock times, all read against the discharge date -
+           * so a night charge that crosses midnight keeps the day it was emptied
+           * on, exactly as the unloading time above does.
+           *
+           * Undefined rather than null on a blank: null would clear a time
+           * already recorded against the run, and "the crew did not note it
+           * down" is not "it did not happen". Only sent from the autoclave
+           * sheet; the server ignores them from anywhere else.
+           */
+          pressureAt: stopIsAutoclave
+            ? atLocal(unload.dischargeDate, unload.pressureTime) ?? undefined
+            : undefined,
+          doorOpenAt: stopIsAutoclave
+            ? atLocal(unload.dischargeDate, unload.doorOpenTime) ?? undefined
+            : undefined,
+          doorCloseAt: stopIsAutoclave
+            ? atLocal(unload.dischargeDate, unload.doorCloseTime) ?? undefined
+            : undefined,
           // The reading itself when there is one; the difference is what the
           // crew falls back to when only the units used are known.
           elecEnd: stopsWithMeters ? elecEndValue : null,
@@ -2224,6 +2264,36 @@ export function MachinesPage() {
                   value={unload.unloadTime}
                   onChange={(e) => setUnload({ ...unload, unloadTime: e.target.value })}
                 />
+                {/*
+                  The cycle. Read against the discharge date above, so a night
+                  charge that crosses midnight keeps the day it was emptied on.
+                */}
+                <TextField
+                  label="Reached 21 bar at"
+                  note="— how long the heat-up took, against the loading time"
+                  type="time"
+                  value={unload.pressureTime}
+                  onChange={(e) => setUnload({ ...unload, pressureTime: e.target.value })}
+                />
+                <FieldRow>
+                  <TextField
+                    label="Door opened at"
+                    type="time"
+                    value={unload.doorOpenTime}
+                    onChange={(e) => setUnload({ ...unload, doorOpenTime: e.target.value })}
+                  />
+                  <TextField
+                    label="Door closed at"
+                    type="time"
+                    value={unload.doorCloseTime}
+                    onChange={(e) => setUnload({ ...unload, doorCloseTime: e.target.value })}
+                  />
+                </FieldRow>
+                <div className="sub">
+                  Door open to door closed is the vessel standing open being emptied and
+                  re-charged — the loading time. Leave any of the three blank if it was not
+                  noted.
+                </div>
               </>
             )}
 

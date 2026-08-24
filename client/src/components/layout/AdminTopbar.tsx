@@ -20,6 +20,11 @@ const MANAGER_TABS = [
   { to: adminPaths.efficiency, label: 'Efficiency' },
   { to: adminPaths.rates, label: 'Rates' },
   { to: adminPaths.ideals, label: 'Ideal values' },
+  // Who is on the plant, and the PINs they sign with. A manager runs the
+  // shifts, so a manager adds the supervisor who joined on Monday and
+  // deactivates the one who left - waiting on the admin account to do it is
+  // waiting to be able to log a shift at all.
+  { to: adminPaths.users, label: 'Users' },
 ];
 
 /**
@@ -39,7 +44,6 @@ const ADMIN_TABS = [
   { to: adminPaths.products, label: 'Products' },
   { to: adminPaths.machines, label: 'Machines' },
   { to: adminPaths.customers, label: 'Customers' },
-  { to: adminPaths.users, label: 'Users' },
 ];
 
 /**

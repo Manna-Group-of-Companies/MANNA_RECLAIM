@@ -1192,6 +1192,15 @@ export const runService = {
       hour_end: payload.hourEnd ?? run.hour_end,
       kwh: kwhOf(run, payload) ?? run.kwh,
       firewood_kg: payload.firewoodKg ?? run.firewood_kg,
+      /*
+       * The autoclave cycle's three clock times, taken at the discharge because
+       * that is when somebody is standing at the vessel. `??` rather than a
+       * plain assignment so a discharge that leaves one blank keeps whatever was
+       * recorded earlier instead of wiping it. See migrations/0018.
+       */
+      pressure_at: payload.pressureAt ?? run.pressure_at,
+      door_open_at: payload.doorOpenAt ?? run.door_open_at,
+      door_close_at: payload.doorCloseAt ?? run.door_close_at,
       weight_kg: payload.outWeight ?? run.weight_kg,
       workers: payload.workers ?? run.workers,
       remarks: payload.remarks ?? run.remarks,

@@ -69,6 +69,73 @@ export function BottomSheet({
     return () => opener.current?.focus?.({ preventScroll: true });
   }, [open]);
 
+  /**
+   * Lift the sheet off the on-screen keyboard.
+   *
+   * The sheet is fixed to the bottom of the *layout* viewport and capped at a
+   * share of `vh`, and neither of those moves when a tablet keyboard opens - so
+   * the sheet stayed exactly where it was, with the keyboard drawn on top of it
+   * and the field being typed into underneath. The crew could see the sheet,
+   * could not see what they were writing in it.
+   *
+   * `visualViewport` is the one thing that does know: its height shrinks to what
+   * is actually visible and `offsetTop` says how far the browser scrolled the
+   * page to keep the caret up. The difference from `innerHeight` is the
+   * keyboard, so the sheet sits on top of it and gives back the space when it
+   * closes.
+   *
+   * Written to CSS custom properties rather than to `style.bottom` so the
+   * stylesheet keeps the layout and this only supplies the two measurements.
+   * Browsers without visualViewport - and desktops, where the sheet is a
+   * centred dialog - get nothing and behave exactly as before.
+   */
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = sheetRef.current;
+    if (!open || !vv || !el) return;
+
+    const fit = () => {
+      const lifted = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      el.style.setProperty('--kb', `${Math.round(lifted)}px`);
+      // What is left to be a sheet in, once the keyboard has taken its share.
+      el.style.setProperty('--vv', `${Math.round(vv.height)}px`);
+    };
+
+    fit();
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    return () => {
+      vv.removeEventListener('resize', fit);
+      vv.removeEventListener('scroll', fit);
+      el.style.removeProperty('--kb');
+      el.style.removeProperty('--vv');
+    };
+  }, [open]);
+
+  /**
+   * And keep the field being typed into on screen.
+   *
+   * Lifting the sheet is not enough on its own: a long sheet still scrolls
+   * inside itself, and the field that was tapped can sit below the fold of what
+   * is left. The browser's own scroll-into-view fires against the layout
+   * viewport and so does nothing useful here; this one runs after the keyboard
+   * has finished animating and scrolls the sheet's own box.
+   */
+  useEffect(() => {
+    if (!open) return;
+    const el = sheetRef.current;
+    if (!el) return;
+    const onFocus = (e: FocusEvent) => {
+      const field = e.target as HTMLElement | null;
+      if (!field || !el.contains(field)) return;
+      window.setTimeout(() => {
+        field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 250);
+    };
+    el.addEventListener('focusin', onFocus);
+    return () => el.removeEventListener('focusin', onFocus);
+  }, [open]);
+
   return (
     <>
       <div aria-hidden onClick={onClose} className={cn('scrim', open && 'show')} />

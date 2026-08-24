@@ -37,20 +37,23 @@ export const adminRoutes: RouteObject[] = [
           { path: 'efficiency', element: <EfficiencyPage /> },
           { path: 'rates', element: <RatesPage /> },
           { path: 'ideals', element: <IdealValuesPage /> },
+          // The accounts, back with the manager: adding the supervisor who
+          // started on Monday is running the plant, not setting it up.
+          { path: 'users', element: <UsersPage /> },
 
           /**
            * The setting-up, behind a second guard: the admin account alone.
            *
            * These change what the plant *is* rather than report what it did -
-           * the machine list, the products, the customers and their rates, the
-           * accounts, the costing that prices all of it. A wrong entry on any of
+           * the machine list, the products, the customers and their rates, and
+           * the costing that prices all of it. A wrong entry on any of
            * them rewrites months of figures rather than one row, which is why
            * they take a deliberate sign-in rather than riding along with the
            * account somebody leaves open on a desk all day. Same reasoning as
            * DELETE_ROLES, one door further out.
            *
            * The guard is here as well as on the tab strip because a hidden tab
-           * is not a guard: a manager typing /admin/users is bounced to their
+           * is not a guard: a manager typing /admin/costing is bounced to their
            * own home rather than shown the page.
            */
           {
@@ -64,7 +67,6 @@ export const adminRoutes: RouteObject[] = [
               { path: 'machines', element: <AdminMachinesPage /> },
               { path: 'customers', element: <CustomersPage /> },
               { path: 'customers/:id', element: <CustomerDetailPage /> },
-              { path: 'users', element: <UsersPage /> },
             ],
           },
         ],
