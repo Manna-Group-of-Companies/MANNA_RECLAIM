@@ -434,6 +434,12 @@ export const TABLES = {
   idealValues: 'ideal_values',
   /** Why an actual missed its ideal, against the date, shift and parameter. */
   varianceReasons: 'variance_reasons',
+  /**
+   * Who operates the lines, and who was on which one for a given shift. Two
+   * tables because they answer two questions - see migrations/0019.
+   */
+  operators: 'operators',
+  shiftOperators: 'shift_operators',
 };
 
 /**
@@ -660,6 +666,59 @@ export const IDEAL_AUTOCLAVES = [
 
 /** The special line's benchmarks are per grade - see IDEAL_PRODUCTION_LINES. */
 export const SPECIAL_LINE_KEY = 'SPECIAL';
+
+/**
+ * The stations an operator is assigned to, and the whole list of them.
+ *
+ * A line, not a machine. The plant is operated in lines: the coarse line is PR1
+ * and R2 worked as one, the special line is the refiners together, and the
+ * autoclaves are a pair one person charges. Only the grinders and the cracker
+ * are a machine each. So four of these seven are not machines at all, which is
+ * why an assignment names a station rather than pointing at `machines`.
+ *
+ * The cracker is here and has no ideal value of its own - it weighs nothing,
+ * because what it cracks is weighed downstream at the grinders. Somebody still
+ * runs it, and a station list built only out of the things with benchmarks would
+ * have left the man on the cracker off the plant's roster.
+ *
+ * Ordered as the shop floor reads them: raw tyre in at the top, refined grade
+ * out at the bottom.
+ */
+export const OPERATOR_STATIONS = [
+  { key: 'CRK', label: 'Cracker' },
+  { key: 'GRD_K', label: 'Grinder 1' },
+  { key: 'GRD_S', label: 'Grinder 2' },
+  { key: 'GRD_O', label: 'Soorya Grinder' },
+  { key: 'AUTOCLAVES', label: 'Autoclaves' },
+  { key: SPECIAL_LINE_KEY, label: 'Special line' },
+  { key: 'COARSE', label: 'Coarse line' },
+];
+
+export const OPERATOR_STATION_KEYS = OPERATOR_STATIONS.map((s) => s.key);
+
+/**
+ * Which station's figures a machine's runs belong to.
+ *
+ * The efficiency cards are keyed per machine and per grade; the roster is keyed
+ * per line. This is the one place the two are joined, so a card can name who was
+ * responsible for it without every card working the mapping out again.
+ */
+export const STATION_OF_MACHINE = {
+  CRK: 'CRK',
+  GRD_K: 'GRD_K',
+  GRD_S: 'GRD_S',
+  GRD_O: 'GRD_O',
+  AC_A: 'AUTOCLAVES',
+  AC_M: 'AUTOCLAVES',
+  AC_N: 'AUTOCLAVES',
+  AC_O: 'AUTOCLAVES',
+  PR2: SPECIAL_LINE_KEY,
+  R1: SPECIAL_LINE_KEY,
+  R3: SPECIAL_LINE_KEY,
+  R4: SPECIAL_LINE_KEY,
+  PR1: 'COARSE',
+  R2: 'COARSE',
+};
 
 /**
  * How a benchmark is named inside `ideal_values.data`.

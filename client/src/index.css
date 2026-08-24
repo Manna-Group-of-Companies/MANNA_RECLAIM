@@ -2431,6 +2431,21 @@
     padding-left: 8px;
     border-left: 2px solid var(--accent);
   }
+  /* Whose shift the card reports. Beside the line name, not under it. */
+  .effop {
+    margin-left: 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    color: var(--ink-dim);
+  }
+  .effop.none {
+    color: var(--muted);
+    font-style: italic;
+  }
   .effhit,
   .effmiss,
   .effnote {

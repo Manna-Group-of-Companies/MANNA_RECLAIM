@@ -12,6 +12,7 @@ import customerRoutes from './customer.routes.js';
 import rateRoutes from './rate.routes.js';
 import maintenanceRoutes from './maintenance.routes.js';
 import reportRoutes from './report.routes.js';
+import operatorRoutes from './operator.routes.js';
 import { dbInfo } from '../config/supabase.js';
 import { env } from '../config/env.js';
 import { ok } from '../utils/ApiResponse.js';
@@ -29,6 +30,8 @@ router.get('/', (_req, res) =>
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+// Who runs the lines, and who ran them on a given shift - see migrations/0019.
+router.use('/operators', operatorRoutes);
 router.use('/machines', machineRoutes);
 router.use('/products', productRoutes);
 router.use('/batches', batchRoutes);

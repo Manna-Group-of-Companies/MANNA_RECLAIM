@@ -1171,6 +1171,40 @@ export interface UnloggedMachine {
   needsAnswer: boolean;
 }
 
+/** One of the seven lines an operator is put on. */
+export interface OperatorStation {
+  key: string;
+  label: string;
+}
+
+/**
+ * Somebody who runs a line.
+ *
+ * A name and whether they still work here, and no login: an operator does not
+ * sign into anything, the tablet is the supervisor's. The row exists so that
+ * the same person is the same row every shift - typed by hand each time,
+ * "Suresh", "suresh" and "Sursh" would be three people and an incentive total
+ * would be wrong in a way nobody would spot.
+ */
+export interface Operator {
+  id: string;
+  name: string;
+  /** What they are usually on. A hint for the picker, never a rule. */
+  station?: string | null;
+  note?: string | null;
+  active: boolean;
+}
+
+/** One line on one shift, and who was on it. Null operator = nobody yet. */
+export interface ShiftRosterSlot {
+  station: string;
+  label: string;
+  operatorId?: string | null;
+  operator?: string | null;
+  assignedBy?: string | null;
+  assignedAt?: string | null;
+}
+
 export interface EfficiencyCard {
   key: string;
   metrics: EfficiencyMetric[];
@@ -1186,6 +1220,8 @@ export interface EfficiencyCard {
   out?: number | null;
   workers?: number | null;
   hours?: number | null;
+  /** Who was on this line for this shift. Null when nobody is rostered yet. */
+  operator?: string | null;
   /** Coarse and autoclave cards name themselves - they are neither. */
   label?: string;
   line?: string;
@@ -1259,6 +1295,8 @@ export interface ShiftEfficiency {
    * nothing to answer for.
    */
   unlogged?: UnloggedMachine[];
+  /** Who was on each line this shift - every station, named or not. */
+  roster?: ShiftRosterSlot[];
   notes: EfficiencyNote[];
   varianceReasons: VarianceReason[];
   /** Whether any benchmark has been set at all - "no target yet" is not "on target". */

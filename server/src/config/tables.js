@@ -126,6 +126,21 @@ export const registry = {
     'approved_at', 'approved_by', 'manager_note',
   ]),
 
+  /**
+   * Who operates the lines, and who was on which one for a given shift.
+   *
+   * `shift_operators.operator` is the name as it was when the shift was worked,
+   * kept beside the id on purpose: an operator renamed next year must not
+   * silently rewrite who the plant paid last March. See migrations/0019.
+   */
+  [TABLES.operators]: table('id', [
+    'id', 'name', 'station', 'note', 'active', 'created_at', 'updated_at',
+  ]),
+  [TABLES.shiftOperators]: table('id', [
+    'id', 'shift_date', 'shift', 'station', 'operator_id', 'operator',
+    'assigned_by', 'created_at', 'updated_at',
+  ]),
+
   // ---- quality ----
   [TABLES.qualityTests]: table('id', [
     'id', ...AUDIT, 'ts', 'kind', 'batch_no', 'shift_date', 'shift', 'verdict',

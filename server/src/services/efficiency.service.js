@@ -10,7 +10,10 @@ import {
   IDEAL_AUTOCLAVES,
   idealKey,
   idealFieldFor,
+  STATION_OF_MACHINE,
+  SPECIAL_LINE_KEY,
 } from '../config/constants.js';
+import { operatorService } from './operator.service.js';
 
 /**
  * The back office's efficiency view, computed here rather than in the browser.
@@ -424,6 +427,23 @@ export const efficiencyService = {
     const shiftRows = all.filter((r) => r.shift_date === date && (r.shift ?? '') === shift);
 
     /**
+     * Who was on each line this shift.
+     *
+     * The plant pays an incentive on these figures, so a card that reports one
+     * and cannot say whose it was is a card nobody can be paid on. Loaded here,
+     * ahead of every card, so the name travels with the figure it belongs to
+     * rather than being looked up separately by the screen.
+     *
+     * Null is the ordinary state on a shift nobody has rostered yet, and the
+     * card says so rather than leaving the space blank - an unassigned line is
+     * a thing to fix, not a thing to skip past.
+     */
+    const roster = await operatorService.forShift({ date, shift }).catch(() => []);
+    const operatorAt = new Map(roster.map((r) => [r.station, r.operator]));
+    const operatorOf = (station) => operatorAt.get(station) ?? null;
+    const operatorOfMachine = (machineId) => operatorOf(STATION_OF_MACHINE[machineId]);
+
+    /**
      * The picked day folded up per line, so a shift card can carry its own
      * comparison instead of pointing at a second card underneath.
      *
@@ -507,6 +527,7 @@ export const efficiencyService = {
       return {
         key: `refiner|${day.key}`,
         quality: day.key,
+        operator: operatorOf(SPECIAL_LINE_KEY),
         batches,
         /** Whether this grade was worked in the shift on the picker. */
         out: round(u.out, 0),
@@ -576,6 +597,7 @@ export const efficiencyService = {
       return {
         key: `grind|${day.key}`,
         machineId: day.key,
+        operator: operatorOfMachine(day.key),
         machine: name,
         out: round(u.out, 0),
         workers: u.workers,
@@ -744,6 +766,7 @@ export const efficiencyService = {
       return {
         key: 'coarse|line',
         line: 'coarse',
+        operator: operatorOf('COARSE'),
         label: 'Coarse line',
         out: round(u.out, 0),
         workers: u.workers,
@@ -843,6 +866,7 @@ export const efficiencyService = {
       return {
         key: `autoclave|${vessel.key}`,
         line: 'autoclave',
+        operator: operatorOf('AUTOCLAVES'),
         machineId: vessel.key,
         label: vessel.label,
         metrics: [
@@ -889,6 +913,7 @@ export const efficiencyService = {
       machines.all({}, { sort: 'sort_order' }).catch(() => []),
       breakdowns.all({}, { sort: 'down_start' }).catch(() => []),
     ]);
+
 
     const workedThisShift = new Set(
       shiftRows.map((r) => r.machine_id).filter(Boolean),
@@ -965,6 +990,12 @@ export const efficiencyService = {
        * breakdown, and this is the list that is neither.
        */
       unlogged,
+      /**
+       * Who was on each line this shift, every station whether named or not.
+       * The cards carry their own operator; this is the list the supervisor
+       * assigns from and the manager reads down.
+       */
+      roster,
       /**
        * The utilisation cut-off, and now nothing else. It is here so the screen
        * can say what the one non-ideal flag on it means without hard-coding the
