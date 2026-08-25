@@ -185,9 +185,32 @@ Checked on 26 August 2026:
   503  This endpoint is switched off: SAP_SYNC_TOKEN is not set on the API.
   ```
 
-Set it: Dashboard → the `manna-reclaim` service → Environment → Add Environment
-Variable → `SAP_SYNC_TOKEN` = the token the plant server generated. Save, and
-wait for the restart.
+### Where exactly
+
+1. Sign in at **dashboard.render.com**.
+2. Click the **`manna-reclaim`** service — the web service running the API, not
+   a static site. If more than one is listed, it is the one whose URL is
+   `manna-reclaim.onrender.com`.
+3. **Environment** in the left sidebar.
+4. Under **Environment Variables**, press **Add Environment Variable**.
+5. **Key**: `SAP_SYNC_TOKEN` — capitals and underscores, exactly. Render does
+   not correct the case, and `Sap_Sync_Token` is a different variable that the
+   API will never read.
+6. **Value**: the token the plant server generated. It is in `target.json` in
+   the sync script's folder. Paste it with no quotes around it and no space
+   before or after - Render keeps whatever is pasted, and a trailing space
+   makes the comparison fail with a 403 that looks exactly like a wrong token.
+7. **Save Changes**.
+
+Saving redeploys the service by itself; that takes a couple of minutes. Wait
+until the service shows **Live** before re-running the sync.
+
+There is no `render.yaml` in this repository, so the dashboard is the only
+place this is configured - nothing to commit and nothing to push.
+
+The variable is listed in `server/.env.example` for anyone running the API
+locally. That file is documentation; the real value belongs in `server/.env`,
+which is not committed.
 
 After that, what each answer means from the plant server:
 
