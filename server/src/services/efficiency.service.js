@@ -860,6 +860,43 @@ export const efficiencyService = {
     const shiftRows = all.filter((r) => r.shift_date === date && (r.shift ?? '') === shift);
 
     /**
+     * Hours on each machine this shift, counted once for the whole response.
+     *
+     * Every record on the machine, whatever line it was logged against and
+     * whether or not it weighed anything. That last part is why this is not
+     * read off grinderUnits, which drops a run with no output on purpose - it
+     * exists to work out kg per man-hour, and a run that made nothing would
+     * drag that figure down for no reason. But a machine that ran four hours
+     * and weighed nothing still ran four hours: dropped from the utilisation
+     * figure it reads as a machine that was never switched on, which is the
+     * opposite of what happened.
+     */
+    const hoursByMachine = new Map();
+    for (const r of shiftRows) {
+      if (!r.machine_id) continue;
+      const held = hoursByMachine.get(r.machine_id) ?? { hours: 0, runs: 0 };
+      held.hours += runHours(r) ?? 0;
+      held.runs += 1;
+      hoursByMachine.set(r.machine_id, held);
+    }
+
+    const SHIFT_HOURS = SHIFT_MINUTES / 60;
+
+    /**
+     * A machine's share of the twelve hours, capped at 150%.
+     *
+     * The cap catches a mis-keyed hour meter, which would otherwise report
+     * 400%. Anything between 100 and 150 is left showing rather than clamped:
+     * a vessel whose charge ran past the shift change genuinely occupied more
+     * than twelve hours of it, and flattening that to "100%" hides the one
+     * case worth looking at.
+     */
+    const utilisationOf = (machineId) => {
+      const hours = hoursByMachine.get(machineId)?.hours ?? 0;
+      return hours > 0 ? Math.min(150, (hours / SHIFT_HOURS) * 100) : 0;
+    };
+
+    /**
      * Who was on each line this shift.
      *
      * The plant pays an incentive on these figures, so a card that reports one
@@ -1026,7 +1063,18 @@ export const efficiencyService = {
     const grinders = dayCards(grindDay, grindAll, (u, d) => u.machineId === d.key).map(({ day, unit }) => {
       const u = unit;
       const name = day.machine ?? day.key;
-      const downMin = Math.max(0, SHIFT_MINUTES - u.hours * 60);
+      /*
+       * The machine's own hours, not the unit's.
+       *
+       * They differ where a run weighed nothing - grinderUnits drops those,
+       * for the good reason that they would drag kg per man-hour down, and
+       * the effect here was a grinder that ran and recorded no output being
+       * reported as a grinder that never turned. The card and the utilisation
+       * list are the same figure on one screen and had better agree.
+       */
+      const ranHours = hoursByMachine.get(day.key)?.hours ?? 0;
+      const utilPct = utilisationOf(day.key);
+      const downMin = Math.max(0, SHIFT_MINUTES - ranHours * 60);
       return {
         key: `grind|${day.key}`,
         machineId: day.key,
@@ -1091,7 +1139,7 @@ export const efficiencyService = {
             key: 'util',
             label: 'Time · utilisation',
             span: 'shift',
-            value: u.util == null ? null : round(u.util * 100, 0),
+            value: ranHours > 0 ? round(utilPct, 0) : null,
             unit: '%',
             /**
              * The one flag on this screen that is not a manager's benchmark, and
@@ -1102,21 +1150,21 @@ export const efficiencyService = {
              * off the Ideal values tab.
              */
             context: `of 12 h · downtime ${round(downMin / 60)} h`,
-            warn: u.util != null && u.util < TH.utilisation,
+            warn: ranHours > 0 && utilPct < TH.utilisation * 100,
             warnLabel: 'high downtime',
             // Declared null rather than left off, so every metric on the wire
             // answers the same question the same way: this is not a figure the
             // manager sets a target against, so the card must not ask for one.
             parameter: null,
-            calc: u.util == null ? null : {
+            calc: ranHours === 0 ? null : {
               title: 'Time · utilisation',
               formula: 'run hours ÷ 12 h shift',
               lines: [
-                `ran = ${round(u.hours)} h`,
-                `= ${round(u.hours)} ÷ 12`,
-                `downtime = 12 − ${round(u.hours)} = ${round(downMin / 60)} h`,
+                `ran = ${round(ranHours)} h`,
+                `= ${round(ranHours)} ÷ 12`,
+                `downtime = 12 − ${round(ranHours)} = ${round(downMin / 60)} h`,
               ],
-              result: `${round(u.util * 100, 0)}%`,
+              result: `${round(utilPct, 0)}%`,
               note: `Flagged below ${Math.round(TH.utilisation * 100)}% utilisation (more than ${Math.round((1 - TH.utilisation) * 100)}% downtime).`,
             },
           },
@@ -1388,6 +1436,84 @@ export const efficiencyService = {
         };
       });
 
+    /**
+     * How much of the twelve hours each machine actually ran.
+     *
+     * Utilisation was on the grinder cards and nowhere else, so the plant could
+     * see that Grinder 1 ran nine hours of twelve and had no way at all to ask
+     * the same of a refiner, a vessel or a press. It is the one question on this
+     * screen that means the same thing for every machine the plant owns - a
+     * shift is twelve hours whatever is bolted to the floor - so it is answered
+     * for all of them, in one list, rather than being a line on the four cards
+     * that happened to have room for it.
+     *
+     * Every enabled machine, including the ones that did not run. Nought of
+     * twelve is the answer to the question, and it is the answer worth having:
+     * a utilisation report that quietly left out the machines nobody switched
+     * on would report the plant as busier the less of it was working.
+     *
+     * Off the same hours the grinder cards read, so the two cannot disagree
+     * about a figure they both print on one screen.
+     */
+    const utilisation = machineRows
+      .filter((m) => m.enabled !== false)
+      .map((m) => {
+        const { hours = 0, runs = 0 } = hoursByMachine.get(m.id) ?? {};
+        const pct = utilisationOf(m.id);
+        const down = coveringBreakdown(m.id);
+        const station = STATION_OF_MACHINE[m.id];
+        return {
+          machineId: m.id,
+          machine: m.name ?? m.id,
+          short: m.short ?? null,
+          group: m.group_name ?? null,
+          kind: m.kind ?? null,
+          runs,
+          hours: round(hours, 2),
+          pct: round(pct, 0),
+          /** What is left of the shift. Never negative - see the cap above. */
+          idle: round(Math.max(0, SHIFT_HOURS - hours), 2),
+          /*
+           * Absent, not null, on a machine that is not an operator station -
+           * a press belongs to no line on the roster, and telling its reader
+           * "no operator set" would invent a gap for them to go and fill. See
+           * OperatorChip on the client.
+           */
+          operator: station ? operatorOf(station) : undefined,
+          down: down ? { id: down.id, open: !down.repaired_at } : null,
+          /*
+           * Flagged only where the machine ran and ran short.
+           *
+           * A machine that ran nothing is not low utilisation, it is not run -
+           * a different question, owned by the Not accounted for list below,
+           * which chases it and asks for a breakdown. Flagged here as well, the
+           * two presses the plant almost never uses would sit red on every
+           * shift of every month, and a flag that fires every time teaches
+           * people to read past the flags that mean something.
+           *
+           * And nothing is flagged where a breakdown already answers for it.
+           */
+          warn: !down && runs > 0 && pct < TH.utilisation * 100,
+        };
+      });
+
+    /*
+     * The plant-wide figure, as the mean of the machines rather than as total
+     * hours over total capacity. They differ, and this is the one that answers
+     * "how much of the plant was working": summing hours lets one vessel
+     * running a long charge cover for three machines standing idle, which is
+     * the opposite of what a utilisation report is read for.
+     */
+    const utilisationTotals = {
+      machines: utilisation.length,
+      ran: utilisation.filter((u) => u.runs > 0).length,
+      hours: round(utilisation.reduce((sum, u) => sum + u.hours, 0), 1),
+      pct: utilisation.length
+        ? round(utilisation.reduce((sum, u) => sum + u.pct, 0) / utilisation.length, 0)
+        : 0,
+      shiftHours: SHIFT_HOURS,
+    };
+
     let kwh = 0;
     let out = 0;
     for (const r of shiftRows) {
@@ -1423,6 +1549,13 @@ export const efficiencyService = {
        * breakdown, and this is the list that is neither.
        */
       unlogged,
+      /**
+       * How much of the twelve hours each machine ran, every machine on the
+       * plant, with the plant-wide mean beside it. The one question on this
+       * screen that means the same thing for a grinder, a vessel and a press.
+       */
+      utilisation,
+      utilisationTotals,
       /**
        * Who was on each line this shift, every station whether named or not.
        * The cards carry their own operator; this is the list the supervisor

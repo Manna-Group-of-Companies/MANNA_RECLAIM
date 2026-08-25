@@ -1409,6 +1409,49 @@ export interface VarianceReason {
   manager_note?: string | null;
 }
 
+/**
+ * One machine's share of the twelve hours.
+ *
+ * The one question on the efficiency screen that means the same thing for a
+ * grinder, a vessel and a press - a shift is twelve hours whatever is bolted to
+ * the floor. Every enabled machine is here, including the ones nobody switched
+ * on: nought of twelve is the answer to the question, and a list that dropped
+ * them would report the plant as busier the less of it was working.
+ */
+export interface MachineUtilisation {
+  machineId: string;
+  machine: string;
+  short?: string | null;
+  group?: string | null;
+  kind?: string | null;
+  /** How many records this shift - a machine stopped and restarted has two. */
+  runs: number;
+  hours: number;
+  /** Of the twelve. Over 100 is a charge that ran past the shift change; the
+   *  server caps at 150 so a mis-keyed hour meter cannot report 400. */
+  pct: number;
+  idle: number;
+  /** Absent where the machine is not an operator station - see OperatorChip. */
+  operator?: string | null;
+  down?: { id: string; open: boolean } | null;
+  /** Low, and nobody has logged a breakdown that answers for it. */
+  warn: boolean;
+}
+
+/**
+ * The plant-wide figure, as the mean of the machines rather than as total hours
+ * over total capacity. Summing hours lets one vessel on a long charge cover for
+ * three machines standing idle, which is the opposite of what a utilisation
+ * report is read for.
+ */
+export interface UtilisationTotals {
+  machines: number;
+  ran: number;
+  hours: number;
+  pct: number;
+  shiftHours: number;
+}
+
 export interface ShiftEfficiency {
   date: string | null;
   shift: string | null;
@@ -1429,6 +1472,12 @@ export interface ShiftEfficiency {
    * nothing to answer for.
    */
   unlogged?: UnloggedMachine[];
+  /**
+   * How much of the twelve hours each machine ran - every machine on the plant,
+   * not only the four whose cards had room for the figure.
+   */
+  utilisation?: MachineUtilisation[];
+  utilisationTotals?: UtilisationTotals;
   /** Who was on each line this shift - every station, named or not. */
   roster?: ShiftRosterSlot[];
   notes: EfficiencyNote[];

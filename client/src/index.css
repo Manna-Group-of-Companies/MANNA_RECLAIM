@@ -2402,6 +2402,50 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  /* -------------------------------------------------------------------------
+   * Machine utilisation - hours run against the twelve the shift is.
+   *
+   * Declared for the whole app rather than under .back-office, because both
+   * sides draw the same bar: the office reads it in a table and the floor as
+   * cards, and a bar that meant one thing on a laptop and another on a tablet
+   * would be two answers to one question.
+   *
+   * The tone is not a rank. Amber is a machine nobody switched on - a gap to ask
+   * about, and the plant has shifts where a line is genuinely not needed - and
+   * red is kept for a machine that ran and ran short, which is the one somebody
+   * has to answer for. Grey is a logged breakdown: already answered.
+   * ------------------------------------------------------------------------- */
+  .utilbar {
+    height: 6px;
+    width: 100%;
+    min-width: 84px;
+    margin-top: 4px;
+    border-radius: 999px;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .utilbar .fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--ok);
+  }
+  .utilbar .fill.low {
+    background: var(--err);
+  }
+  .utilbar .fill.idle {
+    background: var(--warn);
+  }
+  .utilbar .fill.down {
+    background: var(--muted);
+  }
+  /* The bar sits under a right-aligned figure on the tablet, so it needs to be
+     told to stop hugging the text. */
+  .effnums .utilbar {
+    min-width: 96px;
+  }
+
   /* A reason the shift wrote, under the figure it is about. */
   .effreason {
     margin-top: 6px;

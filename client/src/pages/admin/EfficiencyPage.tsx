@@ -13,6 +13,7 @@ import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
 import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
+import { UtilisationTable } from '@/features/reports/Utilisation';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
@@ -782,6 +783,17 @@ export function EfficiencyPage() {
           ) : (
             <div className="empty">No autoclave charges on this day.</div>
           )}
+
+          {/*
+            How much of the twelve hours each machine ran - every machine,
+            above the list of the ones that ran none of them, because the two
+            are the same question at two levels. This one answers it for the
+            whole plant; the next names the machines nobody has answered for.
+          */}
+          <UtilisationTable
+            rows={shiftEfficiency.utilisation ?? []}
+            totals={shiftEfficiency.utilisationTotals}
+          />
 
           {/*
             Every machine is meant to be accounted for on every shift - it ran,

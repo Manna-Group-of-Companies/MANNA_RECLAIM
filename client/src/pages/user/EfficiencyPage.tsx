@@ -15,6 +15,7 @@ import {
 } from '@/components/ui';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { ShiftTrend } from '@/features/reports/ShiftTrend';
+import { UtilisationCards } from '@/features/reports/Utilisation';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { dayLong } from '@/utils/date';
@@ -338,6 +339,17 @@ export function UserEfficiencyPage() {
           ) : (
             <div className="empty">Nothing was logged on this shift.</div>
           )}
+
+          {/*
+            And how much of the twelve hours each machine ran. Under the cards
+            rather than above them: the cards are what the shift is measured on
+            and this is how it spent its time, which is the thing a crew reaches
+            for once a card has told them a figure came in short.
+          */}
+          <UtilisationCards
+            rows={shiftEfficiency.utilisation ?? []}
+            totals={shiftEfficiency.utilisationTotals}
+          />
         </>
       )}
 
