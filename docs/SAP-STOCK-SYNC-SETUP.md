@@ -168,25 +168,27 @@ scheduled job has stopped: the sync runs every fifteen minutes, so six hours is
 two dozen missed runs, and stale stock looks exactly like stock unless something
 says so.
 
-## Two things that still have to happen, and only you can do either
+## One thing left, and only you can do it
 
-Checked against the live systems on 26 August 2026, and both were still
-outstanding.
+**The migrations are applied.** All five - 0015, 0017, 0018, 0019 and 0020 -
+went onto the live database on 26 August 2026, and the four new tables were
+checked column by column against what the API expects. That matters more than
+it sounds: PostgREST silently drops a write to a column it cannot see, so a
+table that is nearly right stores nothing and answers 201 while doing it.
 
-**1. Apply the migrations.** `APPLY-PENDING-MIGRATIONS.sql` in the project root
-is all five of them - 0015, 0017, 0018, 0019 and 0020 - concatenated in order.
-Open it, copy the whole file, paste it into the Supabase SQL editor and run it
-once. Every statement is guarded, so running it twice does nothing the second
-time. "Success. No rows returned" is what it should say.
+**Redeploy Render.** Dashboard → the `manna-reclaim` service → Manual Deploy →
+Deploy latest commit. Until then `POST /api/v1/sync/sap-stock` answers **404**,
+which is what the plant server is seeing.
 
-Without 0020 the sync answers **500** rather than 201: the route is there, the
-tables it writes to are not.
+Then set `SAP_SYNC_TOKEN` in that service's Environment, if it is not there
+already. An env var added to a service that has not deployed the code yet still
+has no route to open.
 
-**2. Redeploy Render.** Dashboard → the `manna-reclaim` service → Manual Deploy
-→ Deploy latest commit. It takes a few minutes. Until then
-`POST /api/v1/sync/sap-stock` answers **404**, which is what the plant server
-is seeing.
+What each half failing looks like from the plant server, so the answer names
+itself:
 
-The order does not matter as long as both are done before the script is
-believed. Doing Render first gives a 500; doing the migrations first still
-gives a 404. Neither is a wrong answer, only an incomplete setup.
+* **404** - Render has not redeployed.
+* **503** naming `SAP_SYNC_TOKEN` - deployed, no token set.
+* **500** - would have meant the tables were missing. They are not, so a 500
+  now is something else and worth sending back here.
+* **201** - through.
