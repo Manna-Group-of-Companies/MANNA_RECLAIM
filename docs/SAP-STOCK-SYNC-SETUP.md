@@ -107,6 +107,47 @@ the problem.
 > folder, and the action `python.exe` with the full script path as the argument.
 > Set it to stop the task if it runs longer than 10 minutes.
 
+## The 201 response body
+
+```json
+{
+  "success": true,
+  "message": "Stored 137 stock rows",
+  "data": {
+    "syncId": "6f2a1c9e-...",
+    "asOf": "2026-08-26T00:30:00+00:00",
+    "receivedAt": "2026-08-26T00:31:12.482+00:00",
+    "rows": 137,
+    "totals": {
+      "rows": 137,
+      "byUnit": { "kg": 109023 }
+    }
+  }
+}
+```
+
+Everything worth logging is under `data`:
+
+* `data.rows` — how many rows the API actually stored. Log this beside the
+  count the script sent; if they differ, something was dropped and the run is
+  worth looking at.
+* `data.totals.byUnit` — what those rows came to, **per unit**. A map, not a
+  number: reclaim is kilograms and moulded goods are pieces, and one figure over
+  the two would make the script's own total disagree on every run with a press
+  lot in it — which reads as the sync being broken when what is broken is the
+  arithmetic it is being checked against. Compare per key.
+* `data.syncId` — the snapshot's id. Worth logging: it is what a question about
+  a particular run is asked with.
+* `data.asOf` — the `asOf` that was sent, **normalised by Postgres to UTC**. The
+  instant is the one the script sent; the text is not, so compare it as a
+  timestamp rather than as a string. `+05:30` in, `+00:00` out, same moment.
+* `data.receivedAt` — when the API took it, which is not when SAP was read.
+
+A non-201 answers the same envelope with `success: false` and a `message`
+saying what was wrong. Log the message, not just the code — a 400 saying "the
+snapshot has RCL-FINE-50 twice" is a query to go and fix, and a 400 saying the
+snapshot was empty is a failed read.
+
 ## Checking it worked
 
 From any machine, with the token:
@@ -127,12 +168,25 @@ scheduled job has stopped: the sync runs every fifteen minutes, so six hours is
 two dozen missed runs, and stale stock looks exactly like stock unless something
 says so.
 
-## Two things that still have to happen
+## Two things that still have to happen, and only you can do either
 
-**Migration `0020_sap_stock.sql` has to be applied**, along with the four still
-outstanding. `APPLY-PENDING-MIGRATIONS.sql` in the project root covers the
-earlier four; `supabase/migrations/0020_sap_stock.sql` is the new one. Paste both
-into the Supabase SQL editor. Without it the sync answers 500 and nothing lands.
+Checked against the live systems on 26 August 2026, and both were still
+outstanding.
 
-**Render has to redeploy.** The endpoint is in the code as of this commit and
-not on the running service until it does.
+**1. Apply the migrations.** `APPLY-PENDING-MIGRATIONS.sql` in the project root
+is all five of them - 0015, 0017, 0018, 0019 and 0020 - concatenated in order.
+Open it, copy the whole file, paste it into the Supabase SQL editor and run it
+once. Every statement is guarded, so running it twice does nothing the second
+time. "Success. No rows returned" is what it should say.
+
+Without 0020 the sync answers **500** rather than 201: the route is there, the
+tables it writes to are not.
+
+**2. Redeploy Render.** Dashboard → the `manna-reclaim` service → Manual Deploy
+→ Deploy latest commit. It takes a few minutes. Until then
+`POST /api/v1/sync/sap-stock` answers **404**, which is what the plant server
+is seeing.
+
+The order does not matter as long as both are done before the script is
+believed. Doing Render first gives a 500; doing the migrations first still
+gives a 404. Neither is a wrong answer, only an incomplete setup.

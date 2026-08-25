@@ -77,6 +77,13 @@ test('a snapshot lands, and the yard reads it back with its age', async (t) => {
   assert.equal(sent.status, 201);
   const { data } = await sent.json();
   assert.equal(data.rows, 2);
+  /*
+   * The answer carries the figures rather than just 'ok'. Nobody is watching
+   * the caller, so the only place a wrong figure gets caught is the log it
+   * writes - and it can only log what was actually stored if it is told.
+   */
+  assert.deepEqual(data.totals, { rows: 2, byUnit: { kg: 16250 } });
+  assert.ok(data.syncId);
 
   const read = await api.call('/stock/sap', { role: 'supervisor' });
   assert.equal(read.status, 200);
@@ -210,4 +217,31 @@ test('with no token configured the route says so, rather than refusing', async (
   assert.equal(sent.status, 503);
   const { message } = await sent.json();
   assert.match(message, /SAP_SYNC_TOKEN/);
+});
+
+test('kilograms and pieces are never added together, on either route', async (t) => {
+  const api = await withToken();
+  t.after(() => api.stop());
+
+  const sent = await post(
+    api,
+    snapshot([
+      row({ quantity: 4250, unit: 'kg' }),
+      row({ sku: 'MLD-SLEEVE-1', grade: null, batch: null, quantity: 120, unit: 'pieces' }),
+    ]),
+  );
+  assert.equal(sent.status, 201);
+
+  /*
+   * 4,370 of something is what one total over the two of them would say, and
+   * the plant server logs this figure beside its own count to catch a mismatch
+   * - so a total that added pieces to kilograms would make the two ends
+   * disagree on every run with a press lot in it, which reads as the sync being
+   * broken when what is broken is the arithmetic it is checked against.
+   */
+  const { data } = await sent.json();
+  assert.deepEqual(data.totals.byUnit, { kg: 4250, pieces: 120 });
+
+  const yard = (await (await api.call('/stock/sap', { role: 'manager' })).json()).data;
+  assert.deepEqual(yard.totals.byUnit, { kg: 4250, pieces: 120 });
 });

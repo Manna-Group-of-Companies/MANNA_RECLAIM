@@ -41,9 +41,15 @@ create table if not exists public.sap_syncs (
   received_at timestamptz not null default now(),
   source      text not null default 'SAP',
   rows        integer not null default 0,
-  -- What the snapshot came to, kept beside it so a run can be compared with the
-  -- one before without reading either snapshot back.
-  total_qty   numeric,
+  -- What the snapshot came to in kilograms, kept beside it so a run can be
+  -- compared with the one before without reading either snapshot back.
+  --
+  -- Weight only. Reclaim is kilograms and moulded goods are counted in pieces,
+  -- and one numeric column cannot hold two units - added together they would
+  -- report a yard holding four thousand of something. The per-unit breakdown
+  -- is worked out from sap_stock when it is wanted; this is the figure the
+  -- plant means when it asks how much is in the yard.
+  total_kg    numeric,
   -- 'ok' once every row is in. A snapshot is only read when its run says so,
   -- which is what makes a half-written one harmless.
   status      text not null default 'pending'

@@ -42,6 +42,30 @@ const clean = (v) => {
  */
 const CHUNK = 500;
 
+/**
+ * What a set of rows comes to, per unit and never across units.
+ *
+ * Reclaim is kilograms and moulded goods are pieces, and one number over the
+ * two of them is a yard holding four thousand of something. It matters more
+ * here than on a screen: the plant server logs this figure beside its own
+ * count so a mismatch between what was sent and what was stored is visible,
+ * and a total that quietly added pieces to kilograms would make the two
+ * disagree on every run that had a press lot in it - which reads as the sync
+ * being broken when what is broken is the arithmetic it is being checked
+ * against.
+ */
+const perUnit = (rows) => {
+  const byUnit = {};
+  for (const r of rows) {
+    const unit = r.unit ?? 'kg';
+    byUnit[unit] = (byUnit[unit] ?? 0) + Number(r.quantity ?? 0);
+  }
+  for (const unit of Object.keys(byUnit)) {
+    byUnit[unit] = Math.round(byUnit[unit] * 100) / 100;
+  }
+  return byUnit;
+};
+
 export const sapStockService = {
   /**
    * Take a snapshot.
@@ -103,12 +127,21 @@ export const sapStockService = {
       seen.add(slot);
     }
 
+    const byUnit = perUnit(priced);
+
     const run = await syncs.create({
       source: source || 'SAP',
       as_of: asOf ?? new Date().toISOString(),
       received_at: new Date().toISOString(),
       rows: priced.length,
-      total_qty: priced.reduce((sum, r) => sum + r.quantity, 0),
+      /*
+       * The weight, and only the weight. One numeric column cannot hold two
+       * units, so it holds the one the plant means when it asks how much is
+       * in the yard - and the full breakdown goes back in the answer rather
+       * than being flattened into this. A snapshot of nothing but pieces
+       * stores nought here, which is true: it holds no weight.
+       */
+      total_kg: byUnit.kg ?? 0,
       status: 'pending',
     });
 
@@ -139,7 +172,7 @@ export const sapStockService = {
       logger.warn(`SAP stock: old snapshots were not cleared - ${err.message}`);
     }
 
-    return { sync: saved, rows: priced.length };
+    return { sync: saved, rows: priced.length, byUnit };
   },
 
   /** The last sync that finished, whatever else is in the table. */
@@ -162,17 +195,6 @@ export const sapStockService = {
       .all({ sync_id: sync.id, ...(grade ? { grade } : {}) }, { sort: 'sku', ascending: true })
       .catch(() => []);
 
-    /*
-     * Totalled per unit rather than into one number. Reclaim is kilograms and
-     * moulded goods are pieces, and a screen that added the two would report a
-     * yard holding four thousand of something.
-     */
-    const byUnit = {};
-    for (const r of rows) {
-      const unit = r.unit ?? 'kg';
-      byUnit[unit] = (byUnit[unit] ?? 0) + Number(r.quantity ?? 0);
-    }
-    for (const unit of Object.keys(byUnit)) byUnit[unit] = Math.round(byUnit[unit] * 100) / 100;
 
     return {
       sync: {
@@ -191,7 +213,7 @@ export const sapStockService = {
         quantity: Number(r.quantity ?? 0),
         unit: r.unit ?? 'kg',
       })),
-      totals: { rows: rows.length, byUnit },
+      totals: { rows: rows.length, byUnit: perUnit(rows) },
     };
   },
 };
