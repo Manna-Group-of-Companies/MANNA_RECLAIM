@@ -7,7 +7,7 @@ export const userPaths = {
   machines: '/machines',
   batches: '/batches',
   weigh: '/weigh',
-  packing: '/packing',
+
   /**
    * What is packed and ready to dispatch. One route, two answers: a manager
    * gets the whole table and the form to issue a dispatch from it, a supervisor

@@ -13,17 +13,17 @@ interface Tab {
   label: string;
   icon: IconName;
   /** Which pending count sits on the badge, if any. */
-  badge?: 'weigh' | 'packing' | 'quality' | 'bearing';
+  badge?: 'weigh' | 'quality' | 'bearing';
   /** Who this tab is for. A tab is floor work unless it says otherwise. */
   roles?: Role[];
 }
 
-/** The eight shop-floor tabs, in the prototype's order. */
+/** The seven shop-floor tabs, in the prototype's order. */
 const tabs: Tab[] = [
   { to: userPaths.machines, label: 'Machines', icon: 'machines' },
   { to: userPaths.batches, label: 'Batches', icon: 'batches' },
   { to: userPaths.weigh, label: 'Weigh', icon: 'weigh', badge: 'weigh' },
-  { to: userPaths.packing, label: 'Packing', icon: 'packing', badge: 'packing' },
+
   // What is packed and ready to go. A manager and a supervisor read different
   // responses from the API here - the full table and a summary - rather than
   // the same one drawn two ways, and only the manager can issue a dispatch off
@@ -40,7 +40,7 @@ const tabs: Tab[] = [
 /** What a badge count means, so it is not read out as a bare number. */
 const badgeNoun: Record<NonNullable<Tab['badge']>, string> = {
   weigh: 'waiting to be weighed',
-  packing: 'waiting to be packed',
+
   quality: 'awaiting test',
   bearing: 'due for temperatures',
 };
@@ -58,7 +58,7 @@ const badgeNoun: Record<NonNullable<Tab['badge']>, string> = {
 export function BottomTabs() {
   const role = useAppSelector((s) => s.auth.user?.role);
   const pendingWeigh = useAppSelector((s) => s.runs.pendingWeigh.length);
-  const pendingPack = useAppSelector((s) => s.runs.pendingPack.length);
+
   const pendingQuality = useAppSelector((s) => s.quality.pending.length);
   // Counted off the live figures rather than the fetched ones: the badge is how
   // the crew learns there is work on a tab they are not looking at, and a count
@@ -68,7 +68,7 @@ export function BottomTabs() {
 
   const counts = {
     weigh: pendingWeigh,
-    packing: pendingPack,
+
     quality: pendingQuality,
     bearing: bearingsDue,
   } as const;

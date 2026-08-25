@@ -147,13 +147,13 @@ const blockedReason = (card: { qc: QcStatus; available: number }): string | null
  * The server's two refusals, said before the tap rather than after it, and each
  * naming where the work actually is. A group is the running total of the packing
  * filed against one label and nothing records which runs fed it, so a full one
- * cannot go without stranding every run that says it packed into it - the way to
- * empty one is to take the packing off the run, which is the Packing tab. A
+ * cannot go without stranding every run that says it packed into it, and the
+ * only thing that can take packing back off a run now is the back office. A
  * group with a dispatch behind it is refused for good: the ledger says those
  * sacks left, and the row is the record of it.
  */
 const deleteBlock = (card: { available: number; dispatched: number | null }): string | null => {
-  if (card.available > 0) return 'Still holding stock — take the packing off on the Packing tab';
+  if (card.available > 0) return 'Still holding stock — the office has to clear it first';
   if ((card.dispatched ?? 0) > 0) return 'Stock has gone out of this group — the row is the record of it';
   return null;
 };
@@ -786,7 +786,7 @@ export function StockPage() {
         <EmptyState
           icon={icons.packing}
           title="Nothing packed and ready"
-          hint="Bag a weighed run or box a press run on the Packing tab and it is filed here as stock — coarse into its ten-day pool, moulded goods against their product and pack, everything else against its batch and grade."
+          hint="Nothing is in the yard against these filters. Stock is no longer filed from the floor — the plant is too busy to keep a bagging bench up to date — and comes from SAP instead."
         />
       ) : (
         <>

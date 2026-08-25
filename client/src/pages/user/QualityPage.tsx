@@ -607,8 +607,8 @@ export function QualityPage() {
       ? ` · ${counted(released.available_qty ?? released.available_sacks, released.unit ?? 'sacks')} released`
       : draft.verdict === 'pass' && !draft.pool
         ? draft.moulded
-          ? ' · nothing boxed yet — box it on the Packing tab'
-          : ' · nothing in the yard yet — bag it on the Packing tab'
+          ? ' · nothing boxed against it in the yard yet'
+          : ' · nothing in the yard against it yet'
         : '';
 
     notify(

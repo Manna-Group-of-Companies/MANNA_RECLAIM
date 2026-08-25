@@ -8,7 +8,7 @@ import {
   HistoryPage,
   LogPage,
   MachinesPage,
-  PackingPage,
+
   QualityPage,
   ReportsPage,
   UserEfficiencyPage,
@@ -45,7 +45,7 @@ export const userRoutes: RouteObject[] = [
               { path: 'machines', element: <MachinesPage /> },
               { path: 'batches', element: <BatchesPage /> },
               { path: 'weigh', element: <WeighPage /> },
-              { path: 'packing', element: <PackingPage /> },
+
               // The yard, both ways round. The page asks for whichever endpoint
               // the account is entitled to and the server refuses the other, so
               // a supervisor here is reading the summary and could not read the

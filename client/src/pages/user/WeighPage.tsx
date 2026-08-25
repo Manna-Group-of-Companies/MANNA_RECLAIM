@@ -79,14 +79,15 @@ function subtitleOf(run: Run) {
  * Why the weighing on a run cannot be cleared, in the words to say it in.
  *
  * The same refusal the server makes, said before the tap rather than after it.
- * The sacks in the yard were bagged against this figure, and the way to put them
- * back is on the Packing tab - which is what the sentence names, because "cannot
- * be cleared" on its own is a wall with no door in it.
+ * The sacks in the yard were bagged against this figure and something has to
+ * take them back out before the weight can go. That used to be the Packing tab
+ * and the floor does not file packing any more, so the sentence names the back
+ * office instead - "cannot be cleared" on its own is a wall with no door in it.
  */
 const clearBlock = (run: Run): string | null => {
   const packed = Number(run.packed_pieces || 0) || Number(run.packed_sacks || 0);
   return packed > 0
-    ? `${packed} packed off this weight — undo the packing on the Packing tab first`
+    ? `${packed} packed off this weight — the office has to clear that first`
     : null;
 };
 

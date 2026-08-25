@@ -55,7 +55,8 @@ export const stockService = {
    * Clears an emptied group off the yard's list.
    *
    * Only an emptied one. The server refuses a group still holding stock and
-   * points at the Packing tab, which is where stock actually comes back from -
+   * points at the back office, which is the only thing that can take packing
+   * back off a run now -
    * a group is the running total of the packing filed against a label, and
    * nothing records which runs fed it, so deleting a full one would leave every
    * one of those runs claiming output that is nowhere. A group with a dispatch

@@ -2537,9 +2537,8 @@ export function MachinesPage() {
                 />
 
                 <div className="hint">
-                  The pieces go to the yard under <b>{stopping.batch_no ?? 'this lot'}</b> awaiting the
-                  lab once they are boxed in the Packing tab. Only a lot the lab has passed can be
-                  dispatched.
+                  The pieces go to the yard under <b>{stopping.batch_no ?? 'this lot'}</b> awaiting
+                  the lab. Only a lot the lab has passed can be dispatched.
                 </div>
               </>
             )}

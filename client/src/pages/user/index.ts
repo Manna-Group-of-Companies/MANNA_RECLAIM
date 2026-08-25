@@ -2,7 +2,7 @@ export { LoginPage } from './LoginPage';
 export { MachinesPage } from './MachinesPage';
 export { BatchesPage } from './BatchesPage';
 export { WeighPage } from './WeighPage';
-export { PackingPage } from './PackingPage';
+
 export { StockPage } from './StockPage';
 export { QualityPage } from './QualityPage';
 export { HistoryPage } from './HistoryPage';

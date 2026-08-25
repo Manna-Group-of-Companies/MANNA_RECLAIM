@@ -42,7 +42,7 @@ export const endpoints = {
     active: '/runs/active',
     pendingWeigh: '/runs/pending-weigh',
     weighed: '/runs/weighed',
-    pendingPack: '/runs/pending-pack',
+
     /** Packed sacks still in the yard, for the Stock tab. */
     packed: '/runs/packed',
     shift: '/runs/shift',
