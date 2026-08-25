@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useAppSelector } from '@/app/hooks';
-import { reportService } from '@/api/services/report.service';
-import { toRequestError } from '@/api/axiosClient';
 import { OperatorChip } from '@/features/operators/OperatorChip';
-import { dayLong, lastNDays, todayISO } from '@/utils/date';
+import { useEfficiencyTrend } from '@/features/reports/useEfficiencyTrend';
+import { TREND_WINDOWS, pointName, spanNoun } from '@/features/reports/trendText';
+import { dayLong, todayISO } from '@/utils/date';
 import { num } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import type { EfficiencyTrend as Trend, TrendMetric, TrendSummary } from '@/types/models';
+import type { TrendMetric, TrendSummary } from '@/types/models';
 
 /**
  * One line, grade or vessel followed across a period.
@@ -23,7 +21,6 @@ import type { EfficiencyTrend as Trend, TrendMetric, TrendSummary } from '@/type
  * when the answer is disputed, which with money attached it will be.
  */
 
-const WINDOWS = [7, 14, 30, 90];
 
 /** How far off, and whether that is the good side. */
 function Delta({ metric }: { metric: TrendMetric }) {
@@ -40,17 +37,13 @@ function Delta({ metric }: { metric: TrendMetric }) {
 
 /** What the window says about one figure: the answer, before the working. */
 function Band({ metric, points }: { metric: TrendSummary; points: number }) {
-  const hit = metric.count ? Math.round((metric.onTarget / metric.count) * 100) : 0;
-  const name = (
-    point?: { date: string; shift?: string | null; label?: string | null } | null,
-  ) => {
-    if (!point) return '—';
-    if (point.label) return point.label;
-    return `${dayLong(point.date)}${point.shift ? ` · ${point.shift}` : ''}`;
-  };
+  const hit =
+    metric.count && metric.onTarget != null
+      ? Math.round((metric.onTarget / metric.count) * 100)
+      : 0;
 
   return (
-    <div className={cn('effcard', metric.offTarget > 0 && 'flag')}>
+    <div className={cn('effcard', (metric.offTarget ?? 0) > 0 && 'flag')}>
       <div className="row">
         <div>
           <b>{metric.label}</b>
@@ -68,31 +61,48 @@ function Band({ metric, points }: { metric: TrendSummary; points: number }) {
       </div>
 
       <div className="kpis">
+        {/*
+          Nothing to be on target against is not the same as being on target.
+          A figure whose benchmark nobody has filled in has offTarget false on
+          every point, so counting hits would have reported an unmeasured line
+          as a perfect one - batch yield, which carries no ideal today, read
+          "2 of 2 on target" while being held to nothing at all.
+        */}
         <div className="kpi">
-          <b style={metric.offTarget ? { color: 'var(--err)' } : undefined}>
-            {metric.onTarget}/{metric.count}
-          </b>
-          {/*
-            Of the ones that measured it, which is not always all of them - a
-            shift with no meter reading has no electricity figure, and counting
-            it as a zero would report the line as twice as good as it ran. Said
-            out loud where the two differ, so the denominator is never a puzzle.
-          */}
-          <span>
-            on target · {hit}%
-            {metric.count < points && ` · ${points - metric.count} not measured`}
-          </span>
+          {metric.ideal == null ? (
+            <>
+              <b>{metric.count}</b>
+              <span>measured · no target set</span>
+            </>
+          ) : (
+            <>
+              <b style={metric.offTarget ? { color: 'var(--err)' } : undefined}>
+                {metric.onTarget}/{metric.count}
+              </b>
+              {/*
+                Of the ones that measured it, which is not always all of them -
+                a shift with no meter reading has no electricity figure, and
+                counting it as a zero would report the line as twice as good as
+                it ran. Said out loud where the two differ, so the denominator
+                is never a puzzle.
+              */}
+              <span>
+                on target · {hit}%
+                {metric.count < points && ` · ${points - metric.count} not measured`}
+              </span>
+            </>
+          )}
         </div>
         <div className="kpi">
           <b>{metric.best?.value ?? '—'}</b>
           {/* Best by which way is good, not by which number is bigger - see the
               note on the server. The shift is named because the point of a best
               is somebody to go and ask what they did differently. */}
-          <span>best · {name(metric.best)}</span>
+          <span>best · {pointName(metric.best)}</span>
         </div>
         <div className="kpi">
           <b>{metric.worst?.value ?? '—'}</b>
-          <span>worst · {name(metric.worst)}</span>
+          <span>worst · {pointName(metric.worst)}</span>
         </div>
       </div>
     </div>
@@ -100,50 +110,19 @@ function Band({ metric, points }: { metric: TrendSummary; points: number }) {
 }
 
 export function EfficiencyTrend() {
-  const refreshTick = useAppSelector((s) => s.ui.refreshTick);
-
-  const [days, setDays] = useState(30);
-  const [from, setFrom] = useState(() => lastNDays(30).from);
-  const [to, setTo] = useState(() => todayISO());
-  const [subject, setSubject] = useState('');
-  const [data, setData] = useState<Trend | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const pickWindow = (n: number) => {
-    setDays(n);
-    const w = lastNDays(n);
-    setFrom(w.from);
-    setTo(w.to);
-  };
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      setData(await reportService.efficiencyTrend({ from, to, subject: subject || undefined }));
-    } catch (err) {
-      setError(toRequestError(err).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [from, to, subject]);
-
-  useEffect(() => {
-    void load();
-  }, [load, refreshTick]);
-
-  /*
-   * Open on something rather than on an empty picker.
-   *
-   * A screen whose first state is "pick one of these fourteen" makes the reader
-   * do the work before it has shown them anything, and the first subject is as
-   * good a starting point as any - what they came to compare, they will pick.
-   */
-  useEffect(() => {
-    if (subject || !data?.subjects.length) return;
-    setSubject(data.subjects[0]!.key);
-  }, [data, subject]);
+  const {
+    from,
+    to,
+    subject,
+    data,
+    loading,
+    error,
+    isWindow,
+    pickWindow,
+    setFrom,
+    setTo,
+    setSubject,
+  } = useEfficiencyTrend();
 
   const span = data?.subject?.span;
 
@@ -151,11 +130,11 @@ export function EfficiencyTrend() {
     <>
       <div className="panel">
         <div className="chips">
-          {WINDOWS.map((n) => (
+          {TREND_WINDOWS.map((n) => (
             <button
               key={n}
               type="button"
-              className={cn('chip', days === n && from === lastNDays(n).from && 'on')}
+              className={cn('chip', isWindow(n) && 'on')}
               onClick={() => pickWindow(n)}
             >
               Last {n} days
@@ -211,11 +190,7 @@ export function EfficiencyTrend() {
           The same figures the shift view holds against a benchmark, followed across the period
           instead of read one shift at a time. Every point is measured the way its own card is:
           {' '}
-          {span === 'day'
-            ? 'a vessel is counted per day, because a charge crosses the shift change.'
-            : span === 'batch'
-              ? 'a yield belongs to its batch, not to a shift.'
-              : 'a line or grade is measured per shift.'}
+          {spanNoun(span).why}
         </div>
       </div>
 
@@ -230,7 +205,7 @@ export function EfficiencyTrend() {
         <>
           <div className="grouphead">
             {data.subject.label} · {dayLong(from)} to {dayLong(to)} · {data.points.length}{' '}
-            {span === 'batch' ? 'batches' : span === 'day' ? 'days' : 'shifts'}
+            {spanNoun(span).plural}
           </div>
 
           {data.summary.length ? (
@@ -246,7 +221,7 @@ export function EfficiencyTrend() {
             <table className="tt min-w-[520px]">
               <thead>
                 <tr>
-                  <th>{span === 'batch' ? 'Batch' : 'When'}</th>
+                  <th>{spanNoun(span).column}</th>
                   {data.points[0]?.metrics.map((m) => (
                     <th key={m.key} className="tnum">
                       {m.label}

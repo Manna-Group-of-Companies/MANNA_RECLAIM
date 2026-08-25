@@ -2905,7 +2905,16 @@
     margin: 0;
     letter-spacing: 0.3px;
   }
-  .back-office .sub {
+  /*
+   * Small print under something: what a control means, what a figure is of.
+   *
+   * Declared for the whole app rather than for the back office, which is where
+   * it started. The tablet had picked the class up in half a dozen places -
+   * under the autoclave times, under the reason sheet, under the operator
+   * roster - and got no styling from it, so an aside written to be an aside
+   * drew at full body size and read as another instruction.
+   */
+  .sub {
     color: var(--muted);
     font-size: 12px;
     margin-top: 2px;

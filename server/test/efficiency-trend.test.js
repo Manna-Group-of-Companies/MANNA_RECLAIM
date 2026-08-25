@@ -169,3 +169,35 @@ test('the floor reads it too, because the floor is paid on it', async (t) => {
     assert.equal(res.status, 200, `${role} could not read the trend`);
   }
 });
+
+test('a figure with no benchmark is not reported as a perfect record', async (t) => {
+  const api = await startApi({
+    tables: {
+      runs: [grind('2026-08-01'), grind('2026-08-02')],
+      // Only the labour target is set. The electricity figure is measured on
+      // both shifts and held to nothing.
+      ideal_values: [{ id: 'current', data: { 'pmh.GRD_K': 90 } }],
+    },
+  });
+  t.after(() => api.stop());
+
+  const { summary } = await trend(api, 'from=2026-08-01&to=2026-08-02&subject=machine:GRD_K');
+  const energy = summary.find((m) => m.key === 'kwhkg.GRD_K');
+
+  /*
+   * Counted the obvious way this comes back 2 of 2 on target, because a figure
+   * with no target is off it on no point. On a screen an incentive is argued
+   * from, "perfect record" is the worst thing it could say about a line nobody
+   * has set a benchmark for.
+   */
+  assert.equal(energy.ideal, null);
+  assert.equal(energy.onTarget, null);
+  assert.equal(energy.offTarget, null);
+  // It is still measured, and the average is still worth reading - what is
+  // missing is the verdict, not the figure.
+  assert.equal(energy.count, 2);
+  assert.equal(energy.average, 0.5);
+
+  const pmh = summary.find((m) => m.key === 'pmh.GRD_K');
+  assert.equal(pmh.onTarget, 2, 'the one with a target still counts');
+});

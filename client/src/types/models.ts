@@ -1138,8 +1138,15 @@ export interface TrendSummary {
   ideal?: number | null;
   lowerIsBetter: boolean;
   count: number;
-  onTarget: number;
-  offTarget: number;
+  /**
+   * Null where nobody has set a benchmark, rather than a flattering number.
+   *
+   * A figure with no target is off it on no point, so counted the obvious way it
+   * comes back a perfect record - and on a screen an incentive is argued from,
+   * "perfect" is the worst thing to say about a line held to nothing at all.
+   */
+  onTarget: number | null;
+  offTarget: number | null;
   average: number;
   best?: { value: number; date: string; shift?: string | null; label?: string | null } | null;
   worst?: { value: number; date: string; shift?: string | null; label?: string | null } | null;

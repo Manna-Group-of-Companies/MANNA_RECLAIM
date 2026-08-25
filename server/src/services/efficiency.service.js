@@ -808,6 +808,17 @@ export const efficiencyService = {
       );
       const total = m.values.reduce((sum, v) => sum + v.value, 0);
       const digits = DIGITS_OF[m.unit] ?? 2;
+      /*
+       * Nothing to be on target against is not the same as being on target.
+       *
+       * A figure whose benchmark nobody has filled in is off target on no point,
+       * so counted the obvious way it comes back as a perfect record - batch
+       * yield, which carries no ideal today, would report every batch a hit
+       * while being held to nothing at all. Null rather than a number, so a
+       * screen has to decide what to say about it instead of printing the
+       * flattering answer by default.
+       */
+      const targeted = m.ideal != null;
       return {
         key: m.key,
         label: m.label,
@@ -815,8 +826,8 @@ export const efficiencyService = {
         ideal: m.ideal,
         lowerIsBetter: m.lowerIsBetter,
         count: m.values.length,
-        offTarget: m.offTarget,
-        onTarget: m.values.length - m.offTarget,
+        offTarget: targeted ? m.offTarget : null,
+        onTarget: targeted ? m.values.length - m.offTarget : null,
         average: round(total / m.values.length, digits),
         best: ranked[0] ?? null,
         worst: ranked[ranked.length - 1] ?? null,

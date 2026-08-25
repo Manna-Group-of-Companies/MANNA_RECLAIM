@@ -14,6 +14,7 @@ import {
   ViewHead,
 } from '@/components/ui';
 import { OperatorChip } from '@/features/operators/OperatorChip';
+import { ShiftTrend } from '@/features/reports/ShiftTrend';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { dayLong } from '@/utils/date';
@@ -339,6 +340,13 @@ export function UserEfficiencyPage() {
           )}
         </>
       )}
+
+      {/*
+        And how the line has been running, under the shift rather than beside
+        it. The shift is what the crew opened this tab for and it stays first;
+        the period is the question that follows once they have read it.
+      */}
+      <ShiftTrend />
 
       <BottomSheet
         open={Boolean(ask)}
