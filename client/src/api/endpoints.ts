@@ -59,6 +59,8 @@ export const endpoints = {
   },
   quality: {
     root: '/quality-tests',
+    /** The lab record by batch and then by grade - what the MD's Quality tab reads. */
+    byBatch: '/quality-tests/by-batch',
     summary: '/quality-tests/summary',
     byId: (id: string) => `/quality-tests/${id}`,
     report: (id: string) => `/quality-tests/${id}/report`,

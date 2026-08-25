@@ -3,11 +3,12 @@ import { MdLayout } from '@/components/layout';
 import { ProtectedRoute } from './ProtectedRoute';
 import { AdminHistoryPage, ApprovalsPage, EfficiencyPage } from '@/pages/admin';
 import { MdOverviewPage } from '@/pages/md';
+import { BatchQualityBoard } from '@/features/quality/BatchQualityBoard';
 import { mdPaths } from '@/config/paths';
 import { SUMMARY_ROLES } from '@/config/constants';
 
 /**
- * The managing director's three screens.
+ * The managing director's five screens.
  *
  * Gated on SUMMARY_ROLES, which is md plus the back office - a manager opening
  * these reads the same two pages rather than being bounced, and the guard stays
@@ -36,6 +37,15 @@ export const mdRoutes: RouteObject[] = [
           // The back office's own History, read-only for this account - see the
           // note in HistoryPage on what comes off it and what still guards it.
           { path: 'history', element: <AdminHistoryPage /> },
+          /*
+           * What the lab found, by batch and then by grade.
+           *
+           * Its own board rather than the back office's Quality tab, which is a
+           * working screen: it files verdicts, uploads reports and holds the
+           * coarse sampling slots. None of that is an MD's, and a page of
+           * controls that write is not made read-only by hiding the buttons.
+           */
+          { path: 'quality', element: <BatchQualityBoard /> },
         ],
       },
     ],

@@ -15,6 +15,14 @@ router.use(authenticate);
 // held batch, so the floor has to be able to see the verdict even though it
 // cannot write one. Writing a test is the lab's alone - see QUALITY_WRITE_ROLES.
 router.get('/', validate({ query: listQuery }), quality.list);
+/**
+ * The lab record by batch and then by grade.
+ *
+ * Open to any signed-in account, like the rest of the quality reads: it carries
+ * verdicts and measured figures and nothing commercial. The managing director's
+ * Quality tab is drawn off this one.
+ */
+router.get('/by-batch', validate({ query: dateRange }), quality.byBatch);
 router.get('/summary', validate({ query: dateRange }), quality.summary);
 router.post('/', authorize(...QUALITY_WRITE_ROLES), validate({ body: qualityTestSchema }), quality.record);
 router.post(

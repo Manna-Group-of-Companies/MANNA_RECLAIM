@@ -217,6 +217,131 @@ export const qualityService = {
   },
 
   /** Pass rate per grade over the window. */
+  /**
+   * The lab record by batch and then by grade, which is how the plant reads it.
+   *
+   * A charge goes into an autoclave under a number and is refined into several
+   * grades, and each grade is tested on its own: batch 2782 has a verdict for
+   * Fine and a separate verdict for Special, and they can differ. So the unit
+   * here is the pair, not the batch.
+   *
+   * That is worth saying because the database has a `quality_latest` view which
+   * answers the same question and is keyed on the batch without the grade - so
+   * it collapses Fine and Special into whichever was tested last. It is not used
+   * here for that reason, and anything else reading it for a per-grade verdict
+   * is getting one grade's answer under another grade's name.
+   *
+   * Newest test wins per pair. The lab re-tests: batch 2782 Fine is on record as
+   * held and then passed on the same day, which is a re-test rather than a
+   * contradiction, and the standing verdict is the later one. The earlier ones
+   * are kept and counted, because "passed on the second go" is a different fact
+   * from "passed", and it is the kind an incentive argument turns on.
+   */
+  async byBatch({ from, to } = {}) {
+    const rows = (await base.all({}, { sort: 'ts' })).map(decorate);
+
+    const inWindow = (t) => {
+      const day = String(t.tested_at ?? '').slice(0, 10);
+      if (!day) return !from && !to;
+      return (!from || day >= from) && (!to || day <= to);
+    };
+
+    const batches = new Map();
+    for (const t of rows) {
+      if (!t.batch_no || !inWindow(t)) continue;
+      const batch = batches.get(t.batch_no) ?? {
+        batch: t.batch_no,
+        kind: t.kind ?? null,
+        grades: new Map(),
+      };
+      // A test with no grade against it is still the lab's answer about the
+      // batch as a whole, so it is kept under its own heading rather than
+      // dropped - see the note on the response below.
+      const key = t.grade ?? '';
+      const held = batch.grades.get(key) ?? { grade: t.grade ?? null, tests: [] };
+      held.tests.push(t);
+      batch.grades.set(key, held);
+      batches.set(t.batch_no, batch);
+    }
+
+    const newestFirst = (a, b) =>
+      String(b.tested_at ?? '').localeCompare(String(a.tested_at ?? ''));
+
+    const out = [...batches.values()].map((b) => {
+      const grades = [...b.grades.values()]
+        .map((g) => {
+          const tests = [...g.tests].sort(newestFirst);
+          const latest = tests[0];
+          const readings = Array.isArray(latest?.params) ? latest.params : [];
+          return {
+            grade: g.grade,
+            verdict: latest?.verdict ?? null,
+            testedAt: latest?.tested_at ?? null,
+            testedBy: latest?.tested_by ?? null,
+            remarks: latest?.remarks ?? null,
+            reportUrl: latest?.attachment_url ?? null,
+            /** The measured figures on the standing test. Often none - see below. */
+            readings,
+            /*
+             * How many times this grade has been tested, and how many of those
+             * were held. "Passed on the third go" is a different fact from
+             * "passed", and a screen that only ever showed the standing verdict
+             * would report the two identically.
+             */
+            tests: tests.length,
+            held: tests.filter((t) => t.verdict !== 'pass').length,
+            history: tests.slice(1).map((t) => ({
+              verdict: t.verdict ?? null,
+              testedAt: t.tested_at ?? null,
+              testedBy: t.tested_by ?? null,
+            })),
+          };
+        })
+        .sort((a, b) => String(a.grade ?? '').localeCompare(String(b.grade ?? '')));
+
+      const tested = grades.map((g) => g.testedAt).filter(Boolean).sort();
+      return {
+        batch: b.batch,
+        kind: b.kind,
+        grades,
+        firstTested: tested[0] ?? null,
+        lastTested: tested[tested.length - 1] ?? null,
+        /*
+         * The batch's own standing, worked out from its grades rather than
+         * stored: a batch is only clear when every grade off it is, because one
+         * grade on hold is stock that cannot go out.
+         */
+        verdict: grades.every((g) => g.verdict === 'pass')
+          ? 'pass'
+          : grades.some((g) => g.verdict === 'pass')
+            ? 'part'
+            : 'hold',
+        readings: grades.reduce((n, g) => n + g.readings.length, 0),
+      };
+    });
+
+    out.sort((a, b) => String(b.lastTested ?? '').localeCompare(String(a.lastTested ?? '')));
+
+    /**
+     * What the record does and does not carry, said out loud.
+     *
+     * The lab has been recording a verdict and a grade and, so far, no measured
+     * figures at all: every test on record has an empty readings list. The
+     * screen has to be able to say that rather than drawing a report with
+     * nothing in it, because a quality page showing verdicts and no numbers
+     * reads as a plant that tests nothing - and what is actually happening is a
+     * plant that tests and does not write the results down here yet.
+     */
+    const totals = {
+      batches: out.length,
+      grades: out.reduce((n, b) => n + b.grades.length, 0),
+      withReadings: out.filter((b) => b.readings > 0).length,
+      onHold: out.filter((b) => b.verdict !== 'pass').length,
+    };
+
+    return { window: { from: from ?? null, to: to ?? null }, totals, batches: out };
+  },
+
   async summary({ from, to } = {}) {
     const rows = (await base.all()).map(decorate);
     const byGrade = {};

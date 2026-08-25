@@ -6,11 +6,12 @@ import { mdPaths } from '@/config/paths';
 import { cn } from '@/utils/cn';
 import { BackOfficeDay } from './BackOfficeDay';
 
-/** Three tabs, and that is the account. */
+/** Five tabs, and that is the account. */
 const tabs = [
   { to: mdPaths.overview, label: 'Overview' },
   { to: mdPaths.efficiency, label: 'Efficiency' },
   { to: mdPaths.approvals, label: 'Approvals' },
+  { to: mdPaths.quality, label: 'Quality' },
   { to: mdPaths.history, label: 'History' },
 ];
 

@@ -1127,6 +1127,55 @@ export interface SapStock {
   totals: { rows: number; byUnit: Record<string, number> };
 }
 
+/** One measured figure off a lab test - the plant's own sheet, as entered. */
+export interface QualityReading {
+  name: string;
+  value: string;
+  unit?: string | null;
+}
+
+/**
+ * One grade off one batch, and where the lab left it.
+ *
+ * The grade is the unit here, not the batch: a charge is refined into several
+ * grades and each is tested on its own, so batch 2782 can be passed on Special
+ * and held on Fine.
+ */
+export interface BatchQualityGrade {
+  grade: string | null;
+  verdict: 'pass' | 'hold' | null;
+  testedAt: string | null;
+  testedBy: string | null;
+  remarks?: string | null;
+  reportUrl?: string | null;
+  readings: QualityReading[];
+  /** How many times this grade has been tested, and how many of those were held. */
+  tests: number;
+  held: number;
+  history: { verdict: string | null; testedAt: string | null; testedBy: string | null }[];
+}
+
+export interface BatchQuality {
+  batch: string;
+  kind?: string | null;
+  grades: BatchQualityGrade[];
+  firstTested: string | null;
+  lastTested: string | null;
+  /**
+   * The batch's own standing, worked out from its grades. `part` is some grades
+   * clear and some not - a real state, and the one that decides whether an order
+   * can be filled off this batch.
+   */
+  verdict: 'pass' | 'part' | 'hold';
+  readings: number;
+}
+
+export interface QualityByBatch {
+  window: { from: string | null; to: string | null };
+  totals: { batches: number; grades: number; withReadings: number; onHold: number };
+  batches: BatchQuality[];
+}
+
 /** What the run history covers, for the back office's pickers. */
 export interface RunFilters {
   days: string[];

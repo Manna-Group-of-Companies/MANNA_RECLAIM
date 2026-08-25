@@ -45,6 +45,14 @@ export const attachReport = asyncHandler(async (req, res) =>
   ok(res, await qualityService.attachReport(req.params.id, req.body), 'Report attached'),
 );
 
+/**
+ * The lab record by batch and then by grade - the shape the plant reads it in,
+ * and the one the managing director is shown.
+ */
+export const byBatch = asyncHandler(async (req, res) =>
+  ok(res, await qualityService.byBatch(req.query)),
+);
+
 export const summary = asyncHandler(async (req, res) =>
   ok(res, await qualityService.summary(req.query)),
 );

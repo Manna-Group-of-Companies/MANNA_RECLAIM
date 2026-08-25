@@ -90,6 +90,13 @@ export const mdPaths = {
   approvals: '/md/approvals',
   /** The run record, read-only: no correction sheet and no costed export. */
   history: '/md/history',
+  /**
+   * What the lab found, by batch and then by grade.
+   *
+   * The grade is the unit: a charge is refined into several and each is tested
+   * on its own, so one batch can be passed on Special and held on Fine.
+   */
+  quality: '/md/quality',
 } as const;
 
 /**

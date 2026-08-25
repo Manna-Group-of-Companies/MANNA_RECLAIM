@@ -2,6 +2,7 @@ import { axiosClient, drainPaged, requestPaged } from '../axiosClient';
 import { endpoints } from '../endpoints';
 import type { ApiEnvelope, ListQuery } from '@/types/api';
 import type {
+  QualityByBatch,
   QualityGradeSummary,
   QualityTest,
   Quality,
@@ -61,6 +62,21 @@ export interface ReportPayload {
 
 export const qualityService = {
   list: (params?: ListQuery) => requestPaged<QualityTest>(endpoints.quality.root, params),
+
+  /**
+   * The lab record by batch and then by grade.
+   *
+   * The grade is the unit, not the batch: a charge is refined into several and
+   * each is tested on its own, so one batch can be passed on Special and held on
+   * Fine. The database has a `quality_latest` view that answers this keyed on
+   * the batch alone - it collapses the two - which is why this is its own read.
+   */
+  async byBatch(range?: { from?: string; to?: string }): Promise<QualityByBatch> {
+    const res = await axiosClient.get<ApiEnvelope<QualityByBatch>>(endpoints.quality.byBatch, {
+      params: range,
+    });
+    return res.data.data;
+  },
 
   /**
    * Every verdict filed on or after `from`, newest first; null is the whole
