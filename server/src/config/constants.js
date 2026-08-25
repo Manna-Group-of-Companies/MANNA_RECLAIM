@@ -787,6 +787,20 @@ export const idealKey = {
    * shown on the card; it is context, not a target.
    */
   autoclaveRuns: (key) => `runs.${key}`,
+  /**
+   * How long one charge should take, in hours.
+   *
+   * Per vessel, because they are not the same vessel: across the whole record
+   * Autoclave A runs a median 8.3 h a charge and M 7.4, and one target for both
+   * would flag the slower one on every charge it ever cooked correctly.
+   *
+   * This is what the plant judges a vessel on, rather than how many charges it
+   * got through in a day. A count per day is a fact about how much work there
+   * was - a quiet day is not a slow vessel - and the crew cannot answer for it.
+   * How long each charge took is the vessel's own, and it is the figure that
+   * moves when a valve is passing or the fire is not being kept up.
+   */
+  autoclaveCycle: (key) => `cycle.${key}`,
   kwhPerKg: (key) => `kwhkg.${key}`,
   specialKwhPerKg: (quality) => `kwhkg.${SPECIAL_LINE_KEY}.${quality}`,
   perManHour: (key) => `pmh.${key}`,
@@ -824,6 +838,12 @@ export const IDEAL_VALUE_FIELDS = [
     label: `${line.label} — production`,
     unit: 'kg/shift',
     lowerIsBetter: false,
+  })),
+  ...IDEAL_AUTOCLAVES.map((vessel) => ({
+    key: idealKey.autoclaveCycle(vessel.key),
+    label: `${vessel.label} — time a charge`,
+    unit: 'h/charge',
+    lowerIsBetter: true,
   })),
   ...IDEAL_AUTOCLAVES.map((vessel) => ({
     key: idealKey.autoclaveRuns(vessel.key),

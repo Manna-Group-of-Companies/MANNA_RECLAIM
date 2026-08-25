@@ -15,6 +15,7 @@ import {
 } from '@/components/ui';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { ShiftTrend } from '@/features/reports/ShiftTrend';
+import { ChargeList } from '@/features/reports/ChargeList';
 import { UtilisationCards } from '@/features/reports/Utilisation';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
@@ -266,6 +267,9 @@ export function UserEfficiencyPage() {
             }}
           />
         ))}
+
+        {/* Every charge under the average - each one is held to the time. */}
+        <ChargeList charges={card.charges} />
       </div>
     );
   };

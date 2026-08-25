@@ -573,6 +573,8 @@ export const IDEAL_KEY = {
    * is what does not move with the split. Mirrors the note on the server.
    */
   autoclaveRuns: (key: string) => `runs.${key}`,
+  /** How long one charge should take. Per vessel - they are not the same vessel. */
+  autoclaveCycle: (key: string) => `cycle.${key}`,
   kwhPerKg: (key: string) => `kwhkg.${key}`,
   specialKwhPerKg: (quality: string) => `kwhkg.SPECIAL.${quality}`,
   perManHour: (key: string) => `pmh.${key}`,
@@ -630,6 +632,15 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
       key: IDEAL_KEY.production(line.key),
       label: line.label,
       unit: 'kg/shift',
+    })),
+  },
+  {
+    title: 'Autoclave — time a charge',
+    note: 'how long one charge should take, and what each charge is held to',
+    fields: IDEAL_AUTOCLAVES.map((vessel) => ({
+      key: IDEAL_KEY.autoclaveCycle(vessel.key),
+      label: vessel.label,
+      unit: 'h/charge',
     })),
   },
   {

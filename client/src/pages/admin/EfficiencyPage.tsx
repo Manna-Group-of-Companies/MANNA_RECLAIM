@@ -13,6 +13,7 @@ import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
 import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
+import { ChargeList } from '@/features/reports/ChargeList';
 import { UtilisationTable } from '@/features/reports/Utilisation';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useToast } from '@/hooks/useToast';
@@ -536,6 +537,10 @@ export function EfficiencyPage() {
         {card.metrics.map((m) => (
           <Metric key={m.key} metric={m} onCalc={setCalc} />
         ))}
+
+        {/* Every charge under the average, because the rule is that each one
+            matches the time and an average can hide the one that doubled. */}
+        <ChargeList charges={card.charges} />
 
         <div className="reasons">
           {notes.map((n) => (

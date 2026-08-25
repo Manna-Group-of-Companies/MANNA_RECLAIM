@@ -1339,6 +1339,19 @@ export interface ShiftRosterSlot {
   assignedAt?: string | null;
 }
 
+/** One charge on a vessel, against the time the manager set for one. */
+export interface AutoclaveCharge {
+  id: string;
+  machineId: string;
+  batch?: string | null;
+  startedAt?: string | null;
+  /** Null where nobody wrote the time down - not a charge that took no time. */
+  hours: number | null;
+  charge?: number | null;
+  overBy: number | null;
+  offTarget: boolean;
+}
+
 export interface EfficiencyCard {
   key: string;
   metrics: EfficiencyMetric[];
@@ -1350,6 +1363,17 @@ export interface EfficiencyCard {
   machine?: string;
   /** ...and yield cards by batch. */
   batch?: string;
+  /**
+   * Each charge on a vessel this shift, and how long it took.
+   *
+   * A vessel is judged on the time a charge takes rather than on how many it
+   * got through: a quiet day is not a slow autoclave and the crew cannot answer
+   * for it. The card's metric is the shift's average - a reason is filed against
+   * one parameter and two charges would collide on a per-charge one - and each
+   * charge is listed with its own verdict, because the rule is that every charge
+   * matches the time and an average can hide one that doubled.
+   */
+  charges?: AutoclaveCharge[];
   charge?: number | null;
   out?: number | null;
   workers?: number | null;

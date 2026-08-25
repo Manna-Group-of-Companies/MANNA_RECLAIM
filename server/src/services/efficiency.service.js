@@ -3,7 +3,6 @@ import { ApiError } from '../utils/ApiError.js';
 import { rateService } from './rate.service.js';
 import {
   TABLES,
-  REFINER_IDS,
   GRINDER_IDS,
   SHIFT_MINUTES,
   EFFICIENCY_THRESHOLDS as TH,
@@ -79,6 +78,30 @@ export function runHours(r) {
 }
 
 /** kWh for a run, from the figure or from the meter readings around it. */
+/**
+ * What one record cost in labour: its crew for its hours.
+ *
+ * Worked out per record and added up, never as the summed crew times the
+ * summed hours. Those two are not the same number and the difference is not
+ * small: a grade refined by 2 hands for 2.5 h and then 3 hands for 0.9 h cost
+ * 7.7 labour-hours, and multiplying the sums reads 5 hands over 3.4 h = 17.
+ *
+ * dailyUnits has carried this warning in its own comment since it was
+ * written - it folds a day out of shifts and is careful to add the shifts'
+ * labour rather than multiply the day's totals. The same mistake was being
+ * made one level further down, across the passes inside a single shift, where
+ * nothing was guarding against it: on the special line, where one grade goes
+ * through two to four passes in a shift, the labour came out 2.26 times too
+ * high on 240 of 278 shift-grades, so every kg per man-hour the line has ever
+ * been judged on was about half what the crew actually achieved.
+ */
+export function runLabour(r) {
+  const crew = num(r.workers);
+  const hours = runHours(r);
+  if (crew == null || hours == null) return 0;
+  return crew * hours;
+}
+
 export function runKwh(r) {
   if (num(r.kwh) != null) return num(r.kwh);
   if (num(r.elec_end) != null && num(r.elec_start) != null) {
@@ -91,28 +114,63 @@ export function runKwh(r) {
 export function refinerUnits(rows) {
   const byKey = new Map();
   for (const r of rows) {
-    if (r.line !== 'special' || !r.quality || !REFINER_IDS.includes(r.machine_id)) continue;
+    if (r.line !== 'special' || !r.quality) continue;
+    /*
+     * Any machine working the line, but never a vessel.
+     *
+     * It used to be REFINER_IDS - PR2, R1, R3, R4 - and the plant does not work
+     * that way: Medium is finished on R2, which is a coarse-line machine, and
+     * DRC has come off PR2. Eleven runs and 6,177 kg of Medium were dropped for
+     * being on the wrong machine, and dropped by coarseUnits too for being on
+     * the special line. What is on the line is what the run says it is on.
+     *
+     * A vessel is excluded by name, the same way coarseUnits excludes it and for
+     * the same reason: 138 charges are logged on the special line carrying 4,054
+     * hours, and a vessel cooking for eight hours with one hand attending is not
+     * the same kind of labour-hour as a crew working a refiner. Averaged in they
+     * would make the line's kg per man-hour four times too lax.
+     */
+    if (r.kind === 'autoclave') continue;
     const key = `${r.shift_date}|${r.shift ?? ''}|${r.quality}`;
     const u = byKey.get(key) ?? {
       day: r.shift_date, shift: r.shift ?? '', quality: r.quality,
-      out: 0, workers: 0, hours: 0, kwh: 0, batches: new Set(),
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, batches: new Set(),
     };
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
+    u.labour += runLabour(r);
     u.kwh += runKwh(r) ?? 0;
     if (r.batch_no) u.batches.add(r.batch_no);
-    // Only R4 is weighed - the earlier passes are the same material moving on,
-    // so counting their weights too would double-count the shift's output.
-    if (r.machine_id === 'R4') {
-      const w = num(r.weight_kg);
-      if (w != null) u.out += w;
-    }
+    /*
+     * Whatever the line weighed, on whichever machine weighed it.
+     *
+     * This used to count R4 alone, on the reasoning that the earlier passes are
+     * the same material moving on and counting their weights too would
+     * double-count the shift. The first half of that is right and the
+     * conclusion was not: a pass that is only moving material on does not get
+     * weighed at all - 1,268 of the plant's runs carry no weight - and a
+     * weighed pass is one that finished a grade.
+     *
+     * What it cost: Medium is finished on R2, ten times since March, and R2 is
+     * a coarse-line machine. Those runs are logged on the special line with a
+     * grade and a weight, so refinerUnits skipped them for not being R4 and
+     * coarseUnits skipped them for not being coarse. 14,618 kg fell between the
+     * two and was counted by no figure on this screen - which is why the night
+     * of 24 August had a Medium card reading 0 kg with both its rates blank,
+     * while History showed the 822 kg that shift had made.
+     *
+     * A charge is worked into several grades at once and each grade is finished
+     * on whichever machine is free, so two machines weighing under one batch
+     * number is two different grades rather than the same rubber twice.
+     */
+    const w = num(r.weight_kg);
+    if (w != null && w > 0) u.out += w;
     byKey.set(key, u);
   }
   return [...byKey.values()].map((u) => ({
     ...u,
     batches: [...u.batches],
-    pmh: u.out > 0 && u.workers > 0 && u.hours > 0 ? u.out / (u.workers * u.hours) : null,
+    pmh: u.out > 0 && u.labour > 0 ? u.out / u.labour : null,
     kwhkg: u.out > 0 && u.kwh > 0 ? u.kwh / u.out : null,
   }));
 }
@@ -127,17 +185,19 @@ export function grinderUnits(rows) {
     const key = `${r.machine_id}|${r.shift_date}|${r.shift ?? ''}`;
     const u = byKey.get(key) ?? {
       machineId: r.machine_id, machine: r.machine ?? r.machine_id,
-      day: r.shift_date, shift: r.shift ?? '', out: 0, workers: 0, hours: 0, kwh: 0,
+      day: r.shift_date, shift: r.shift ?? '',
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0,
     };
     u.out += w;
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
+    u.labour += runLabour(r);
     u.kwh += runKwh(r) ?? 0;
     byKey.set(key, u);
   }
   return [...byKey.values()].map((u) => ({
     ...u,
-    pmh: u.out > 0 && u.workers > 0 && u.hours > 0 ? u.out / (u.workers * u.hours) : null,
+    pmh: u.out > 0 && u.labour > 0 ? u.out / u.labour : null,
     kwhkg: u.out > 0 && u.kwh > 0 ? u.kwh / u.out : null,
     // Capped at 1.5 so a mis-keyed hour meter cannot report 400% utilisation.
     util: u.hours > 0 ? Math.min(1.5, u.hours / (SHIFT_MINUTES / 60)) : null,
@@ -180,7 +240,10 @@ export function dailyUnits(units, keyOf) {
     };
     d.out += u.out ?? 0;
     d.kwh += u.kwh ?? 0;
-    d.labourHours += (u.workers ?? 0) * (u.hours ?? 0);
+    // The shift's own labour, already worked out record by record - see
+    // runLabour. Multiplying this shift's summed crew by its summed hours
+    // here would put the very mistake back that the note above warns about.
+    d.labourHours += u.labour ?? 0;
     d.shifts += 1;
     byKey.set(mapKey, d);
   }
@@ -204,14 +267,18 @@ function batchYields(rows) {
       batch: r.batch_no, charge: null, out: 0, outDay: null, outShift: null,
     };
     if (r.kind === 'autoclave' && num(r.capacity) != null) u.charge = num(r.capacity);
-    if (r.machine_id === 'R4') {
-      const w = num(r.weight_kg);
-      if (w != null) {
-        u.out += w;
-        if (r.shift_date) {
-          u.outDay = r.shift_date;
-          u.outShift = r.shift ?? '';
-        }
+    /*
+     * The same rule as refinerUnits above, and for the same reason: a batch's
+     * yield is everything that came off it, and the Medium finished on R2 is
+     * part of what the charge gave back. Counting R4 alone understated the
+     * yield of every batch that had a grade finished elsewhere.
+     */
+    const w = num(r.weight_kg);
+    if (w != null && w > 0) {
+      u.out += w;
+      if (r.shift_date) {
+        u.outDay = r.shift_date;
+        u.outShift = r.shift ?? '';
       }
     }
     byBatch.set(r.batch_no, u);
@@ -250,11 +317,13 @@ function coarseUnits(rows) {
     if (r.kind === 'autoclave') continue;
     const key = `${r.shift_date}|${r.shift ?? ''}`;
     const u = byKey.get(key) ?? {
-      day: r.shift_date, shift: r.shift ?? '', out: 0, workers: 0, hours: 0, kwh: 0,
+      day: r.shift_date, shift: r.shift ?? '',
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0,
     };
     u.out += num(r.weight_kg) ?? 0;
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
+    u.labour += runLabour(r);
     u.kwh += runKwh(r) ?? 0;
     byKey.set(key, u);
   }
@@ -266,7 +335,7 @@ function coarseUnits(rows) {
     .filter((u) => u.out > 0)
     .map((u) => ({
       ...u,
-      pmh: u.out > 0 && u.workers > 0 && u.hours > 0 ? u.out / (u.workers * u.hours) : null,
+      pmh: u.out > 0 && u.labour > 0 ? u.out / u.labour : null,
       kwhkg: u.out > 0 && u.kwh > 0 ? u.kwh / u.out : null,
     }));
 }
@@ -288,12 +357,49 @@ function autoclaveRunsByDay(rows) {
     if (r.kind !== 'autoclave' || !r.shift_date) continue;
     const key = `${r.machine_id}|${r.shift_date}`;
     const u = byKey.get(key) ?? {
-      machineId: r.machine_id, machine: r.machine ?? r.machine_id, day: r.shift_date, runs: 0,
+      machineId: r.machine_id, machine: r.machine ?? r.machine_id, day: r.shift_date,
+      runs: 0, hours: 0, timed: 0,
     };
     u.runs += 1;
+    // Only the charges that recorded a time. A charge whose duration was
+    // never written down is not a charge that took nought hours, and
+    // averaging it in as one would report the vessel as twice as quick.
+    const h = runHours(r);
+    if (h != null && h > 0) {
+      u.hours += h;
+      u.timed += 1;
+    }
     byKey.set(key, u);
   }
-  return [...byKey.values()];
+  return [...byKey.values()].map((u) => ({
+    ...u,
+    cycle: u.timed > 0 ? u.hours / u.timed : null,
+  }));
+}
+
+/**
+ * Each charge on a vessel in one shift, and how long it took.
+ *
+ * Per shift and per charge, which is a different span from the count above and
+ * deliberately so. How many charges a vessel got through is a fact about how
+ * much work there was - a quiet day is not a slow vessel, and the crew cannot
+ * answer for it - and it is counted per day because a charge crosses the
+ * handover. How long each charge took is the vessel's own, it belongs to the
+ * charge rather than to the day, and it is the figure that moves when a valve
+ * is passing or the fire is not being kept up.
+ */
+function autoclaveCharges(rows) {
+  return rows
+    .filter((r) => r.kind === 'autoclave')
+    .map((r) => ({
+      id: r.id,
+      machineId: r.machine_id,
+      batch: r.batch_no ?? null,
+      startedAt: r.started_at ?? null,
+      hours: runHours(r),
+      charge: num(r.capacity),
+    }))
+    .sort((a, b) => String(a.startedAt ?? '').localeCompare(String(b.startedAt ?? '')));
 }
 
 /**
@@ -1341,21 +1447,82 @@ export const efficiencyService = {
      * rather than leaving the reader to notice.
      */
     const acAll = autoclaveRunsByDay(all);
+    const chargesThisShift = autoclaveCharges(shiftRows);
+
     const autoclaves = IDEAL_AUTOCLAVES.map((vessel) => {
       const today = acAll.find((u) => u.machineId === vessel.key && u.day === date);
       const runsToday = today?.runs ?? 0;
+
+      /*
+       * This shift's charges on this vessel, each measured against the time the
+       * manager set for one. The metric is the average of them, because a
+       * reason is filed against a parameter and a per-charge parameter would
+       * collide the moment a vessel took two charges in a shift - but every
+       * charge is listed with its own verdict beside it, since "each run should
+       * match the ideal" is the rule and an average can hide a charge that
+       * doubled while another was quick.
+       */
+      const mine = chargesThisShift.filter((c) => c.machineId === vessel.key);
+      const cycleIdeal = ideals[idealKey.autoclaveCycle(vessel.key)] ?? null;
+      const timed = mine.filter((c) => c.hours != null && c.hours > 0);
+      const cycle = timed.length
+        ? timed.reduce((sum, c) => sum + c.hours, 0) / timed.length
+        : null;
+      const charges = mine.map((c) => {
+        /*
+         * Nought hours is not a charge that took no time, it is a charge whose
+         * time nobody wrote down - the vessel was loaded and the sheet left
+         * blank. Null so the screen says so, and so it is left out of the
+         * average the same way.
+         */
+        const hours = c.hours != null && c.hours > 0 ? round(c.hours, 2) : null;
+        return {
+          ...c,
+          hours,
+          overBy: hours == null || cycleIdeal == null ? null : round(hours - Number(cycleIdeal), 2),
+          offTarget: hours != null && cycleIdeal != null && hours > Number(cycleIdeal),
+        };
+      });
+
       return {
         key: `autoclave|${vessel.key}`,
         line: 'autoclave',
         operator: operatorOf('AUTOCLAVES'),
         machineId: vessel.key,
         label: vessel.label,
+        /** Each charge this shift, with its own time and its own verdict. */
+        charges,
         metrics: [
+          {
+            key: 'cycle',
+            label: 'Time a charge',
+            value: round(cycle, 2),
+            unit: 'h',
+            span: 'shift',
+            context: timed.length
+              ? `${timed.length} charge${timed.length === 1 ? '' : 's'} this shift`
+              : null,
+            warn: false,
+            ...idealFor(idealKey.autoclaveCycle(vessel.key), cycle, ideals, 2),
+            calc: cycle == null ? null : {
+              title: 'Time a charge',
+              formula: 'hours logged on each charge, averaged over the shift',
+              lines: [
+                ...timed.map(
+                  (c) => `${c.batch ?? 'charge'} = ${round(c.hours, 2)} h`,
+                ),
+                `= ${round(timed.reduce((sum, c) => sum + c.hours, 0), 2)} ÷ ${timed.length}`,
+              ],
+              result: `${round(cycle, 2)} h`,
+              note: 'Each charge is held to the time set for this vessel on the Ideal values tab; the average is what a reason is filed against.',
+            },
+          },
           {
             key: 'runs',
             label: 'Charges today',
             value: runsToday,
             unit: 'runs/day',
+            span: 'day',
             context: null,
             warn: false,
             ...idealFor(idealKey.autoclaveRuns(vessel.key), runsToday, ideals, 0),
