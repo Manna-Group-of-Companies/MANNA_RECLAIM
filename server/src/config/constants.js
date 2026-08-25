@@ -449,6 +449,9 @@ export const TABLES = {
    * migrations/0020.
    */
   sapStock: 'sap_stock',
+  /** What has gone out, three months of it - see migrations/0021. */
+  sapDispatches: 'sap_dispatches',
+  /** One run table for both feeds, scoped by `feed`. */
   sapSyncs: 'sap_syncs',
 };
 

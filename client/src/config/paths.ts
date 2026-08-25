@@ -97,6 +97,12 @@ export const mdPaths = {
    * on its own, so one batch can be passed on Special and held on Fine.
    */
   quality: '/md/quality',
+  /**
+   * What the plant has been shipping - three months of SAP's own documents.
+   * A question no screen here could answer before: the plant raises them in
+   * SAP, so this end never had them.
+   */
+  dispatches: '/md/dispatches',
 } as const;
 
 /**

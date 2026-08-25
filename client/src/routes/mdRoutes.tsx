@@ -4,11 +4,12 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { AdminHistoryPage, ApprovalsPage, EfficiencyPage } from '@/pages/admin';
 import { MdOverviewPage } from '@/pages/md';
 import { BatchQualityBoard } from '@/features/quality/BatchQualityBoard';
+import { SapDispatchBoard } from '@/features/dispatch/SapDispatchBoard';
 import { mdPaths } from '@/config/paths';
 import { SUMMARY_ROLES } from '@/config/constants';
 
 /**
- * The managing director's five screens.
+ * The managing director's six screens.
  *
  * Gated on SUMMARY_ROLES, which is md plus the back office - a manager opening
  * these reads the same two pages rather than being bounced, and the guard stays
@@ -46,6 +47,12 @@ export const mdRoutes: RouteObject[] = [
            * controls that write is not made read-only by hiding the buttons.
            */
           { path: 'quality', element: <BatchQualityBoard /> },
+          /*
+           * What has gone out, off SAP's own documents. Not the yard's
+           * dispatch screen, which raises them and is the supervisor's - this
+           * account reads a quarter and issues nothing.
+           */
+          { path: 'dispatches', element: <SapDispatchBoard /> },
         ],
       },
     ],

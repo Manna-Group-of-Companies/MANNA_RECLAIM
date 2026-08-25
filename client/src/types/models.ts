@@ -1176,6 +1176,51 @@ export interface QualityByBatch {
   batches: BatchQuality[];
 }
 
+/** One line of one dispatch document, as SAP holds it. */
+export interface SapDispatchRow {
+  docNo: string;
+  /** `invoice` here - this SAP install raises no delivery notes at all. */
+  docType: string | null;
+  docDate: string | null;
+  customer: string | null;
+  customerCode: string | null;
+  sku: string;
+  description: string | null;
+  grade: string | null;
+  /** Null throughout: no invoice line on this install carries a batch. */
+  batch: string | null;
+  quantity: number;
+  unit: string;
+  /** Null where the document carries none - a zero would read as free. */
+  value: number | null;
+  currency: string | null;
+}
+
+export interface SapDispatches {
+  sync: {
+    id: string;
+    feed: string | null;
+    source: string;
+    asOf: string;
+    receivedAt: string;
+    rows: number;
+    /** What the read covered, rather than what the rows happen to span. */
+    window: { from: string | null; to: string | null } | null;
+  } | null;
+  rows: SapDispatchRow[];
+  totals: {
+    rows: number;
+    /** Lines are what is stored; documents are what a person counts. */
+    documents: number;
+    byUnit: Record<string, number>;
+    /**
+     * Null where nothing carried a value, or where two currencies did - a
+     * total across both is a number with no unit, and it would be believed.
+     */
+    value: { amount: number; currency: string | null; lines: number } | null;
+  };
+}
+
 /** What the run history covers, for the back office's pickers. */
 export interface RunFilters {
   days: string[];

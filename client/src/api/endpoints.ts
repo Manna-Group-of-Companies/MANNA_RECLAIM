@@ -98,6 +98,12 @@ export const endpoints = {
   /** Posted once, never edited - a correction is a reversal and a new one. */
   dispatch: {
     root: '/dispatches',
+    /**
+     * What has gone out, as SAP holds it - three months, read once a day. The
+     * office and the managing director read this; the yard raises documents and
+     * reads what left lately, which is `root`.
+     */
+    sap: '/dispatches/sap',
     byId: (id: string) => `/dispatches/${id}`,
   },
   customers: {

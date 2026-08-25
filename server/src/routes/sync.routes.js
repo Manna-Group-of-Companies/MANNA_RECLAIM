@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as sapStock from '../controllers/sapStock.controller.js';
 import { machineToken } from '../middlewares/machineAuth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { sapStockSnapshot } from '../validations/sapStock.validation.js';
+import { sapStockSnapshot, sapDispatchSnapshot } from '../validations/sapStock.validation.js';
 
 /**
  * The way in for machines rather than people.
@@ -29,6 +29,21 @@ router.post(
   machineToken,
   validate({ body: sapStockSnapshot }),
   sapStock.receive,
+);
+
+/**
+ * Three months of dispatches, once a day.
+ *
+ * Same gate and same shape of answer as the yard. A separate route rather than
+ * a mode on that one because they are read on different schedules and replace
+ * different things: a stock snapshot is a moment and this is a window, and a
+ * document that could be either would eventually be posted as the wrong one.
+ */
+router.post(
+  '/sap-dispatch',
+  machineToken,
+  validate({ body: sapDispatchSnapshot }),
+  sapStock.receiveDispatch,
 );
 
 export default router;

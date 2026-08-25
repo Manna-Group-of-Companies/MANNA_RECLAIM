@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isoDate } from './common.validation.js';
 
 /**
  * What the plant server's stock sync may post.
@@ -57,3 +58,58 @@ export const sapStockSnapshot = z.object({
 });
 
 export const sapStockQuery = z.object({ grade: text(60).optional() }).passthrough();
+
+/**
+ * One line of one dispatch document.
+ *
+ * Strict about the four things that make a line mean something - which
+ * document, which item, how much, when - and forgiving about the rest, which is
+ * SAP's vocabulary and not this end's to insist on.
+ */
+const dispatchRow = z.object({
+  docNo: text(80).min(1, 'Every line needs the document number as `docNo`'),
+  /**
+   * `invoice` or `delivery`. Free rather than an enum: this install raises no
+   * delivery notes at all, so the enum would be a list of one - and a plant
+   * that starts raising them later should not be refused at the door for it.
+   */
+  docType: text(30).optional().nullable(),
+  docDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'docDate is YYYY-MM-DD').optional().nullable(),
+  customer: text(200).optional().nullable(),
+  customerCode: text(60).optional().nullable(),
+  sku: text(120).min(1, 'Every line needs the SAP item code as `sku`'),
+  description: text(300).optional().nullable(),
+  grade: text(60).optional().nullable(),
+  batch: text(120).optional().nullable(),
+  /**
+   * Negative is allowed through: a credit note or a return is a real line, and
+   * refusing it would bounce the whole window because one document was a
+   * correction. It is a thing to look at, not a thing to lose the quarter over.
+   */
+  quantity: z.coerce.number().finite(),
+  unit: text(20).optional().nullable(),
+  /**
+   * Optional, and null rather than nought where the document carries none - a
+   * zero reads as a free delivery, which is a different fact.
+   */
+  value: z.coerce.number().finite().optional().nullable(),
+  currency: text(10).optional().nullable(),
+});
+
+export const sapDispatchSnapshot = z.object({
+  source: text(40).optional(),
+  asOf: z.string().datetime({ offset: true }).optional(),
+  /**
+   * The window the query covered, so the receiving end knows what it is being
+   * given rather than inferring it from the rows. A window whose oldest row is
+   * three weeks old is either a quiet month or a query that silently narrowed,
+   * and only this can tell them apart.
+   */
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  rows: z.array(dispatchRow).min(1, 'A window with no lines is not a window').max(50000),
+});
+
+export const sapDispatchQuery = z
+  .object({ grade: text(60).optional(), customer: text(200).optional() })
+  .passthrough();

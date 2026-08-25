@@ -147,8 +147,13 @@ export const registry = {
    * half-written snapshot is never read as the yard - see migrations/0020.
    */
   [TABLES.sapSyncs]: table('id', [
-    'id', 'as_of', 'received_at', 'source', 'rows', 'total_kg', 'status',
-    'note', 'created_at',
+    'id', 'feed', 'as_of', 'received_at', 'source', 'rows', 'total_kg',
+    'window_from', 'window_to', 'status', 'note', 'created_at',
+  ]),
+  [TABLES.sapDispatches]: table('id', [
+    'id', 'sync_id', 'doc_no', 'doc_type', 'doc_date', 'customer',
+    'customer_code', 'sku', 'description', 'grade', 'batch', 'quantity',
+    'unit', 'value', 'currency', 'created_at',
   ]),
   [TABLES.sapStock]: table('id', [
     'id', 'sync_id', 'sku', 'description', 'grade', 'batch', 'warehouse',

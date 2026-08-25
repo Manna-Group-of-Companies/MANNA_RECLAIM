@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import * as dispatch from '../controllers/dispatch.controller.js';
+import * as sapDispatch from '../controllers/sapStock.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { authorize } from '../middlewares/role.middleware.js';
+import { authorize, summaryOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam, listQuery } from '../validations/common.validation.js';
 import { createDispatchSchema } from '../validations/dispatch.validation.js';
+import { sapDispatchQuery } from '../validations/sapStock.validation.js';
 import { DISPATCH_ROLES } from '../config/constants.js';
 
 /**
@@ -41,7 +43,23 @@ import { DISPATCH_ROLES } from '../config/constants.js';
  */
 const router = Router();
 
-router.use(authenticate, authorize(...DISPATCH_ROLES));
+router.use(authenticate);
+
+/**
+ * What has gone out, as SAP holds it - three months, read once a day.
+ *
+ * Declared before the DISPATCH_ROLES gate below and given its own, narrower
+ * one. The rest of this router is the yard's: the supervisor at the vehicle
+ * raises the document, so the floor is on it. This is the opposite shape - a
+ * quarter's shipping read by the office and the managing director, who is not
+ * on DISPATCH_ROLES and has no business raising one.
+ *
+ * Before `/:id` as well, which would otherwise swallow it: Express matches in
+ * order, and `sap` is a perfectly good document id as far as that route knows.
+ */
+router.get('/sap', summaryOnly, validate({ query: sapDispatchQuery }), sapDispatch.dispatches);
+
+router.use(authorize(...DISPATCH_ROLES));
 
 router.get('/', validate({ query: listQuery }), dispatch.list);
 router.post('/', validate({ body: createDispatchSchema }), dispatch.create);

@@ -6,6 +6,7 @@ import type {
   DispatchSummary,
   LoadingMaterial,
   LoadingMode,
+  SapDispatches,
   StockUnit,
 } from '@/types/models';
 
@@ -92,6 +93,19 @@ export const dispatchService = {
    * screen the crew opens all day.
    */
   recent: (params?: ListQuery) => requestPaged<DispatchSummary>(endpoints.dispatch.root, params),
+
+  /**
+   * What has gone out, as SAP holds it, with how old the reading is.
+   *
+   * Both together, the same rule the yard is read under: a dispatch list with
+   * no age on it is believed on the day the daily job stopped.
+   */
+  async sap(params?: { grade?: string; customer?: string }): Promise<SapDispatches> {
+    const res = await axiosClient.get<ApiEnvelope<SapDispatches>>(endpoints.dispatch.sap, {
+      params,
+    });
+    return res.data.data;
+  },
 
   async create(payload: DispatchPayload): Promise<DispatchDoc> {
     const res = await axiosClient.post<ApiEnvelope<DispatchDoc>>(endpoints.dispatch.root, payload);
