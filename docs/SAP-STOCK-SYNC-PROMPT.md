@@ -51,6 +51,15 @@ So the first deliverable is `explore_sap.py` and a written answer. It should:
 
 * Read `login.json` and connect. Support both of the shapes SAP Business One
   comes in and detect which this is rather than asking:
+  > **Since written, the plant server went a third way: the B1 Service Layer,**
+  > the REST/OData API on port 50000. That is the better choice - no database
+  > credentials, no ODBC driver, and it cannot write by accident. Its running
+  > characteristics are different from direct SQL and are worth reading before
+  > this job is left alone on a schedule: see SAP-SYNC-OPERATING-NOTES.md, in
+  > particular the two that bite quietly - always log the session out, and
+  > follow `@odata.nextLink`, because the default page is twenty rows and a
+  > script that stops there reports a fifth of the yard as all of it.
+
   * **SQL Server** — use `pyodbc` with the ODBC Driver 18 (fall back to 17), or
     `pymssql` if no driver is installed. Database names are usually like `SBO_*`.
   * **SAP HANA** — use `hdbcli`. Schema usually `SBO*` or the company db name.
