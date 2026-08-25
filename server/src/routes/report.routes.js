@@ -82,6 +82,22 @@ router.get(
   validate({ query: dateRange }),
   reports.varianceStatus,
 );
+
+/**
+ * The same figures the shift view holds against a benchmark, followed across a
+ * window instead of read one shift at a time.
+ *
+ * Open to the floor as well as the office, like the shift view and for the same
+ * reason: the plant pays an incentive on these figures, and a crew entitled to
+ * see last night's is entitled to see whether last night was a bad night or a
+ * bad fortnight.
+ */
+router.get(
+  '/efficiency-trend',
+  shiftReview,
+  validate({ query: dateRange }),
+  reports.efficiencyTrend,
+);
 router.get(
   '/variance-reasons',
   shiftReview,

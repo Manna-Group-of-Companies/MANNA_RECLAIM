@@ -1,5 +1,12 @@
 import { crud } from './base.service.js';
-import { TABLES, VIEWS, FIREWOOD_KG_PER_LOAD, isMoulding } from '../config/constants.js';
+import {
+  TABLES,
+  VIEWS,
+  FIREWOOD_KG_PER_LOAD,
+  isMoulding,
+  MACHINE_CATEGORIES,
+  machinesInCategory,
+} from '../config/constants.js';
 import { rateService } from './rate.service.js';
 import { crumbCost, autoclaveCharge } from './crumb.service.js';
 import { fromRow as dispatchFromRow } from './dispatch.service.js';
@@ -21,6 +28,7 @@ const shiftCosting = crud(VIEWS.shiftCosting, { defaultSort: 'shift_date' });
 const specialBatches = crud(VIEWS.specialBatchDetail, { defaultSort: 'shift_date' });
 const coarseShifts = crud(VIEWS.coarseShiftDetail, { defaultSort: 'shift_date' });
 const dispatches = crud(TABLES.dispatches, { defaultSort: 'dispatched_at' });
+const machines = crud(TABLES.machines, { defaultSort: 'sort_order' });
 
 /**
  * The count inside a batch number, whatever is written around it.
@@ -85,23 +93,24 @@ export const reportService = {
    * find out what months exist.
    */
   async runFilters() {
-    const [rows, refs] = await Promise.all([
+    const [rows, refs, machineRows] = await Promise.all([
       runs.all({}, { sort: 'shift_date' }),
       // Quietly: the pickers are worth having with one list missing from them,
       // and a blob that would not read is not a reason to refuse the History
       // tab its days, shifts and machines as well.
       batchService.refs().catch(() => []),
+      machines.all({}, { sort: 'sort_order' }).catch(() => []),
     ]);
     const days = new Set();
-    const machines = new Map();
+    const machineNames = new Map();
     const shifts = new Set();
     const batches = new Set();
     for (const r of rows) {
       if (r.shift_date) days.add(r.shift_date);
       if (r.shift) shifts.add(r.shift);
       if (r.batch_no) batches.add(String(r.batch_no));
-      if (r.machine_id && !machines.has(r.machine_id)) {
-        machines.set(r.machine_id, r.machine ?? r.machine_id);
+      if (r.machine_id && !machineNames.has(r.machine_id)) {
+        machineNames.set(r.machine_id, r.machine ?? r.machine_id);
       }
     }
 
@@ -124,10 +133,38 @@ export const reportService = {
       seen.add(key);
       batches.add(ref);
     }
+    /*
+     * The categories, each carrying the machines it covers.
+     *
+     * Resolved here against the machine list rather than sent as a rule for the
+     * browser to apply, because the browser does not have the machine list on
+     * every screen that offers this picker - and a category is only worth
+     * offering if something in the record is under it, so an empty one is left
+     * out rather than picked and answering nothing.
+     */
+    const logged = new Set(machineNames.keys());
+    const categories = MACHINE_CATEGORIES.map((c) => ({
+      key: c.key,
+      label: c.label,
+      machineIds: machinesInCategory(c.key, machineRows).filter((id) => logged.has(id)),
+    })).filter((c) => c.machineIds.length > 0);
+
+    const kindOf = new Map(machineRows.map((m) => [m.id, m.kind]));
+    const categoryOf = new Map();
+    for (const c of categories) for (const id of c.machineIds) categoryOf.set(id, c.key);
+
     return {
       days: [...days].sort().reverse(),
       shifts: [...shifts].sort(),
-      machines: [...machines].map(([id, name]) => ({ id, name })).sort((a, b) => (a.id < b.id ? -1 : 1)),
+      machines: [...machineNames]
+        .map(([id, name]) => ({
+          id,
+          name,
+          kind: kindOf.get(id) ?? null,
+          category: categoryOf.get(id) ?? null,
+        }))
+        .sort((a, b) => (a.id < b.id ? -1 : 1)),
+      categories,
       batches: [...batches].sort(byBatchNumber),
     };
   },

@@ -387,6 +387,19 @@ function idealFor(key, value, ideals, digits = 2) {
  * past the rows that do.
  */
 
+/**
+ * How finely each unit is worth reading. kWh per kg moves in the third place -
+ * 0.202 against 0.214 is the plant's whole energy argument - and a count of
+ * charges has no decimals at all, because there is no third of a charge.
+ */
+const DIGITS_OF = {
+  'kWh/kg': 3,
+  kg: 0,
+  charges: 0,
+  '%': 1,
+  'kg/man-h': 2,
+};
+
 export const efficiencyService = {
   notes,
 
@@ -569,6 +582,253 @@ export const efficiencyService = {
         approved: count('approved'),
       },
       items,
+    };
+  },
+
+  /**
+   * One line, one grade or one vessel, shift by shift across a window.
+   *
+   * The shift view answers "how did last night go". This answers the question
+   * that follows it and that nothing here could ask: "is that normal". A single
+   * shift against a benchmark says hit or miss and nothing about whether the
+   * line has been drifting for a fortnight, and the plant pays an incentive on
+   * these figures - one bad shift is an argument, ten in a row is a fact.
+   *
+   * A subject is what is being followed, and each one is measured the way its
+   * own card is: the special line per grade, a grinder on its own, the coarse
+   * line as one, a vessel per day because a charge crosses the shift change,
+   * and a yield per batch because that is what a yield belongs to. Forcing the
+   * five onto one span would have made the series tidier and three of them
+   * wrong.
+   *
+   * Every subject is worked out and one is returned. The list of them is what
+   * fills the picker, and it has to be the subjects the window actually holds -
+   * offering the whole plant and answering half of them with nothing reads as a
+   * broken screen rather than as a line that did not run.
+   */
+  async trend({ from, to, subject } = {}) {
+    const [all, idealSheet, rosterRows] = await Promise.all([
+      runs.all({}, { sort: 'shift_date' }),
+      rateService.idealValues(),
+      operatorService.shiftsFor({ from, to }).catch(() => []),
+    ]);
+    const ideals = idealSheet?.data ?? {};
+
+    const inWindow = (day) => {
+      if (!day) return false;
+      return (!from || day >= from) && (!to || day <= to);
+    };
+
+    const operatorAt = new Map(
+      rosterRows.map((r) => [
+        `${String(r.shift_date ?? '').slice(0, 10)}|${r.shift ?? ''}|${r.station}`,
+        r.operator ?? null,
+      ]),
+    );
+
+    /**
+     * The series, built subject by subject as the figures are walked.
+     *
+     * Keyed by the subject rather than collected into a list, because a subject
+     * is met once per shift and its points arrive interleaved with every other
+     * subject's - the alternative is one pass per subject over the same rows.
+     */
+    const series = new Map();
+    const at = (key, label, span) => {
+      const held = series.get(key);
+      if (held) return held;
+      const made = { key, label, span, points: [] };
+      series.set(key, made);
+      return made;
+    };
+
+    /** One figure on one point, measured against whatever the manager set. */
+    const metric = (key, label, value, unit, digits = 2) => ({
+      key,
+      label,
+      unit,
+      value: round(value, digits),
+      ...idealFor(key, value, ideals, digits),
+    });
+
+    const point = (subjectKey, { date, shift, station, label, context, metrics }) => {
+      const held = series.get(subjectKey);
+      held.points.push({
+        date,
+        shift: shift || null,
+        label: label ?? null,
+        operator:
+          station && shift ? (operatorAt.get(`${date}|${shift}|${station}`) ?? null) : undefined,
+        ...context,
+        // Only the figures that were actually measured. A metric with no value
+        // is a shift that did not record it, and a series that carried it as a
+        // gap would average nulls into the answer.
+        metrics: metrics.filter((m) => m.value != null),
+      });
+    };
+
+    for (const u of refinerUnits(all)) {
+      if (!inWindow(u.day)) continue;
+      const key = `special:${u.quality}`;
+      at(key, `Special line · ${u.quality}`, 'shift');
+      point(key, {
+        date: u.day,
+        shift: u.shift,
+        station: SPECIAL_LINE_KEY,
+        context: {
+          out: round(u.out, 0),
+          workers: u.workers,
+          hours: round(u.hours, 2),
+          kwh: round(u.kwh, 1),
+          batches: u.batches,
+        },
+        metrics: [
+          metric(idealKey.specialPerManHour(u.quality), 'Production per man-hour', u.pmh, 'kg/man-h'),
+          metric(idealKey.specialKwhPerKg(u.quality), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+        ],
+      });
+    }
+
+    for (const u of grinderUnits(all)) {
+      if (!inWindow(u.day)) continue;
+      const key = `machine:${u.machineId}`;
+      at(key, u.machine ?? u.machineId, 'shift');
+      point(key, {
+        date: u.day,
+        shift: u.shift,
+        station: STATION_OF_MACHINE[u.machineId] ?? null,
+        context: {
+          out: round(u.out, 0),
+          workers: u.workers,
+          hours: round(u.hours, 2),
+          kwh: round(u.kwh, 1),
+        },
+        metrics: [
+          metric(idealKey.production(u.machineId), 'Output', u.out, 'kg', 0),
+          metric(idealKey.perManHour(u.machineId), 'Production per man-hour', u.pmh, 'kg/man-h'),
+          metric(idealKey.kwhPerKg(u.machineId), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+        ],
+      });
+    }
+
+    for (const u of coarseUnits(all)) {
+      if (!inWindow(u.day)) continue;
+      const key = 'coarse';
+      at(key, 'Coarse line', 'shift');
+      point(key, {
+        date: u.day,
+        shift: u.shift,
+        station: 'COARSE',
+        context: {
+          out: round(u.out, 0),
+          workers: u.workers,
+          hours: round(u.hours, 2),
+          kwh: round(u.kwh, 1),
+        },
+        metrics: [
+          metric(idealKey.production('COARSE'), 'Output', u.out, 'kg', 0),
+          metric(idealKey.perManHour('COARSE'), 'Production per man-hour', u.pmh, 'kg/man-h'),
+          metric(idealKey.kwhPerKg('COARSE'), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+        ],
+      });
+    }
+
+    for (const u of autoclaveRunsByDay(all)) {
+      if (!inWindow(u.day)) continue;
+      const vessel = IDEAL_AUTOCLAVES.find((v) => v.key === u.machineId);
+      if (!vessel) continue;
+      const key = `autoclave:${vessel.key}`;
+      at(key, vessel.label, 'day');
+      point(key, {
+        date: u.day,
+        shift: null,
+        context: {},
+        metrics: [metric(idealKey.autoclaveRuns(vessel.key), 'Charges a day', u.runs, 'charges', 0)],
+      });
+    }
+
+    for (const y of batchYields(all)) {
+      if (!inWindow(y.outDay)) continue;
+      const key = 'yield';
+      at(key, 'Batch yield', 'batch');
+      point(key, {
+        date: y.outDay,
+        shift: y.outShift,
+        label: `Batch ${y.batch}`,
+        context: { charge: y.charge, out: round(y.out, 0) },
+        metrics: [metric(idealKey.batchYield(), 'Yield', y.pct, '%', 1)],
+      });
+    }
+
+    const subjects = [...series.values()]
+      .map(({ key, label, span, points }) => ({ key, label, span, points: points.length }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    const chosen = series.get(subject) ?? null;
+    const points = (chosen?.points ?? []).sort(
+      (a, b) =>
+        String(a.date).localeCompare(String(b.date))
+        || String(a.shift ?? '').localeCompare(String(b.shift ?? '')),
+    );
+
+    /**
+     * What the window says about each figure, which is the point of asking for
+     * one.
+     *
+     * Best and worst read off `lowerIsBetter` rather than off the arithmetic:
+     * the best kWh per kg is the smallest and the best kg per man-hour is the
+     * largest, and a screen that called the highest number the best would
+     * congratulate the line on the shift it wasted the most electricity.
+     *
+     * The average is of the shifts, not weighted by what they made. Those are
+     * different questions and this is the one the incentive asks: every shift is
+     * held to the same benchmark whatever volume happened to come through it.
+     */
+    const byMetric = new Map();
+    for (const pt of points) {
+      for (const m of pt.metrics) {
+        const held = byMetric.get(m.key) ?? {
+          key: m.key,
+          label: m.label,
+          unit: m.unit,
+          ideal: m.ideal,
+          lowerIsBetter: m.lowerIsBetter,
+          values: [],
+          offTarget: 0,
+        };
+        held.values.push({ value: m.value, date: pt.date, shift: pt.shift, label: pt.label });
+        if (m.offTarget) held.offTarget += 1;
+        byMetric.set(m.key, held);
+      }
+    }
+
+    const summary = [...byMetric.values()].map((m) => {
+      const ranked = [...m.values].sort((a, b) =>
+        m.lowerIsBetter ? a.value - b.value : b.value - a.value,
+      );
+      const total = m.values.reduce((sum, v) => sum + v.value, 0);
+      const digits = DIGITS_OF[m.unit] ?? 2;
+      return {
+        key: m.key,
+        label: m.label,
+        unit: m.unit,
+        ideal: m.ideal,
+        lowerIsBetter: m.lowerIsBetter,
+        count: m.values.length,
+        offTarget: m.offTarget,
+        onTarget: m.values.length - m.offTarget,
+        average: round(total / m.values.length, digits),
+        best: ranked[0] ?? null,
+        worst: ranked[ranked.length - 1] ?? null,
+      };
+    });
+
+    return {
+      window: { from: from ?? null, to: to ?? null },
+      subjects,
+      subject: chosen ? { key: chosen.key, label: chosen.label, span: chosen.span } : null,
+      points,
+      summary,
     };
   },
 

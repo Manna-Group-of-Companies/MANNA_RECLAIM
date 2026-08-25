@@ -85,8 +85,21 @@ function applyFilters(params, filters = {}) {
       params.append('or', `(${value.join(',')})`);
       continue;
     }
-    if (Array.isArray(value)) params.append(field, `in.${encodeList(value)}`);
-    else if (typeof value === 'object') params.append(field, clause(value));
+    if (Array.isArray(value)) {
+      /*
+       * Two clauses on one column, which is how a range is asked for:
+       * `{ shift_date: [op.gte(from), op.lte(to)] }`. PostgREST ands repeated
+       * parameters, so both are appended rather than combined here.
+       *
+       * A plain array is still an IN list - `{ machine_id: ['R1', 'R4'] }` - so
+       * the two are told apart by what is in the array, not by a second
+       * argument somewhere. Mixing the two would be asking for a list of
+       * operators as a set of values, which is not a thing anyone means.
+       */
+      if (value.every((v) => v && typeof v === 'object' && 'op' in v)) {
+        for (const each of value) params.append(field, clause(each));
+      } else params.append(field, `in.${encodeList(value)}`);
+    } else if (typeof value === 'object') params.append(field, clause(value));
     else params.append(field, `eq.${encodeValue(value)}`);
   }
 }

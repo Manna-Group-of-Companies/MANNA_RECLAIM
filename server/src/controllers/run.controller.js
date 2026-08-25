@@ -1,14 +1,45 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ok, created, paginated } from '../utils/ApiResponse.js';
+import { op } from '../services/base.service.js';
 import { runService, settlesGrade } from '../services/run.service.js';
 import { batchService } from '../services/batch.service.js';
 import { logger } from '../config/logger.js';
 
+/**
+ * One day, or a window, or neither.
+ *
+ * Returned as a list of clauses when it is a window - see applyFilters, which
+ * ands repeated parameters the way PostgREST does - and as a bare value for a
+ * single day, because that is the common case and an equality reads better in
+ * a log than a pair of inequalities that mean the same thing.
+ */
+const dayOrWindow = ({ date, from, to } = {}) => {
+  if (date) return date;
+  const clauses = [];
+  if (from) clauses.push(op.gte(from));
+  if (to) clauses.push(op.lte(to));
+  return clauses.length ? clauses : undefined;
+};
+
+/**
+ * The run record, cut however it was asked for.
+ *
+ * `date` is one day and `from`/`to` are a window, and both are here because
+ * they answer different questions: a manager correcting last night wants the
+ * shift, and anyone comparing wants the fortnight. A window given without an
+ * end is open at that end, which is what "since the first" means.
+ *
+ * `category` is a cut of the machine list - the autoclaves, the refiners, the
+ * grinders - resolved against the plant's own machines so a machine bought next
+ * year lands in its category by its kind. An explicit machine wins over it:
+ * asking for R4 and for the refiners means R4.
+ */
 export const list = asyncHandler(async (req, res) =>
   paginated(res, await runService.list(req.query, {
-    machine_id: req.query.machineId,
-    shift_date: req.query.date,
+    machine_id: req.query.machineId || (await runService.machineIdsIn(req.query.category)),
+    shift_date: dayOrWindow(req.query),
     shift: req.query.shift,
+    quality: req.query.quality,
     batch_no: req.query.batch ?? req.query.batchNo,
     status: req.query.status,
   })),

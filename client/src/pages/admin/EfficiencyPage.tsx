@@ -12,6 +12,7 @@ import {
 import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
+import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useToast } from '@/hooks/useToast';
 import { dayLong } from '@/utils/date';
@@ -183,6 +184,34 @@ function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: Calc
   );
 }
 
+/** Which question is being asked: how did that shift go, or is that normal. */
+function ViewToggle({
+  view,
+  onView,
+}: {
+  view: 'shift' | 'period';
+  onView: (v: 'shift' | 'period') => void;
+}) {
+  return (
+    <div className="chips mt-3 mx-0.5">
+      <button
+        type="button"
+        className={cn('chip', view === 'shift' && 'on')}
+        onClick={() => onView('shift')}
+      >
+        One shift
+      </button>
+      <button
+        type="button"
+        className={cn('chip', view === 'period' && 'on')}
+        onClick={() => onView('period')}
+      >
+        Compare a period
+      </button>
+    </div>
+  );
+}
+
 export function EfficiencyPage() {
   const dispatch = useAppDispatch();
   const notify = useToast();
@@ -214,6 +243,15 @@ export function EfficiencyPage() {
    */
   const date = useAppSelector((s) => s.ui.backOfficeDay);
   const shift = useAppSelector((s) => s.ui.backOfficeShift);
+  /*
+   * One shift, or the same figures across a period.
+   *
+   * Two views rather than a period picker bolted onto the shift view: the shift
+   * view is where a miss is explained and signed off, and every control on it
+   * belongs to one shift. A period has no single shift to write a reason
+   * against, so it carries none of them and says so by being its own screen.
+   */
+  const [view, setView] = useState<'shift' | 'period'>('shift');
   const [calc, setCalc] = useState<CalcTarget>(null);
   const [noteFor, setNoteFor] = useState<NoteTarget>(null);
   const [varianceFor, setVarianceFor] = useState<VarianceTarget>(null);
@@ -599,8 +637,27 @@ export function EfficiencyPage() {
     );
   };
 
+  /*
+   * The period view is its own screen rather than a section under the shift.
+   *
+   * Everything above this point is one shift's - the cards, the reasons, the
+   * approvals, the breakdown sheet - and none of it has a meaning across a
+   * fortnight. Drawing both would have put two answers to two different
+   * questions on one page and left the reader to work out which figure belonged
+   * to which.
+   */
+  if (view === 'period') {
+    return (
+      <>
+        <ViewToggle view={view} onView={setView} />
+        <EfficiencyTrend />
+      </>
+    );
+  }
+
   return (
     <>
+      <ViewToggle view={view} onView={setView} />
       <div className="panel">
         {/* Picked above the tabs - see BackOfficeDay. This only says which. */}
         <div className="sub">

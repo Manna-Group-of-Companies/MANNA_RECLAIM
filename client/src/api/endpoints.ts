@@ -145,6 +145,13 @@ export const endpoints = {
     varianceReasons: '/reports/variance-reasons',
     /** Every miss over a window, and how far along its explanation is. */
     varianceStatus: '/reports/variance-status',
+
+    /**
+     * One line, grade or vessel followed across a window - the question a
+     * single shift cannot answer, which is whether the shift just read was
+     * normal.
+     */
+    efficiencyTrend: '/reports/efficiency-trend',
     varianceReasonById: (id: string) => `/reports/variance-reasons/${id}`,
     approveVarianceReason: (id: string) => `/reports/variance-reasons/${id}/approve`,
     /**

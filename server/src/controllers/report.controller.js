@@ -127,6 +127,14 @@ export const varianceStatus = asyncHandler(async (req, res) =>
   ok(res, await efficiencyService.varianceStatus(req.query)),
 );
 
+/**
+ * One line, grade or vessel followed across a window - the question a single
+ * shift cannot answer, which is whether the shift it just read was normal.
+ */
+export const efficiencyTrend = asyncHandler(async (req, res) =>
+  ok(res, await efficiencyService.trend(req.query)),
+);
+
 export const addVarianceReason = asyncHandler(async (req, res) =>
   created(
     res,

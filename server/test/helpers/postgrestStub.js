@@ -46,10 +46,39 @@ function predicateFor(params) {
     else if (operator === 'in') {
       const list = value.replace(/^\(|\)$/g, '').split(',').map(unquote);
       tests.push((row) => list.includes(String(row[field])));
-    } else if (operator === 'gt') tests.push((row) => Number(row[field]) > Number(value));
-    else if (operator === 'gte') tests.push((row) => Number(row[field]) >= Number(value));
-    else if (operator === 'lt') tests.push((row) => Number(row[field]) < Number(value));
-    else if (operator === 'lte') tests.push((row) => Number(row[field]) <= Number(value));
+    }
+    /*
+     * Ordered comparisons, on numbers or on text.
+     *
+     * Numerically where both sides are numbers and lexicographically otherwise,
+     * which is what Postgres does and what a date range needs: these used to
+     * coerce with Number(), and Number('2026-08-01') is NaN, so every
+     * comparison against a date came back false and a windowed query answered
+     * with nothing at all. An ISO date sorts correctly as text, which is the
+     * reason the plant stores them that way.
+     */
+    else if (['gt', 'gte', 'lt', 'lte'].includes(operator)) {
+      const wanted = unquote(value);
+      const cmp = (row) => {
+        const held = row[field];
+        if (held == null) return null;
+        const a = Number(held);
+        const b = Number(wanted);
+        if (Number.isFinite(a) && Number.isFinite(b)) return a === b ? 0 : a < b ? -1 : 1;
+        const x = String(held);
+        return x === wanted ? 0 : x < wanted ? -1 : 1;
+      };
+      const passes = {
+        gt: (c) => c > 0,
+        gte: (c) => c >= 0,
+        lt: (c) => c < 0,
+        lte: (c) => c <= 0,
+      }[operator];
+      tests.push((row) => {
+        const c = cmp(row);
+        return c != null && passes(c);
+      });
+    }
     /*
      * `is.null` and `not.is.null`.
      *

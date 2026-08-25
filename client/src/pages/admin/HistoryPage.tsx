@@ -16,8 +16,9 @@ import {
   text,
   type Draft,
 } from '@/features/history/runDraft';
+import { RunRecord } from '@/features/history/RunRecord';
 import { QUALITIES, SHIFTS, isReadOnly } from '@/config/constants';
-import { clock, dayLong } from '@/utils/date';
+import { clock, dayLong, lastNDays, todayISO } from '@/utils/date';
 import { hours, kwhOf, num } from '@/utils/format';
 import { cn } from '@/utils/cn';
 import type { Run } from '@/types/models';
@@ -413,7 +414,36 @@ function RunDetail({
 }
 
 /**
- * Every run, filtered by day / machine / shift.
+ * The record with no controls on it, for the managing director.
+ *
+ * A row used not to open at all for that account, on the reasoning that a
+ * correction sheet with every button disabled is worse than no sheet. That was
+ * half right: a disabled form is a bad answer and no answer is a worse one. The
+ * one account that only ever reads was the one account that could not see what
+ * it was reading - seven columns of a table and nothing underneath them.
+ *
+ * Reading a run and correcting it are two acts, so they are two components. The
+ * guard is unchanged and is not here: the PATCH and the DELETE are refused at
+ * the routes whatever any screen offers.
+ */
+function RunReadOnly({ run, onClose }: { run: Run | null; onClose: () => void }) {
+  if (!run) return null;
+  return (
+    <BoModal
+      open
+      title={`${run.machine ?? run.machine_id}${run.batch_no ? ` · Batch ${run.batch_no}` : ""}`}
+      subtitle={`${run.kind ?? ""}${run.line ? ` · ${run.line} line` : ""} · ${dayLong(run.shift_date)}${
+        (run.passes ?? 1) > 1 ? ` · ${run.passes} start/stops combined` : ""
+      }`}
+      onClose={onClose}
+    >
+      <RunRecord run={run} />
+    </BoModal>
+  );
+}
+
+/**
+ * Every run, cut by day or period, machine or category, shift and grade.
  *
  * The rows come back already filtered rather than being pulled down whole and
  * sifted in the browser - the plant has well over a thousand runs on record,
@@ -444,8 +474,27 @@ export function AdminHistoryPage() {
    * so a manager reading 20 August on Efficiency and switching here was
    * silently handed five months of runs instead of the shift they were on.
    */
-  const date = useAppSelector((s) => s.ui.backOfficeDay);
+  const day = useAppSelector((s) => s.ui.backOfficeDay);
+
+  /*
+   * One day, or a window of them.
+   *
+   * Two questions and two modes rather than one control that tries to be both:
+   * the office corrects last night by the shift, and anybody comparing wants a
+   * fortnight. A single date that quietly meant "from here" would have made the
+   * first question unaskable.
+   *
+   * The window opens on the week ending at the day already picked above the tab
+   * strip, so switching to it is a widening of what is on screen rather than a
+   * jump to somewhere else.
+   */
+  const [span, setSpan] = useState<'day' | 'period'>('day');
+  const [from, setFrom] = useState(() => lastNDays(7).from);
+  const [to, setTo] = useState(() => todayISO());
+
   const [machineId, setMachineId] = useState('');
+  const [category, setCategory] = useState('');
+  const [quality, setQuality] = useState('');
   const [shift, setShift] = useState('');
   const [rows, setRows] = useState<Run[]>([]);
   const [total, setTotal] = useState(0);
@@ -457,17 +506,40 @@ export function AdminHistoryPage() {
     void dispatch(fetchRunFilters());
   }, [dispatch, refreshTick]);
 
+  /**
+   * What is being asked for, in one object.
+   *
+   * The table and the export read the same one on purpose. The button is
+   * offered as "everything matching what is on screen", and two lists of
+   * parameters built separately is exactly how an export comes to cover a
+   * different set from the panel above it - which is the worst kind of wrong,
+   * because it looks like it worked.
+   */
+  const cut: {
+    date?: string;
+    from?: string;
+    to?: string;
+    machineId?: string;
+    category?: string;
+    quality?: string;
+    shift?: string;
+  } = useMemo(
+    () => ({
+      ...(span === 'day' ? { date: day || undefined } : { from: from || undefined, to: to || undefined }),
+      machineId: machineId || undefined,
+      category: category || undefined,
+      quality: quality || undefined,
+      shift: shift || undefined,
+    }),
+    [span, day, from, to, machineId, category, quality, shift],
+  );
+
   useEffect(() => {
     let live = true;
     setLoading(true);
     setError('');
     runService
-      .list({
-        date: date || undefined,
-        machineId: machineId || undefined,
-        shift: shift || undefined,
-        limit: 200,
-      })
+      .list({ ...cut, limit: 200 })
       .then(({ rows: got, meta }) => {
         if (!live) return;
         setRows(got);
@@ -482,7 +554,7 @@ export function AdminHistoryPage() {
     return () => {
       live = false;
     };
-  }, [date, machineId, shift, refreshTick]);
+  }, [cut, refreshTick]);
 
   /**
    * The export, and whether it is in flight.
@@ -499,13 +571,9 @@ export function AdminHistoryPage() {
     setExporting(true);
     setError('');
     try {
-      await reportService.machineLogCsv({
-        // The day picker is a single day, so it is both ends of the window.
-        from: date || undefined,
-        to: date || undefined,
-        machineId: machineId || undefined,
-        shift: shift || undefined,
-      });
+      // A single day is both ends of the window, which is what the export takes.
+      const { date: one, ...rest } = cut;
+      await reportService.machineLogCsv(one ? { ...rest, from: one, to: one } : rest);
     } catch (err) {
       setError(toRequestError(err).message);
     } finally {
@@ -526,15 +594,105 @@ export function AdminHistoryPage() {
   return (
     <>
       <div className="panel">
-        <div className="bar">
+        {/*
+          One day or a window. The mode is a pair of chips rather than a blank
+          second date box, because a window with one end filled in is a state
+          somebody lands in by accident and then reads as a broken filter.
+        */}
+        <div className="chips">
+          <button
+            type="button"
+            className={cn('chip', span === 'day' && 'on')}
+            onClick={() => setSpan('day')}
+          >
+            One day
+          </button>
+          <button
+            type="button"
+            className={cn('chip', span === 'period' && 'on')}
+            onClick={() => setSpan('period')}
+          >
+            A period
+          </button>
+          {span === 'day' && <span className="sub self-center">{dayLong(day) }</span>}
+        </div>
 
+        {span === 'period' && (
+          <div className="bar mt-2.5">
+            <div className="f">
+              <label htmlFor="h-from">From</label>
+              <input
+                id="h-from"
+                type="date"
+                value={from}
+                max={to || todayISO()}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </div>
+            <div className="f">
+              <label htmlFor="h-to">To</label>
+              <input
+                id="h-to"
+                type="date"
+                value={to}
+                min={from || undefined}
+                max={todayISO()}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="bar mt-2.5">
           <div className="f">
             <label htmlFor="h-machine">Machine</label>
-            <select id="h-machine" value={machineId} onChange={(e) => setMachineId(e.target.value)}>
+            {/*
+              The categories and the machines in one control, because they are
+              one question - "which machines" - asked at two widths. Two selects
+              would have needed a rule for what a category and a machine mean
+              together, and the honest rule is that nobody asks both.
+            */}
+            <select
+              id="h-machine"
+              value={category ? `cat:${category}` : machineId}
+              onChange={(e) => {
+                const picked = e.target.value;
+                setCategory(picked.startsWith('cat:') ? picked.slice(4) : '');
+                setMachineId(picked.startsWith('cat:') ? '' : picked);
+              }}
+            >
               <option value="">All machines</option>
-              {filters?.machines.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
+              {Boolean(filters?.categories?.length) && (
+                <optgroup label="Groups">
+                  {filters?.categories?.map((c) => (
+                    <option key={c.key} value={`cat:${c.key}`}>
+                      {c.label} · {c.machineIds.length}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="One machine">
+                {filters?.machines.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+
+          <div className="f">
+            <label htmlFor="h-grade">Grade</label>
+            {/*
+              Across every machine that made it. The question the office asks is
+              "the Fine runs over these days", not "the Fine runs on R4" - a
+              grade is refined on whichever machine was free.
+            */}
+            <select id="h-grade" value={quality} onChange={(e) => setQuality(e.target.value)}>
+              <option value="">All grades</option>
+              {QUALITIES.map((q) => (
+                <option key={q} value={q}>
+                  {q}
                 </option>
               ))}
             </select>
@@ -592,8 +750,9 @@ export function AdminHistoryPage() {
 
         {total > rows.length && (
           <div className="sub mt-2">
-            Showing the {rows.length} most recent of {total} matching runs — narrow the day or
-            machine to see the rest.
+            Showing the {rows.length} most recent of {total} matching runs, and the totals above
+            are of those {rows.length} — narrow the period, the machine or the grade to bring the
+            rest in. The export covers all {total} whatever is on screen.
           </div>
         )}
       </div>
@@ -604,7 +763,9 @@ export function AdminHistoryPage() {
 
       {!loading && rows.length > 0 && (
         <>
-          <div className="sub mx-0.5 mb-1.5 mt-3">Tap any row for the full run details.</div>
+          <div className="sub mx-0.5 mb-1.5 mt-3">
+            Tap any row for the full run details{readOnly ? "" : " — and to correct them"}.
+          </div>
           <div className="panel scroll-x mt-0 p-0">
             <table className="tt min-w-[560px]">
               <thead>
@@ -624,11 +785,10 @@ export function AdminHistoryPage() {
                   const k = kwhOf(r);
                   const w = r.weight_kg ?? r.out_weight ?? null;
                   return (
-                    <tr
-                      key={r.id}
-                      onClick={readOnly ? undefined : () => setSelected(r)}
-                      className={readOnly ? undefined : 'cursor-pointer'}
-                    >
+                    // Every account opens the run. What opens differs: the
+                    // office gets the correction sheet, the managing director
+                    // gets the record with no controls on it.
+                    <tr key={r.id} onClick={() => setSelected(r)} className="cursor-pointer">
                       <td>
                         <b>{dayLong(r.shift_date)}</b>
                         {r.shift && <div className="muted text-[10px]">{r.shift} shift</div>}
@@ -686,8 +846,10 @@ export function AdminHistoryPage() {
         </>
       )}
 
+      {readOnly && <RunReadOnly run={selected} onClose={() => setSelected(null)} />}
+
       <RunDetail
-        run={selected}
+        run={readOnly ? null : selected}
         onClose={() => setSelected(null)}
         onSaved={(saved) => {
           // The table and its totals follow the correction straight away,

@@ -503,6 +503,49 @@ export const PRE_REFINER_IDS = ['PR1', 'PR2'];
 export const REFINE_STAGE_IDS = ['R3', 'R1'];
 export const FINAL_REFINER_IDS = ['R4'];
 
+/**
+ * The machine list, cut the way somebody reading the record asks for it.
+ *
+ * "Show me the autoclaves" is a question the History tab could not answer: it
+ * offered one machine or all of them, so comparing the three vessels meant
+ * reading the page three times and adding it up on paper.
+ *
+ * Cut by kind rather than by the machines table's `group_name`, which is a
+ * heading on the shop-floor screen and is edited to suit it. A category that
+ * moved because somebody renamed a heading would quietly change what a month's
+ * comparison covered, and nothing on the screen would say so.
+ *
+ * The cracker is carved out of the grinders on purpose. It shares their kind -
+ * it is on the grinding line and the plant groups it there - but it grinds
+ * nothing: it breaks tyres for the yard, weighs no output, and averaged in with
+ * three grinders it drags every figure they are judged on. Somebody asking for
+ * the grinders means the three that grind.
+ */
+export const MACHINE_CATEGORIES = [
+  { key: 'grinders', label: 'Grinders', kinds: ['grind'], exclude: CRACKER_IDS },
+  { key: 'cracker', label: 'Cracker', ids: CRACKER_IDS },
+  { key: 'refiners', label: 'Refiners', kinds: ['refiner', 'prerefiner'] },
+  { key: 'autoclaves', label: 'Autoclaves', kinds: ['autoclave'] },
+  { key: 'coarse', label: 'Coarse line', kinds: ['coarse'] },
+  { key: 'presses', label: 'Presses', kinds: ['press', 'sleeve', 'loop'] },
+];
+
+export const MACHINE_CATEGORY_KEYS = MACHINE_CATEGORIES.map((c) => c.key);
+
+/**
+ * Which machines a category covers, worked out against the plant's own machine
+ * list rather than written down twice - a machine added next year lands in its
+ * category because of its kind, not because somebody remembered this file.
+ */
+export const machinesInCategory = (key, machines = []) => {
+  const category = MACHINE_CATEGORIES.find((c) => c.key === key);
+  if (!category) return [];
+  if (category.ids) return machines.filter((m) => category.ids.includes(m.id)).map((m) => m.id);
+  return machines
+    .filter((m) => category.kinds.includes(m.kind) && !(category.exclude ?? []).includes(m.id))
+    .map((m) => m.id);
+};
+
 /** A shift is 12 hours; a bearing over this many degrees is flagged. */
 export const SHIFT_MINUTES = 720;
 export const BEARING_TEMP_LIMIT_C = 80;

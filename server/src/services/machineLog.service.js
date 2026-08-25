@@ -1,3 +1,4 @@
+import { op } from './base.service.js';
 import { runService } from './run.service.js';
 import { COARSE_GRADE, isMoulding } from '../config/constants.js';
 
@@ -120,24 +121,42 @@ export const machineLogService = {
    * here is exactly how an exported figure comes to disagree with the screen it
    * was read off.
    */
-  async csv({ from, to, machineId, shift, kind } = {}) {
-    // The machine and the shift narrow the read; the window is applied here, the
-    // same way every other report in this project does it - PostgREST takes one
-    // operator per column, so a `from` and a `to` on `shift_date` cannot both be
-    // pushed down as an AND. See report.service's inWindow().
+  async csv({ from, to, machineId, shift, kind, quality, category } = {}) {
+    /*
+     * Every narrowing the screen offers, pushed down to the database.
+     *
+     * The window included, which it did not used to be: a `from` and a `to` on
+     * one column are two clauses, and applyFilters now sends both rather than
+     * the caller reading the whole record back and dropping most of it. The
+     * rows still have to be walked for `ended_at`, so a run in progress is
+     * dropped here.
+     *
+     * It matters that this list matches the History tab's filters exactly. The
+     * button is offered as "everything matching what is on screen", and an
+     * export that quietly covered more than the panel says it is showing is the
+     * worst kind of wrong: it looks like it worked.
+     */
+    const window = [];
+    if (from) window.push(op.gte(from));
+    if (to) window.push(op.lte(to));
+
     const { rows } = await runService.list(
       { all: true, sort: 'shift_date', order: 'desc' },
       {
-        ...(machineId ? { machine_id: machineId } : {}),
+        ...(machineId
+          ? { machine_id: machineId }
+          : { machine_id: await runService.machineIdsIn(category) }),
         ...(shift ? { shift } : {}),
         ...(kind ? { kind } : {}),
+        ...(quality ? { quality } : {}),
+        ...(window.length ? { shift_date: window } : {}),
       },
     );
     const logged = rows.filter((run) => {
       if (!run.ended_at) return false;
-      const day = run.shift_date ? String(run.shift_date).slice(0, 10) : null;
-      if (!day) return !from && !to;
-      return (!from || day >= from) && (!to || day <= to);
+      // A run with no shift date is outside any window that was asked for, and
+      // inside the export when none was.
+      return Boolean(run.shift_date) || (!from && !to);
     });
 
     const lines = [COLUMNS.map(([header]) => cell(header)).join(',')];

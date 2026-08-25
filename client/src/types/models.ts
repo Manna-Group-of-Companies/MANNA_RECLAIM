@@ -338,6 +338,17 @@ export interface Run {
   started_at: string;
   ended_at?: string | null;
   stopped_at?: string | null;
+  /**
+   * Two of the three moments inside an autoclave cycle - see migrations/0018.
+   *
+   * started_at to `pressure_at` is the heat-up; `door_open_at` to the next
+   * charge's start is the vessel standing open being emptied and re-charged,
+   * which is what the plant calls its loading time. Null on every charge cooked
+   * before the crew was asked for them, which is a different answer from zero
+   * and is why they are nullable rather than defaulted.
+   */
+  pressure_at?: string | null;
+  door_open_at?: string | null;
   runtime_min?: number | null;
   hours_run?: number | null;
   weight_kg?: number | null;
@@ -1060,13 +1071,94 @@ export interface EfficiencyRow {
   kgPerWorkerHour: number;
 }
 
+/**
+ * A cut of the machine list - the autoclaves, the refiners, the grinders.
+ *
+ * Carries the machines it covers rather than a rule for working them out,
+ * because the screens that offer this picker do not all hold the machine list.
+ * Only categories the record actually has runs under are sent: a filter that
+ * can only answer with a blank page is not worth offering.
+ */
+export interface MachineCategory {
+  key: string;
+  label: string;
+  machineIds: string[];
+}
+
 /** What the run history covers, for the back office's pickers. */
 export interface RunFilters {
   days: string[];
   shifts: Shift[];
-  machines: { id: string; name: string }[];
+  machines: { id: string; name: string; kind?: string | null; category?: string | null }[];
+  categories?: MachineCategory[];
   /** Batch numbers on record, newest first - the History batch picker. */
   batches: string[];
+}
+
+/** One figure on one point of a trend, against the manager's benchmark. */
+export interface TrendMetric {
+  key: string;
+  label: string;
+  unit: string;
+  value: number;
+  ideal?: number | null;
+  variance?: number | null;
+  variancePct?: number | null;
+  offTarget: boolean;
+  lowerIsBetter: boolean;
+  parameter: string;
+}
+
+/** One shift, day or batch in a series, and what it measured. */
+export interface TrendPoint {
+  date: string;
+  shift?: string | null;
+  /** What this point is called where it is not a shift - "Batch 3123". */
+  label?: string | null;
+  operator?: string | null;
+  out?: number | null;
+  workers?: number | null;
+  hours?: number | null;
+  kwh?: number | null;
+  charge?: number | null;
+  batches?: string[];
+  metrics: TrendMetric[];
+}
+
+/**
+ * What a window says about one figure.
+ *
+ * `best` and `worst` are the points themselves rather than bare numbers, so the
+ * screen can name the shift somebody should go and ask about.
+ */
+export interface TrendSummary {
+  key: string;
+  label: string;
+  unit: string;
+  ideal?: number | null;
+  lowerIsBetter: boolean;
+  count: number;
+  onTarget: number;
+  offTarget: number;
+  average: number;
+  best?: { value: number; date: string; shift?: string | null; label?: string | null } | null;
+  worst?: { value: number; date: string; shift?: string | null; label?: string | null } | null;
+}
+
+/** What is being followed, and over what span each of its points is measured. */
+export interface TrendSubject {
+  key: string;
+  label: string;
+  span: 'shift' | 'day' | 'batch';
+  points?: number;
+}
+
+export interface EfficiencyTrend {
+  window: { from: string | null; to: string | null };
+  subjects: TrendSubject[];
+  subject: TrendSubject | null;
+  points: TrendPoint[];
+  summary: TrendSummary[];
 }
 
 export interface ShiftOption {

@@ -14,6 +14,8 @@ import {
   COARSE_GRADE,
   MOULDING_KINDS,
   FINAL_REFINER_IDS,
+  MACHINE_CATEGORY_KEYS,
+  machinesInCategory,
   isCracker,
   isMoulding,
 } from '../config/constants.js';
@@ -803,6 +805,22 @@ export const runService = {
       return { rows, total: rows.length, page: 1, limit: rows.length };
     }
     return decorateList(await base.list(query, filters));
+  },
+
+  /**
+   * The machines a category covers - the autoclaves, the refiners, the grinders.
+   *
+   * Resolved against the plant's own machine list rather than written down, so a
+   * machine bought next year lands in its category by its kind. An unknown or
+   * missing category is undefined rather than an empty list: undefined is "no
+   * filter" to applyFilters, and an empty list would be "none of them" and
+   * answer a mistyped category with a blank page instead of everything.
+   */
+  async machineIdsIn(category) {
+    if (!category || !MACHINE_CATEGORY_KEYS.includes(category)) return undefined;
+    const { rows } = await machineService.list({ limit: 200, order: 'asc' });
+    const ids = machinesInCategory(category, rows);
+    return ids.length ? ids : undefined;
   },
 
   async findById(id) {

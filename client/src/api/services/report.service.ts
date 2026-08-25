@@ -6,6 +6,7 @@ import type {
   DowntimeDetail,
   DowntimeReport,
   EfficiencyNote,
+  EfficiencyTrend,
   EfficiencyRow,
   ProductionReport,
   RunFilters,
@@ -117,6 +118,16 @@ export const reportService = {
    */
   varianceStatus: (range?: DateRange) =>
     get<VarianceStatus>(endpoints.reports.varianceStatus, range),
+
+  /**
+   * One line, grade or vessel followed across a window.
+   *
+   * The subject list comes back on every call, chosen or not, so the picker is
+   * filled by the same read that draws the series - a screen that had to ask
+   * twice would show an empty picker for as long as the first call took.
+   */
+  efficiencyTrend: (params: DateRange & { subject?: string }) =>
+    get<EfficiencyTrend>(endpoints.reports.efficiencyTrend, params),
 
   varianceReasons: (range?: DateRange) =>
     get<VarianceReason[]>(endpoints.reports.varianceReasons, range),
