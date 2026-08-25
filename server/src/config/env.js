@@ -51,6 +51,20 @@ export const env = {
     ...list(process.env.CLIENT_URL),
   ]),
   trustProxy: bool(process.env.TRUST_PROXY, false),
+  /**
+   * The shared secret the plant server's stock sync signs itself with.
+   *
+   * A plain token rather than an account, because the caller is a scheduled
+   * Python script on a machine in the plant office and not a person: it has no
+   * password to rotate, no session to refresh, and no screen to be shown a
+   * login on. It reaches exactly one route, which only ever writes stock.
+   *
+   * Unset means the route is off, and says so - a 503 naming this variable,
+   * not a 401. The two failures are told apart on purpose: a script that gets
+   * 401 is told its token is wrong and somebody goes looking for a typo in the
+   * token, when what is actually wrong is that nobody has set one here.
+   */
+  sapSyncToken: process.env.SAP_SYNC_TOKEN || '',
   jwt: {
     secret: process.env.JWT_SECRET || 'dev-access-secret',
     expiresIn: process.env.JWT_EXPIRES_IN || '1d',

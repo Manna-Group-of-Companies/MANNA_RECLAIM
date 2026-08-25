@@ -1085,6 +1085,48 @@ export interface MachineCategory {
   machineIds: string[];
 }
 
+/**
+ * One line of the yard as SAP holds it.
+ *
+ * Not aggregated on the way here: one row per item per batch per warehouse, as
+ * SAP has it. A pre-totalled figure would make every later disagreement between
+ * the two systems unanswerable - this way the total can be shown and then
+ * explained.
+ */
+export interface SapStockRow {
+  /** SAP's own item code, and the key. Never invented at either end. */
+  sku: string;
+  description?: string | null;
+  /** What the plant calls it. Null where nobody has mapped the SAP item yet. */
+  grade?: string | null;
+  batch?: string | null;
+  warehouse?: string | null;
+  quantity: number;
+  /** kg for reclaim, pieces for moulded goods - held per row, as SAP holds it. */
+  unit: string;
+}
+
+/**
+ * The yard from SAP, and how old the reading is.
+ *
+ * `sync` is null when nothing has ever landed - which is a different thing from
+ * an empty yard, and the screen says so. `asOf` is when the plant server read
+ * SAP, not when the document reached this API: a script that queried at six and
+ * posted at nine after three retries is reporting six o'clock's stock.
+ */
+export interface SapStock {
+  sync: {
+    id: string;
+    source: string;
+    asOf: string;
+    receivedAt: string;
+    rows: number;
+  } | null;
+  rows: SapStockRow[];
+  /** Totalled per unit - kilograms and pieces must never be added together. */
+  totals: { rows: number; byUnit: Record<string, number> };
+}
+
 /** What the run history covers, for the back office's pickers. */
 export interface RunFilters {
   days: string[];

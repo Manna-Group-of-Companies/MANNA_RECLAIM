@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import * as stock from '../controllers/stock.controller.js';
+import * as sapStock from '../controllers/sapStock.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize, strictAdminOnly } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { idParam } from '../validations/common.validation.js';
 import { stockQuery, qcStatusSchema } from '../validations/stock.validation.js';
+import { sapStockQuery } from '../validations/sapStock.validation.js';
 import { ROLES, ADMIN_ROLES } from '../config/constants.js';
 
 /**
@@ -36,6 +38,15 @@ const floor = authorize(ROLES.SUPERVISOR, ROLES.WORKER, ...ADMIN_ROLES);
  * stock and readings and nothing commercial, which is what makes that safe.
  */
 const forSampling = authorize(ROLES.LAB, ROLES.SUPERVISOR, ROLES.WORKER, ...ADMIN_ROLES);
+
+/**
+ * Stock as SAP holds it, with how old the reading is.
+ *
+ * Open to the same people the yard summary is, and no wider: it is what is in
+ * the yard and carries no rate and no customer. Listed before `/:id` for the
+ * same reason `/summary` is - Express matches in order.
+ */
+router.get('/sap', forSampling, validate({ query: sapStockQuery }), sapStock.current);
 
 router.get('/pools', forSampling, validate({ query: stockQuery }), stock.pools);
 

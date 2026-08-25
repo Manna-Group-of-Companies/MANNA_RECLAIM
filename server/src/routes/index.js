@@ -13,6 +13,7 @@ import rateRoutes from './rate.routes.js';
 import maintenanceRoutes from './maintenance.routes.js';
 import reportRoutes from './report.routes.js';
 import operatorRoutes from './operator.routes.js';
+import syncRoutes from './sync.routes.js';
 import { dbInfo } from '../config/supabase.js';
 import { env } from '../config/env.js';
 import { ok } from '../utils/ApiResponse.js';
@@ -43,5 +44,12 @@ router.use('/customers', customerRoutes);
 router.use('/rates', rateRoutes);
 router.use('/maintenance', maintenanceRoutes);
 router.use('/reports', reportRoutes);
+/**
+ * The way in for machines rather than people: the scheduled stock sync on the
+ * plant server, signed with a shared secret instead of a session. Its own
+ * prefix so the exception it needs is one file rather than a hole carved into
+ * the guard every other route sits behind - see sync.routes.js.
+ */
+router.use('/sync', syncRoutes);
 
 export default router;

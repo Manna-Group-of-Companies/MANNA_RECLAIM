@@ -72,6 +72,12 @@ export const endpoints = {
     root: '/stock',
     summary: '/stock/summary',
     /**
+     * Stock as SAP holds it, with how old the reading is. Posted by the
+     * scheduled sync on the plant server - see /sync/sap-stock, which is the
+     * way in and takes a shared secret rather than a session.
+     */
+    sap: '/stock/sap',
+    /**
      * The coarse pools and their three sample points. The lab tests the period
      * rather than a lot, so it has to see which periods exist and which slots
      * are still empty.

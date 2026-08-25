@@ -440,6 +440,16 @@ export const TABLES = {
    */
   operators: 'operators',
   shiftOperators: 'shift_operators',
+  /**
+   * Stock as SAP holds it, and the record of each read of it.
+   *
+   * Two tables because a sync is two facts: what the stock is, and whether the
+   * reading of it worked. A screen showing stock with no idea how old it is
+   * will be believed on the day the script has been failing silently - see
+   * migrations/0020.
+   */
+  sapStock: 'sap_stock',
+  sapSyncs: 'sap_syncs',
 };
 
 /**

@@ -141,6 +141,20 @@ export const registry = {
     'assigned_by', 'created_at', 'updated_at',
   ]),
 
+  /**
+   * Stock as SAP holds it, one row per item per batch per warehouse, and the
+   * record of each read. Every row carries the sync that brought it, so a
+   * half-written snapshot is never read as the yard - see migrations/0020.
+   */
+  [TABLES.sapSyncs]: table('id', [
+    'id', 'as_of', 'received_at', 'source', 'rows', 'total_qty', 'status',
+    'note', 'created_at',
+  ]),
+  [TABLES.sapStock]: table('id', [
+    'id', 'sync_id', 'sku', 'description', 'grade', 'batch', 'warehouse',
+    'quantity', 'unit', 'created_at',
+  ]),
+
   // ---- quality ----
   [TABLES.qualityTests]: table('id', [
     'id', ...AUDIT, 'ts', 'kind', 'batch_no', 'shift_date', 'shift', 'verdict',

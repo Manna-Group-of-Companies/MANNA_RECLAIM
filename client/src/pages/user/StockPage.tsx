@@ -14,6 +14,7 @@ import {
 } from '@/components/ui';
 import { NewDispatchSheet, type DispatchableStock } from '@/features/dispatch/NewDispatchSheet';
 import { ADMIN_ROLES, DELETE_ROLES, DISPATCH_ROLES, UNIT_NOUN, counted } from '@/config/constants';
+import { SapStockPanel } from '@/features/stock/SapStockPanel';
 import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
@@ -782,11 +783,30 @@ export function StockPage() {
         }
       />
 
+      {/*
+        The yard as SAP holds it, above the groups this app kept for itself.
+        Above, because it is the live answer now: the packing entry is off the
+        tablets and the groups below are what was filed before the switch,
+        which the dispatch documents are still drawn against.
+      */}
+      <div className="msec">
+        <b>Stock from SAP</b>
+        <div className="ln" />
+      </div>
+      <SapStockPanel />
+
+      {cards.length > 0 && (
+        <div className="msec">
+          <b>Filed here before the switch</b>
+          <div className="ln" />
+        </div>
+      )}
+
       {!cards.length ? (
         <EmptyState
           icon={icons.packing}
-          title="Nothing packed and ready"
-          hint="Nothing is in the yard against these filters. Stock is no longer filed from the floor — the plant is too busy to keep a bagging bench up to date — and comes from SAP instead."
+          title="Nothing filed here"
+          hint="Nothing was packed into the yard from the floor against these filters. Stock comes from SAP now — the panel above is the live answer."
         />
       ) : (
         <>

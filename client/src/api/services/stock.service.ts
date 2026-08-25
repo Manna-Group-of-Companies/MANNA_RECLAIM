@@ -4,6 +4,7 @@ import type { ApiEnvelope, ListQuery } from '@/types/api';
 import type {
   MouldedStock,
   QcStatus,
+  SapStock,
   StockGroup,
   StockPool,
   StockSummaryRow,
@@ -28,6 +29,19 @@ export const stockService = {
   list: (params?: ListQuery) => requestPaged<StockGroup>(endpoints.stock.root, params),
 
   summary: (params?: ListQuery) => requestPaged<StockSummaryRow>(endpoints.stock.summary, params),
+
+  /**
+   * Stock as SAP holds it, and how old the reading is.
+   *
+   * Both come back together on purpose. A stock figure with no age on it is
+   * believed on the day the scheduled sync has been failing silently, and that
+   * is the day it matters most - so there is no way to ask for the numbers
+   * without also being handed when they were read.
+   */
+  async sap(params?: { grade?: string }): Promise<SapStock> {
+    const res = await axiosClient.get<ApiEnvelope<SapStock>>(endpoints.stock.sap, { params });
+    return res.data.data;
+  },
 
   /**
    * The coarse pools with their three sample points. Carries stock and readings

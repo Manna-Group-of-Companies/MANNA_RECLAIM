@@ -115,6 +115,30 @@ export function crud(table, { defaultSort = 'created_at', select = '*' } = {}) {
       return serialize(rows[0]);
     },
 
+    /**
+     * Many rows in one round trip.
+     *
+     * For the writes that arrive as a set rather than as an event: a stock
+     * snapshot is a few thousand rows that mean nothing apart from each other,
+     * and creating them one at a time is a few thousand requests to hold one
+     * fact. PostgREST takes an array on the same POST, so this is the same
+     * call with a list in it.
+     *
+     * Deliberately not a substitute for create(). Everything the tablets write
+     * is one thing happening - a run started, a weight recorded - and those
+     * belong on the single path where a failure is about that one thing.
+     */
+    async createMany(payloads = []) {
+      if (!payloads.length) return [];
+      const body = payloads.map((payload) => {
+        const row = toRow(payload);
+        if (key === 'id' && row.id === undefined) row.id = newId();
+        return row;
+      });
+      const { rows } = await request(table, { method: 'POST', select, body });
+      return rows.map(serialize);
+    },
+
     async update(id, patch) {
       const body = toPatch(patch);
       if (!Object.keys(body).length) return this.findById(id);
