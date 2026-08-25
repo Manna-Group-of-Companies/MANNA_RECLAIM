@@ -6,7 +6,6 @@ import { toRequestError } from '@/api/axiosClient';
 import {
   Badge,
   Button,
-  EmptyState,
   PageLoader,
   QualityChip,
   ViewHead,
@@ -15,7 +14,6 @@ import {
 import { NewDispatchSheet, type DispatchableStock } from '@/features/dispatch/NewDispatchSheet';
 import { ADMIN_ROLES, DELETE_ROLES, DISPATCH_ROLES, UNIT_NOUN, counted } from '@/config/constants';
 import { SapStockPanel } from '@/features/stock/SapStockPanel';
-import { icons } from '@/config/icons';
 import { useToast } from '@/hooks/useToast';
 import { useRefreshOnFocus } from '@/hooks/useRefreshOnFocus';
 import { cn } from '@/utils/cn';
@@ -474,6 +472,19 @@ const readyLine = (t: ReturnType<typeof tally>) => {
 export function StockPage() {
   const notify = useToast();
   const dispatch = useAppDispatch();
+  /**
+   * Whether the yard this app used to keep for itself is on screen.
+   *
+   * Off by default and off for the floor entirely. Stock comes from SAP now,
+   * so what is under this is a frozen ledger: the packing entry is off the
+   * tablets, nothing is filed into it any more, and a crew reading it would be
+   * reading a photograph of the yard as it stood the day the bench stopped.
+   *
+   * Kept reachable at all for one reason - the dispatch documents are drawn
+   * against these groups, and a dispatch already in flight has to be able to
+   * be finished. It goes when dispatch does.
+   */
+  const [showLegacy, setShowLegacy] = useState(false);
   const role = useAppSelector((s) => s.auth.user?.role);
   /*
    * Two different questions, and they are no longer the same one.
@@ -771,45 +782,44 @@ export function StockPage() {
 
   return (
     <>
-      {/* The count of groups on screen, then what is actually sellable. The
-          second is the answer to "can this order go out today"; the first is
-          only how much of the yard the filters are letting through. */}
-      <ViewHead
-        meta={
-          <>
-            {filtered ? `${visible.length} of ${cards.length}` : cards.length} groups ·{' '}
-            {readyLine(standing.pass)}
-          </>
-        }
-      />
-
       {/*
-        The yard as SAP holds it, above the groups this app kept for itself.
-        Above, because it is the live answer now: the packing entry is off the
-        tablets and the groups below are what was filed before the switch,
-        which the dispatch documents are still drawn against.
+        The yard is SAP's answer now, and it is the whole page.
+
+        The packing entry is off the tablets - the plant is too busy to keep a
+        bagging bench up to date - so the groups this app kept for itself no
+        longer grow. Showing both would put two answers to one question on one
+        screen and leave the reader to work out which is the plant.
       */}
-      <div className="msec">
-        <b>Stock from SAP</b>
-        <div className="ln" />
-      </div>
+      <ViewHead meta="from SAP" />
+
       <SapStockPanel />
 
-      {cards.length > 0 && (
-        <div className="msec">
-          <b>Filed here before the switch</b>
-          <div className="ln" />
-        </div>
+      {/*
+        And the way back to the frozen ledger, for the office alone.
+
+        Not on the floor at all: a crew reading it would be reading the yard as
+        it stood the day the bagging bench stopped, and nothing on the rows
+        themselves would say so. The office needs it while a dispatch drawn
+        against those groups is still in flight, and not after.
+      */}
+      {mayDispatch && cards.length > 0 && (
+        <button
+          type="button"
+          className="btn ghost block mt-2.5"
+          onClick={() => setShowLegacy(!showLegacy)}
+        >
+          {showLegacy ? 'Hide' : 'Show'} the old yard ledger · {cards.length} groups
+        </button>
       )}
 
-      {!cards.length ? (
-        <EmptyState
-          icon={icons.packing}
-          title="Nothing filed here"
-          hint="Nothing was packed into the yard from the floor against these filters. Stock comes from SAP now — the panel above is the live answer."
-        />
-      ) : (
+      {showLegacy && (
         <>
+          <div className="hint">
+            Nothing has been filed into these since the packing entry came off the tablets.
+            They are what the dispatch documents are drawn against, and they are not the
+            yard — the panel above is. {filtered ? `${visible.length} of ${cards.length}` : cards.length}
+            {' '}groups · {readyLine(standing.pass)}.
+          </div>
           {/*
             What is standing in each verdict, before any of the cards.
 

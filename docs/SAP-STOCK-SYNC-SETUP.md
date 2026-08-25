@@ -168,27 +168,33 @@ scheduled job has stopped: the sync runs every fifteen minutes, so six hours is
 two dozen missed runs, and stale stock looks exactly like stock unless something
 says so.
 
-## One thing left, and only you can do it
+## One thing left: the token
 
-**The migrations are applied.** All five - 0015, 0017, 0018, 0019 and 0020 -
-went onto the live database on 26 August 2026, and the four new tables were
-checked column by column against what the API expects. That matters more than
-it sounds: PostgREST silently drops a write to a column it cannot see, so a
-table that is nearly right stores nothing and answers 201 while doing it.
+Checked on 26 August 2026:
 
-**Redeploy Render.** Dashboard → the `manna-reclaim` service → Manual Deploy →
-Deploy latest commit. Until then `POST /api/v1/sync/sap-stock` answers **404**,
-which is what the plant server is seeing.
+* **The migrations are applied.** All five - 0015, 0017, 0018, 0019 and 0020 -
+  are on the live database, and the four new tables were checked column by
+  column against what the API expects. That matters more than it sounds:
+  PostgREST silently drops a write to a column it cannot see, so a table that is
+  nearly right stores nothing and answers 201 while doing it.
+* **Render is deployed.** `POST /api/v1/sync/sap-stock` answers rather than
+  404ing.
+* **`SAP_SYNC_TOKEN` is not set.** The route says so itself, in as many words:
 
-Then set `SAP_SYNC_TOKEN` in that service's Environment, if it is not there
-already. An env var added to a service that has not deployed the code yet still
-has no route to open.
+  ```
+  503  This endpoint is switched off: SAP_SYNC_TOKEN is not set on the API.
+  ```
 
-What each half failing looks like from the plant server, so the answer names
-itself:
+Set it: Dashboard → the `manna-reclaim` service → Environment → Add Environment
+Variable → `SAP_SYNC_TOKEN` = the token the plant server generated. Save, and
+wait for the restart.
 
-* **404** - Render has not redeployed.
-* **503** naming `SAP_SYNC_TOKEN` - deployed, no token set.
+After that, what each answer means from the plant server:
+
+* **503** naming `SAP_SYNC_TOKEN` - the variable is still not set, or the
+  service has not finished restarting.
+* **403** - it is set, and it is not the same string the script is sending.
+  Check for a trailing space or newline at either end.
 * **500** - would have meant the tables were missing. They are not, so a 500
   now is something else and worth sending back here.
 * **201** - through.
