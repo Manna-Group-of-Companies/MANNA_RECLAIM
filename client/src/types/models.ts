@@ -1285,6 +1285,17 @@ export interface TrendPart {
   hours: number | null;
   /** This record's own crew times its own hours. */
   labour: number | null;
+  /**
+   * The shift this pass actually ran in, where that is not the shift it is
+   * counted in.
+   *
+   * A grade is counted in the shift that weighed it out, so a pass worked on the
+   * day and finished at night belongs to the night's figure. The hours were
+   * still worked when they were worked, and a panel that said otherwise would
+   * answer "when did this happen" with the wrong night.
+   */
+  ranOn?: string | null;
+  ranIn?: string | null;
   out: number | null;
   kwh: number | null;
 }

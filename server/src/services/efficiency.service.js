@@ -139,32 +139,115 @@ export function runKwh(r) {
 }
 
 /** One unit per shift + grade, summed across the refiner passes it went through. */
+/**
+ * One unit per grade per shift - the shift that weighed it out.
+ *
+ * A grade goes through two to four refiner passes and only the finishing one
+ * is weighed. The passes need not be in the same shift: batch 3096 Special was
+ * worked on R3 through the day of 15 August and finished on R4 that night.
+ *
+ * Attributed to the shift each pass ran in - which is what this did - that
+ * batch reads as 12.4 man-hours against no output on the day, and 1,083 kg
+ * against only the night's own 19.2 on the night. So the day looks like a crew
+ * that produced nothing and the night like one that produced 56.4 kg per
+ * man-hour, when the material actually cost 31.6 man-hours and came to 34.3.
+ * Both halves wrong, in opposite directions, on a figure the plant pays an
+ * incentive against. It happens to 36 of the 267 batch-grades on record.
+ *
+ * So the unit is the material rather than the clock: every pass on a batch and
+ * grade is counted in the shift where that grade was weighed out, because that
+ * is the shift whose figure the whole of the work produced. Batch yield has
+ * always been attributed this way; this is the same rule reaching the rates.
+ *
+ * Three cases the rule has to answer, and it answers them here rather than
+ * leaving them to fall out of the loop:
+ *
+ *   Weighed in more than one shift - 18 groups. The last weighing takes it,
+ *   because that is the shift the grade was finished in. Splitting the earlier
+ *   passes between them would mean inventing a proportion.
+ *
+ *   Never weighed at all - 16 groups, 172 man-hours, 2.6% of the line. Left
+ *   out of every rate rather than charged to the shift it ran in, and this is
+ *   the second half of the same fix. On 15 August the night weighed 1,083 kg
+ *   of batch 3096 and also carried 18.6 hours worked on batch 3088, which has
+ *   never been weighed at all - so the night read 21.6 kg per man-hour when
+ *   the material it produced cost 34.3. Labour spent on one batch must not be
+ *   charged against another's output, whichever shift it happened in.
+ *
+ *   Not lost: a rate is kilograms out over the hours that produced those
+ *   kilograms, so work in progress joins the figure on the shift it is finally
+ *   weighed in. These sixteen are months old and will not be - see
+ *   refinerPending, which is what makes them visible rather than silently
+ *   dropped. Two of them are batch numbers with the grade typed into them,
+ *   "3088 special drc", which is where somebody should start.
+ *
+ *   A pass naming two batches - 5 runs, written "3134,3140". Kept as its own
+ *   group under that literal key rather than divided, for the same reason: a
+ *   pass cannot be cut in two without inventing how much of it was which.
+ */
 export function refinerUnits(rows) {
+  /*
+   * Any machine working the line, but never a vessel.
+   *
+   * It used to be REFINER_IDS - PR2, R1, R3, R4 - and the plant does not work
+   * that way: Medium is finished on R2, which is a coarse-line machine, and
+   * DRC has come off PR2. Eleven runs and 6,177 kg of Medium were dropped for
+   * being on the wrong machine, and dropped by coarseUnits too for being on
+   * the special line. What is on the line is what the run says it is on.
+   *
+   * A vessel is excluded by name, the same way coarseUnits excludes it and for
+   * the same reason: 138 charges are logged on the special line carrying 4,054
+   * hours, and a vessel cooking for eight hours with one hand attending is not
+   * the same kind of labour-hour as a crew working a refiner. Averaged in they
+   * would make the line's kg per man-hour four times too lax.
+   */
+  const onTheLine = rows.filter(
+    (r) => r.line === 'special' && r.quality && r.kind !== 'autoclave',
+  );
+
+  /** The material: one batch worked into one grade, however many passes. */
+  const slotOf = (r) => `${r.shift_date}|${r.shift ?? ''}`;
+  const byMaterial = new Map();
+  for (const r of onTheLine) {
+    const key = `${r.batch_no ?? ''}|${r.quality}`;
+    byMaterial.set(key, [...(byMaterial.get(key) ?? []), r]);
+  }
+
+  /**
+   * Where each pass is counted: the shift its grade was weighed out in.
+   *
+   * Built as a map from run to slot rather than by moving rows about, so the
+   * aggregation below stays the single pass it was and nothing is counted
+   * twice by an accident of ordering.
+   */
+  const homeOf = new Map();
+  for (const group of byMaterial.values()) {
+    const weighed = group
+      .filter((r) => (num(r.weight_kg) ?? 0) > 0)
+      .sort((a, b) => slotOf(a).localeCompare(slotOf(b)));
+    // Never weighed means no shift owns it yet - see the note above.
+    if (!weighed.length) continue;
+    const home = slotOf(weighed[weighed.length - 1]);
+    for (const r of group) homeOf.set(r.id, home);
+  }
+
   const byKey = new Map();
-  for (const r of rows) {
-    if (r.line !== 'special' || !r.quality) continue;
-    /*
-     * Any machine working the line, but never a vessel.
-     *
-     * It used to be REFINER_IDS - PR2, R1, R3, R4 - and the plant does not work
-     * that way: Medium is finished on R2, which is a coarse-line machine, and
-     * DRC has come off PR2. Eleven runs and 6,177 kg of Medium were dropped for
-     * being on the wrong machine, and dropped by coarseUnits too for being on
-     * the special line. What is on the line is what the run says it is on.
-     *
-     * A vessel is excluded by name, the same way coarseUnits excludes it and for
-     * the same reason: 138 charges are logged on the special line carrying 4,054
-     * hours, and a vessel cooking for eight hours with one hand attending is not
-     * the same kind of labour-hour as a crew working a refiner. Averaged in they
-     * would make the line's kg per man-hour four times too lax.
-     */
-    if (r.kind === 'autoclave') continue;
-    const key = `${r.shift_date}|${r.shift ?? ''}|${r.quality}`;
+  for (const r of onTheLine) {
+    const home = homeOf.get(r.id);
+    if (!home) continue;
+    const [day, shift] = home.split('|');
+    const key = `${home}|${r.quality}`;
     const u = byKey.get(key) ?? {
-      day: r.shift_date, shift: r.shift ?? '', quality: r.quality,
+      day, shift, quality: r.quality,
       out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, batches: new Set(), parts: [],
     };
-    u.parts.push(runPart(r));
+    /*
+     * The pass carries the shift it actually ran in, where that is not the
+     * shift it is counted in. The figure belongs to the weighing shift and the
+     * hours were still worked when they were worked - a detail panel that said
+     * otherwise would be answering "when did this happen" with the wrong night.
+     */
+    u.parts.push({ ...runPart(r), ranOn: r.shift_date ?? null, ranIn: r.shift ?? null });
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
     u.labour += runLabour(r);
@@ -177,25 +260,14 @@ export function refinerUnits(rows) {
      * the same material moving on and counting their weights too would
      * double-count the shift. The first half of that is right and the
      * conclusion was not: a pass that is only moving material on does not get
-     * weighed at all - 1,268 of the plant's runs carry no weight - and a
-     * weighed pass is one that finished a grade.
-     *
-     * What it cost: Medium is finished on R2, ten times since March, and R2 is
-     * a coarse-line machine. Those runs are logged on the special line with a
-     * grade and a weight, so refinerUnits skipped them for not being R4 and
-     * coarseUnits skipped them for not being coarse. 14,618 kg fell between the
-     * two and was counted by no figure on this screen - which is why the night
-     * of 24 August had a Medium card reading 0 kg with both its rates blank,
-     * while History showed the 822 kg that shift had made.
-     *
-     * A charge is worked into several grades at once and each grade is finished
-     * on whichever machine is free, so two machines weighing under one batch
-     * number is two different grades rather than the same rubber twice.
+     * weighed at all, and a weighed pass is one that finished a grade. Medium
+     * is finished on R2 and 14,618 kg fell between this and coarseUnits.
      */
     const w = num(r.weight_kg);
     if (w != null && w > 0) u.out += w;
     byKey.set(key, u);
   }
+
   return [...byKey.values()].map((u) => ({
     ...u,
     batches: [...u.batches],
@@ -232,6 +304,45 @@ export function grinderUnits(rows) {
     // Capped at 1.5 so a mis-keyed hour meter cannot report 400% utilisation.
     util: u.hours > 0 ? Math.min(1.5, u.hours / (SHIFT_MINUTES / 60)) : null,
   }));
+}
+
+/**
+ * Material the special line worked and never weighed out.
+ *
+ * refinerUnits leaves these out of every rate, because a rate is kilograms
+ * out over the hours that produced those kilograms and this labour produced
+ * none that anybody recorded. Left in, it is charged against some other
+ * batch's output on whichever shift it happened to run in.
+ *
+ * Exported so that exclusion is a thing somebody can look at rather than a
+ * silence. 172 man-hours over sixteen groups on the record as it stands, and
+ * two of those groups are batch numbers with the grade typed into them.
+ */
+export function refinerPending(rows) {
+  const line = rows.filter(
+    (r) => r.line === 'special' && r.quality && r.kind !== 'autoclave',
+  );
+  const byMaterial = new Map();
+  for (const r of line) {
+    const key = `${r.batch_no ?? ''}|${r.quality}`;
+    byMaterial.set(key, [...(byMaterial.get(key) ?? []), r]);
+  }
+
+  const out = [];
+  for (const group of byMaterial.values()) {
+    if (group.some((r) => (num(r.weight_kg) ?? 0) > 0)) continue;
+    const days = group.map((r) => r.shift_date).filter(Boolean).sort();
+    out.push({
+      batch: group[0].batch_no ?? null,
+      quality: group[0].quality,
+      passes: group.length,
+      labour: round(group.reduce((sum, r) => sum + runLabour(r), 0), 2),
+      hours: round(group.reduce((sum, r) => sum + (runHours(r) ?? 0), 0), 2),
+      firstDay: days[0] ?? null,
+      lastDay: days[days.length - 1] ?? null,
+    });
+  }
+  return out.sort((a, b) => b.labour - a.labour);
 }
 
 /**

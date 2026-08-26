@@ -445,7 +445,24 @@ export function EfficiencyTrend() {
                     <tbody>
                       {detail.point.parts?.map((part) => (
                         <tr key={part.runId}>
-                          <td>{part.machine ?? part.machineId ?? '—'}</td>
+                          <td>
+                            {part.machine ?? part.machineId ?? '—'}
+                            {/*
+                              A pass counted here that ran in another shift. A
+                              grade belongs to the shift that weighed it out, so
+                              the night that finishes day-started material
+                              carries the day's passes - and a reader who was not
+                              told would take it for a mistake in the record.
+                            */}
+                            {part.ranIn && part.ranIn !== detail.point.shift && (
+                              <div className="muted text-[10px]">
+                                ran on the {part.ranIn} shift
+                                {part.ranOn && part.ranOn !== detail.point.date
+                                  ? `, ${dayLong(part.ranOn)}`
+                                  : ''}
+                              </div>
+                            )}
+                          </td>
                           <td>
                             {part.batch ? (
                               <span className="batchref text-xs">{part.batch}</span>
