@@ -23,11 +23,7 @@ import { hours, kwhOf, num } from '@/utils/format';
 import { cn } from '@/utils/cn';
 import type { Run } from '@/types/models';
 
-const SHIFT_CHIPS = [
-  { value: '', label: 'Both shifts' },
-  { value: 'Day', label: 'Day shift' },
-  { value: 'Night', label: 'Night shift' },
-];
+
 
 /**
  * Everything recorded about one run, and every one of it editable - or, at the
@@ -495,7 +491,23 @@ export function AdminHistoryPage() {
   const [machineId, setMachineId] = useState('');
   const [category, setCategory] = useState('');
   const [quality, setQuality] = useState('');
-  const [shift, setShift] = useState('');
+  /**
+   * The shift is the one picked above the tab strip, not a second choice.
+   *
+   * It used to be its own filter starting on "Both shifts", which made the
+   * bar's own promise - "every tab below reads this shift" - false on this
+   * tab: the day shift could be selected up there and the night shift down
+   * here, both on screen at once, disagreeing. Two controls for one question
+   * is worse than either of them alone.
+   *
+   * What is kept is the widening, because the bar cannot express it: a day
+   * has two shifts and sometimes the question is about the day. That is a
+   * span, not a shift, so it is a single toggle rather than a third option
+   * pretending to be one.
+   */
+  const pickedShift = useAppSelector((s) => s.ui.backOfficeShift);
+  const [bothShifts, setBothShifts] = useState(false);
+  const shift = bothShifts ? '' : pickedShift;
   const [rows, setRows] = useState<Run[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -595,9 +607,11 @@ export function AdminHistoryPage() {
     <>
       <div className="panel">
         {/*
-          One day or a window. The mode is a pair of chips rather than a blank
-          second date box, because a window with one end filled in is a state
-          somebody lands in by accident and then reads as a broken filter.
+          A span, not a date. The day and the shift are picked once above the
+          tab strip and every tab reads them - this only says whether to read
+          that one day or a stretch of them, and the date itself is never
+          shown twice. It used to echo the day beside these chips, which read
+          as a second date picker disagreeing with the first.
         */}
         <div className="chips">
           <button
@@ -605,19 +619,35 @@ export function AdminHistoryPage() {
             className={cn('chip', span === 'day' && 'on')}
             onClick={() => setSpan('day')}
           >
-            One day
+            The day above
           </button>
           <button
             type="button"
             className={cn('chip', span === 'period' && 'on')}
             onClick={() => setSpan('period')}
           >
-            A period
+            A period of days
           </button>
-          {span === 'day' && <span className="sub self-center">{dayLong(day) }</span>}
+          <button
+            type="button"
+            className={cn('chip', bothShifts && 'on')}
+            onClick={() => setBothShifts(!bothShifts)}
+            aria-pressed={bothShifts}
+          >
+            {bothShifts ? 'Both shifts' : `${pickedShift} shift only`}
+          </button>
         </div>
 
         {span === 'period' && (
+          <>
+            {/*
+              Said out loud, because the bar above stays on screen and goes on
+              showing a day. Without this somebody changes it and waits for a
+              list that is never going to move.
+            */}
+            <div className="sub mt-2">
+              The day above does not apply while a period is showing — these two dates do.
+            </div>
           <div className="bar mt-2.5">
             <div className="f">
               <label htmlFor="h-from">From</label>
@@ -641,6 +671,7 @@ export function AdminHistoryPage() {
               />
             </div>
           </div>
+          </>
         )}
 
         <div className="bar mt-2.5">
@@ -700,16 +731,6 @@ export function AdminHistoryPage() {
         </div>
 
         <div className="chips mt-2.5">
-          {SHIFT_CHIPS.map((c) => (
-            <button
-              key={c.label}
-              type="button"
-              className={cn('chip', shift === c.value && 'on')}
-              onClick={() => setShift(c.value)}
-            >
-              {c.label}
-            </button>
-          ))}
           {/*
             The machine log as a spreadsheet, over whatever is filtered above.
 
