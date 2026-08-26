@@ -109,6 +109,7 @@ vocabulary:
   "rows": [
     {
       "docNo": "DN-2026-00841",
+      "lineNum": 0,
       "docType": "delivery",
       "docDate": "2026-08-24",
       "customer": "Some Rubber Works Pvt Ltd",
@@ -126,6 +127,11 @@ vocabulary:
 }
 ```
 
+* `lineNum` is SAP's own `INV1.LineNum`, and it is not optional in practice.
+  It is the only thing that tells two lines of the same item apart, and this
+  install carries no batch on any invoice line - so a document holding one item
+  twice cannot be stored without it. Invoice 149 is exactly that case: I-10061
+  on two lines, 2000 kg and 1000 kg, same warehouse, no batch on either.
 * One row per **document line**, not per document. A delivery of three grades is
   three rows. Aggregated per document, the plant cannot ask what went out as
   Fine, which is most of what this is for.

@@ -151,7 +151,7 @@ export const registry = {
     'window_from', 'window_to', 'status', 'note', 'created_at',
   ]),
   [TABLES.sapDispatches]: table('id', [
-    'id', 'sync_id', 'doc_no', 'doc_type', 'doc_date', 'customer',
+    'id', 'sync_id', 'doc_no', 'doc_type', 'line_num', 'doc_date', 'customer',
     'customer_code', 'sku', 'description', 'grade', 'batch', 'quantity',
     'unit', 'value', 'currency', 'created_at',
   ]),

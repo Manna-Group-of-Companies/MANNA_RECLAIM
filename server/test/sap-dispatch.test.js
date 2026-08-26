@@ -152,14 +152,61 @@ test('a new window replaces the last one entirely', async (t) => {
   assert.equal(out.totals.documents, 2);
 });
 
-test('the same item twice on one document against one batch is refused', async (t) => {
+test('two lines of one item are two lines, when the line number says so', async (t) => {
+  const api = await withToken();
+  t.after(() => api.stop());
+
+  /*
+   * Invoice 149 on the plant's own SAP: item I-10061 twice, 2000 kg and 1000
+   * kg, same warehouse, no batch on either - because no invoice line on that
+   * install carries one. Two genuine lines with nothing but the line number to
+   * tell them apart, and the first real run refused the whole quarter over it.
+   */
+  const sent = await post(
+    api,
+    'sap-dispatch',
+    window_([
+      line({ lineNum: 0, sku: 'I-10061', quantity: 2000 }),
+      line({ lineNum: 1, sku: 'I-10061', quantity: 1000 }),
+    ]),
+  );
+  assert.equal(sent.status, 201);
+
+  const out = await read(api);
+  assert.equal(out.totals.rows, 2, 'both lines');
+  assert.equal(out.totals.documents, 1, 'off one invoice');
+  assert.equal(out.totals.byUnit.kg, 3000, 'and neither was dropped');
+});
+
+test('the same line number twice is still the same line, and refused', async (t) => {
+  const api = await withToken();
+  t.after(() => api.stop());
+
+  // The guard is not gone, only better aimed: two rows claiming to be line 0 of
+  // one document are the same line sent twice, whatever the quantities say.
+  const sent = await post(
+    api,
+    'sap-dispatch',
+    window_([line({ lineNum: 0 }), line({ lineNum: 0, quantity: 9 })]),
+  );
+  assert.equal(sent.status, 400);
+});
+
+test('without a line number, a collision says what to send', async (t) => {
   const api = await withToken();
   t.after(() => api.stop());
 
   const sent = await post(api, 'sap-dispatch', window_([line(), line({ quantity: 9 })]));
-  assert.equal(sent.status, 400);
+  assert.equal(sent.status, 400, 'two rows nothing can tell apart are still refused');
+
+  /*
+   * But the message names the fix. Without a line number those two rows are
+   * genuinely indistinguishable and storing both would as easily be doubling a
+   * figure as recording a fact - so refusing is right, and a refusal that says
+   * what to do next is a different thing from a dead end.
+   */
   const { message } = await sent.json();
-  assert.match(message, /twice/i);
+  assert.match(message, /lineNum/);
 });
 
 test('the same item on one document against two batches is two lines', async (t) => {

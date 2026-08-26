@@ -74,6 +74,14 @@ const dispatchRow = z.object({
    * that starts raising them later should not be refused at the door for it.
    */
   docType: text(30).optional().nullable(),
+  /**
+   * SAP's own line number on the document - `INV1.LineNum`.
+   *
+   * Optional, and worth sending. It is the only thing that tells two lines of
+   * the same item apart, and this install carries no batch on any invoice line
+   * - so without it a document holding one item twice cannot be stored.
+   */
+  lineNum: z.coerce.number().int().optional().nullable(),
   docDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'docDate is YYYY-MM-DD').optional().nullable(),
   customer: text(200).optional().nullable(),
   customerCode: text(60).optional().nullable(),
