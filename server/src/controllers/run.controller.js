@@ -16,15 +16,24 @@ import { logger } from '../config/logger.js';
 /**
  * Runs that name a batch, including the ones that name it alongside another.
  *
- * `batch_no` is usually one number and sometimes a list - the plant writes
- * "3134,3140" on a pass that worked both - so an equality match finds the first
- * kind and silently misses the second. Searching for 3134 and being shown some
- * of its runs is worse than being shown none: the answer looks complete.
+ * A pass can work two batches at once, and the run names both: the one it is
+ * filed under in `batch_no`, and the whole list across `src1`..`src4`. So a
+ * search of `batch_no` alone finds every pass filed under a number and none of
+ * the passes that mixed it into another batch - and being shown some of a
+ * batch's runs is worse than being shown none, because the answer looks
+ * complete. The mixed-in number is exactly what somebody is searching for when
+ * they are asking where the rest of a batch went.
  *
- * Four clauses rather than a contains: `like '*3134*'` would also match 13134
- * and 31340, and a batch search that returns another batch's runs is the one
- * failure this must not have. So it is the number alone, or the number at
- * either end of a list, or in the middle of one.
+ * The three comma patterns are an older shape. Before the refiners had a picker
+ * for the mix, some supervisors wrote both numbers into the batch box with a
+ * comma between them - "3134,3140" - and five passes went on record that way
+ * before mix-comma-split.js moved them into the columns above. There are none left,
+ * and the clauses stay: a batch search is the wrong place to discover that
+ * something wrote one again.
+ *
+ * Anchored rather than a contains. `like '*3134*'` would also match 13134 and
+ * 31340, and a batch search that answers with another batch's runs is the one
+ * failure this must not have.
  *
  * Quoted throughout because the patterns contain commas, which PostgREST would
  * otherwise read as the separator between clauses.
@@ -37,6 +46,7 @@ const batchClause = (batch) => {
   return {
     or: [
       `batch_no.eq."${safe}"`,
+      ...['src1', 'src2', 'src3', 'src4'].map((column) => `${column}.eq."${safe}"`),
       `batch_no.like."${safe},*"`,
       `batch_no.like."*,${safe}"`,
       `batch_no.like."*,${safe},*"`,

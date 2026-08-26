@@ -359,9 +359,11 @@ export function MachinesPage() {
    * say so, so a pass with two in it went on record as a pass on one. Folding
    * the grids was not: two tiles lit identically say nothing about which the
    * run is filed under, and nothing on the sheet said a second tap meant
-   * anything at all. The record settles it - forty runs recorded a mix in June
-   * and none after, and what the supervisors did instead was type both numbers
-   * into the batch box with a comma between them, which no report can read.
+   * anything at all. What the record shows is worse than disuse: it is a coin
+   * toss. Nineteen jobs across April, June and August recorded the mix
+   * properly, and in August alone four found the second tap while two typed
+   * both numbers into the batch box with a comma between them - a shape no
+   * report can read. The same plant, the same fortnight, both ways.
    *
    * So: two grids again, on every sheet that picks a batch, and the second one
    * asked only once there is something to mix into.
@@ -493,10 +495,10 @@ export function MachinesPage() {
    *
    * Its own handler and its own grid. Both questions used to be one grid where
    * a second tap quietly meant "and mix this in", which lit two tiles the same
-   * way and said nothing about which was which. Nobody found it: the mix was
-   * recorded forty times in June and not once after, and what the supervisors
-   * did instead was type both numbers into the batch box separated by a comma.
-   * A feature nobody can see is a feature that is not there.
+   * way and said nothing about which was which. Some crews found it and some
+   * did not - in August four jobs recorded the mix and two were typed into the
+   * batch box with a comma instead. A feature half the plant cannot see is not
+   * a feature that half works; it is one that quietly splits the record in two.
    */
   const pickBatch = (b: Batch) => {
     if (batchNo.trim() === b.ref) {
@@ -2017,10 +2019,10 @@ export function MachinesPage() {
                   Several batches go into one grade often enough that the plant
                   has a word for it, and this used to be a second tap on the
                   grid above - which lit two tiles identically and said nothing
-                  about which the run was filed under. It was used forty times
-                  in June and never again: what the supervisors did instead was
-                  type both numbers into the batch box with a comma between
-                  them, which no report can read.
+                  about which the run was filed under. Half the plant found it
+                  and half did not: in August four jobs recorded the mix and two
+                  were typed into the batch box with a comma between them,
+                  which is a shape no report can read.
 
                   So it is asked separately, after there is something to mix
                   into, and the batch already picked is not on the list -

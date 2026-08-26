@@ -186,6 +186,37 @@ test('a batch search finds the runs that name it beside another', async (t) => {
   assert.deepEqual(await ids(api, 'batch=3140'), ['b-2', 'b-3', 'b-4']);
 });
 
+test('a batch search finds the passes that mixed the batch into another', async (t) => {
+  const api = await startApi({
+    tables: {
+      machines: PLANT,
+      runs: [
+        // The shape a mix is recorded in: the batch it is filed under, and the
+        // whole list across the source columns.
+        run('x-1', { batch_no: '3056', src1: '3056', src2: '3058' }),
+        run('x-2', { batch_no: '3056' }),
+        run('x-3', { batch_no: '3058' }),
+        run('x-4', { batch_no: '3059', src1: '3059', src2: '30581' }),
+      ],
+    },
+  });
+  t.after(() => api.stop());
+
+  /*
+   * 3058 was mixed into 3056 on x-1, so a pass on 3058 is what that run is -
+   * and it is the search somebody runs when they are asking where the rest of a
+   * batch went. Searching the filed-under column alone answers with x-3 and
+   * looks complete, which is the failure mode that matters: nobody re-runs a
+   * search that already gave them an answer.
+   */
+  assert.deepEqual(await ids(api, 'batch=3058'), ['x-1', 'x-3']);
+  // And the batch it is filed under still finds it once, not twice, though the
+  // number is in two columns of the same row.
+  assert.deepEqual(await ids(api, 'batch=3056'), ['x-1', 'x-2']);
+  // A source column is matched whole, like every other clause here.
+  assert.deepEqual(await ids(api, 'batch=30581'), ['x-4']);
+});
+
 test('a batch search narrows with everything else', async (t) => {
   const api = await startApi({
     tables: {
