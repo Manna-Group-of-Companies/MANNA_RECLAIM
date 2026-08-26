@@ -349,13 +349,22 @@ export function MachinesPage() {
    * through with the one being refined. The batch itself is not in here - it
    * leads the list that gets sent, and cannot be mixed with itself.
    *
-   * Filled by tapping the Batch grid a second time - see tapBatch. It was a
-   * grid of its own under "Mixed from", offered on the special line alone,
-   * which got both halves of this wrong. A refiner takes two batches at a time
-   * and could not say so at all, so a pass with two batches in it went on
-   * record as a pass on one; and a second grid of the same numbers is not what
-   * "pick two batches" looks like to a crew in gloves. One grid, and the tap
-   * after the first mixes one in.
+   * Filled from its own grid under "Mixed in" - see toggleMix. This was a grid
+   * of its own once, offered on the special line alone; it was folded into the
+   * Batch grid as a second tap, on the reasoning that a second grid of the same
+   * numbers is not what "pick two batches" looks like to a crew in gloves.
+   *
+   * Half of that was right and the change was wrong. Widening it past the
+   * special line was right: a refiner takes two batches at a time and could not
+   * say so, so a pass with two in it went on record as a pass on one. Folding
+   * the grids was not: two tiles lit identically say nothing about which the
+   * run is filed under, and nothing on the sheet said a second tap meant
+   * anything at all. The record settles it - forty runs recorded a mix in June
+   * and none after, and what the supervisors did instead was type both numbers
+   * into the batch box with a comma between them, which no report can read.
+   *
+   * So: two grids again, on every sheet that picks a batch, and the second one
+   * asked only once there is something to mix into.
    */
   const [mix, setMix] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(todayISO());
@@ -479,50 +488,55 @@ export function MachinesPage() {
    */
   const startNothingReady = startSpecial && pickableBatches.length === 0;
   /**
-   * A tap on the Batch grid.
+   * The batch being refined - the one the run is filed under, and the only one
+   * the record keys on.
    *
-   * The first number picked is the batch being refined - the one the run is
-   * filed under, and the only one the record keys on. What is tapped after it
-   * goes through with it as tailings, which is what `sources` keeps. Two
-   * batches is what a refiner takes at a time; the special line records up to
-   * four, which is as many as its columns hold.
-   *
-   * Untapping the one it is filed under hands that job to the next number still
-   * lit rather than dropping the whole picking: the crew is taking one batch
-   * back off the machine, not starting the pick again.
+   * Its own handler and its own grid. Both questions used to be one grid where
+   * a second tap quietly meant "and mix this in", which lit two tiles the same
+   * way and said nothing about which was which. Nobody found it: the mix was
+   * recorded forty times in June and not once after, and what the supervisors
+   * did instead was type both numbers into the batch box separated by a comma.
+   * A feature nobody can see is a feature that is not there.
    */
-  const tapBatch = (b: Batch) => {
-    const lead = batchNo.trim();
-    if (lead === b.ref) {
-      setBatchNo(mix[0] ?? '');
-      setMix(mix.slice(1));
+  const pickBatch = (b: Batch) => {
+    if (batchNo.trim() === b.ref) {
+      // Untapping clears the pick rather than promoting a mixed batch into
+      // its place: with two lists on screen, silently moving a number from
+      // one to the other is a change nobody asked for and nobody would see.
+      setBatchNo('');
       return;
     }
+    setBatchNo(b.ref);
+    // Nothing is mixed into itself.
+    setMix(mix.filter((ref) => ref !== b.ref));
+    // The grade the batch was opened for is the one it will come off at, so
+    // the picker starts there - the crew can still say otherwise before it
+    // starts.
+    if (startSpecial && b.grade) setQuality(b.grade);
+  };
+
+  /**
+   * What goes through with it as tailings, which is what `sources` keeps.
+   *
+   * Two batches is what a refiner takes at a time: the one it is filed under
+   * and one more going through with it. The special line keeps the four it has
+   * always recorded - four columns is what the record has room for, and one of
+   * them is the batch being refined.
+   */
+  const toggleMix = (b: Batch) => {
     if (mix.includes(b.ref)) {
       setMix(mix.filter((ref) => ref !== b.ref));
-      return;
-    }
-    if (!lead) {
-      setBatchNo(b.ref);
-      // The grade the batch was opened for is the one it will come off at, so
-      // the picker starts there - the crew can still say otherwise before it
-      // starts.
-      if (startSpecial && b.grade) setQuality(b.grade);
       return;
     }
     if (!b.autoclave_done) {
       // A charge is on this grid before it is out of the vessel, so that the
       // pick says why it is not ready rather than leaving the number off the
-      // screen. It can still be the batch a run is filed under - the crew see
-      // it through the door - but it has no tailings to put through anything
+      // screen. It can be the batch a run is filed under - the crew see it
+      // through the door - but it has no tailings to put through anything
       // until it is discharged.
       notify(`${b.ref} is still in the autoclave`, 'warn');
       return;
     }
-    // Two batches is what a refiner takes at a time: the one it is filed under
-    // and one more going through with it. The special line keeps the four it
-    // has always recorded - four columns is what the record has room for, and
-    // one of them is the batch being refined.
     if (mix.length >= (startSpecial ? 3 : 1)) {
       notify(startSpecial ? 'Up to 4 batches per mix' : 'Two batches at a time', 'warn');
       return;
@@ -1980,11 +1994,9 @@ export function MachinesPage() {
               <>
                 <SheetLabel>
                   Batch{' '}
-                  {!mix.length && (
-                    <span className="muted normal-case tracking-normal">
-                      — tap a second to mix one in
-                    </span>
-                  )}
+                  <span className="muted normal-case tracking-normal">
+                    — the one being refined
+                  </span>
                 </SheetLabel>
                 <PickGrid>
                   {pickableBatches.map((b) => (
@@ -1993,20 +2005,66 @@ export function MachinesPage() {
                       title={b.ref}
                       dot={b.grade ? gradeVar(b.grade) : undefined}
                       sub={<BatchPickSub batch={b} />}
-                      selected={batchNo === b.ref || mix.includes(b.ref)}
-                      onClick={() => tapBatch(b)}
+                      selected={batchNo.trim() === b.ref}
+                      onClick={() => pickBatch(b)}
                     />
                   ))}
                 </PickGrid>
-                {/* Which of the lit tiles the run is actually filed under. Two
-                    tiles lit the same way say nothing about that, and the one
-                    it is filed under is the one the batch card, the weighing
-                    and the costing all follow. */}
-                {mix.length > 0 && (
-                  <div className="hint">
-                    Filed under {batchNo.trim()} — {mix.join(' and ')}{' '}
-                    {mix.length === 1 ? 'goes' : 'go'} through with it as tailings.
-                  </div>
+
+                {/*
+                  And what is mixed into it, as a list of its own.
+
+                  Several batches go into one grade often enough that the plant
+                  has a word for it, and this used to be a second tap on the
+                  grid above - which lit two tiles identically and said nothing
+                  about which the run was filed under. It was used forty times
+                  in June and never again: what the supervisors did instead was
+                  type both numbers into the batch box with a comma between
+                  them, which no report can read.
+
+                  So it is asked separately, after there is something to mix
+                  into, and the batch already picked is not on the list -
+                  nothing is mixed into itself. Nothing mixed is a tile rather
+                  than an empty grid, so that skipping it is an answer somebody
+                  gave rather than a question they did not notice.
+                */}
+                {batchNo.trim() && (
+                  <>
+                    <SheetLabel className="mt-4">
+                      Mixed in{' '}
+                      <span className="muted normal-case tracking-normal">
+                        — optional, tailings that go through with it
+                      </span>
+                    </SheetLabel>
+                    <PickGrid>
+                      <Pick
+                        title="Nothing mixed"
+                        sub="just this batch"
+                        selected={!mix.length}
+                        onClick={() => setMix([])}
+                      />
+                      {pickableBatches
+                        .filter((b) => b.ref !== batchNo.trim())
+                        .map((b) => (
+                          <Pick
+                            key={`mix-${b.id}`}
+                            title={b.ref}
+                            dot={b.grade ? gradeVar(b.grade) : undefined}
+                            sub={<BatchPickSub batch={b} />}
+                            selected={mix.includes(b.ref)}
+                            onClick={() => toggleMix(b)}
+                          />
+                        ))}
+                    </PickGrid>
+                    {mix.length > 0 && (
+                      <div className="hint">
+                        Filed under {batchNo.trim()} — {mix.join(' and ')}{' '}
+                        {mix.length === 1 ? 'goes' : 'go'} through with it as tailings.
+                        {' '}The run is recorded against {batchNo.trim()}, which is what the
+                        batch card, the weighing and the costing all follow.
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
