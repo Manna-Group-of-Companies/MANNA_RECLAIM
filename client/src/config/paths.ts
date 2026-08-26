@@ -84,7 +84,7 @@ export const adminPaths = {
 export const mdPaths = {
   root: '/md',
   login: '/md/login',
-  overview: '/md/overview',
+
   efficiency: '/md/efficiency',
   /** The same approvals board, read-only - the process, observed. */
   approvals: '/md/approvals',
@@ -120,7 +120,7 @@ export const mdPaths = {
  * director has no shop-floor tab at all.
  */
 export const homeFor = (role?: Role | null): string => {
-  if (role === 'md') return mdPaths.overview;
+  if (role === 'md') return mdPaths.efficiency;
   if (role === 'lab') return userPaths.quality;
   return userPaths.machines;
 };

@@ -49,7 +49,16 @@ const seed = () => ({
   users: [],
 });
 
-/** The summary screen's three GETs, which are the account's whole reason to exist. */
+/**
+ * The reads this account is for.
+ *
+ * `/reports/dashboard` is on the list and no MD screen draws it any more - the
+ * Overview tab was taken off that dashboard as a view nobody used. The route
+ * stays open to the role rather than being narrowed with the screen: the
+ * account is defined by what it may read, not by which of those a tab happens
+ * to show this month, and re-opening it later should not need a second
+ * argument about permissions.
+ */
 const SUMMARY_READS = [
   `/reports/dashboard?from=${DAY}&to=${DAY}`,
   '/reports/shifts',

@@ -67,7 +67,7 @@ const roleNote: Record<Role, string> = {
   lab: 'Quality only - no machines, batches or dispatch.',
   manager: 'Shop floor and this back office. Can correct anything; cannot delete.',
   admin: 'Everything a manager reaches, plus the deletes nobody can undo - clearing a weighing, clearing a stock group, removing a QC verdict.',
-  md: 'The plant overview and the shift efficiency, read-only. No shop floor, no rate card, no ideal values, and no way to write anything anywhere.',
+  md: 'Efficiency, the approvals board, the lab record, the yard and what has been dispatched - all read-only. No shop floor, no rate card, no ideal values, and no way to write anything anywhere.',
 };
 
 /**

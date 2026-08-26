@@ -2,7 +2,6 @@ import { Navigate, type RouteObject } from 'react-router-dom';
 import { MdLayout } from '@/components/layout';
 import { ProtectedRoute } from './ProtectedRoute';
 import { AdminHistoryPage, ApprovalsPage, EfficiencyPage } from '@/pages/admin';
-import { MdOverviewPage } from '@/pages/md';
 import { BatchQualityBoard } from '@/features/quality/BatchQualityBoard';
 import { SapDispatchBoard } from '@/features/dispatch/SapDispatchBoard';
 import { MdStockPage } from '@/pages/md';
@@ -10,7 +9,7 @@ import { mdPaths } from '@/config/paths';
 import { SUMMARY_ROLES } from '@/config/constants';
 
 /**
- * The managing director's seven screens.
+ * The managing director's six screens.
  *
  * Gated on SUMMARY_ROLES, which is md plus the back office - a manager opening
  * these reads the same two pages rather than being bounced, and the guard stays
@@ -30,8 +29,7 @@ export const mdRoutes: RouteObject[] = [
       {
         element: <MdLayout />,
         children: [
-          { index: true, element: <Navigate to={mdPaths.overview} replace /> },
-          { path: 'overview', element: <MdOverviewPage /> },
+          { index: true, element: <Navigate to={mdPaths.efficiency} replace /> },
           { path: 'efficiency', element: <EfficiencyPage /> },
           // The approvals board, read-only. The managing director watches the
           // process run without being able to sign anything off.
