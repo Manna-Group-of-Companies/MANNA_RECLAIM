@@ -1,10 +1,12 @@
+import { useState } from 'react';
+import { BoModal } from '@/components/ui';
 import { OperatorChip } from '@/features/operators/OperatorChip';
 import { useEfficiencyTrend } from '@/features/reports/useEfficiencyTrend';
 import { TREND_WINDOWS, pointName, spanNoun } from '@/features/reports/trendText';
 import { dayLong, todayISO } from '@/utils/date';
 import { num } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import type { TrendMetric, TrendSummary } from '@/types/models';
+import type { TrendMetric, TrendPoint, TrendSummary } from '@/types/models';
 
 /**
  * One line, grade or vessel followed across a period.
@@ -21,6 +23,16 @@ import type { TrendMetric, TrendSummary } from '@/types/models';
  * when the answer is disputed, which with money attached it will be.
  */
 
+
+/**
+ * A figure in the table, and the point it came off.
+ *
+ * Both, because neither answers on its own. The arithmetic says how the
+ * number was reached; the point says what else was true that shift - what it
+ * weighed, who was on it, how long it ran - and "why was Tuesday night 3.15"
+ * is nearly always answered by the second.
+ */
+type Detail = { metric: TrendMetric; point: TrendPoint } | null;
 
 /** How far off, and whether that is the good side. */
 function Delta({ metric }: { metric: TrendMetric }) {
@@ -123,6 +135,9 @@ export function EfficiencyTrend() {
     setTo,
     setSubject,
   } = useEfficiencyTrend();
+
+  /** The figure whose working is open, if any. */
+  const [detail, setDetail] = useState<Detail>(null);
 
   const span = data?.subject?.span;
 
@@ -253,12 +268,24 @@ export function EfficiencyTrend() {
                       return (
                         <td key={col.key} className="tnum">
                           {m ? (
-                            <>
+                            /*
+                              Every figure opens its own working, the way the
+                              shift cards do. Over a period it matters more
+                              rather than less: a table of bare numbers ends
+                              every "why was that one low" with somebody going
+                              back to the paper.
+                            */
+                            <button
+                              type="button"
+                              className="figure"
+                              onClick={() => setDetail({ metric: m, point: p })}
+                              title="How this was worked out"
+                            >
                               <b>{m.value}</b>
                               <div className="text-[10px]">
                                 <Delta metric={m} />
                               </div>
-                            </>
+                            </button>
                           ) : (
                             <span className="muted">—</span>
                           )}
@@ -272,6 +299,119 @@ export function EfficiencyTrend() {
           </div>
         </>
       )}
+
+      <BoModal
+        open={Boolean(detail)}
+        title={detail?.metric.calc?.title ?? detail?.metric.label ?? ''}
+        subtitle={
+          detail
+            ? `${detail.point.label ?? dayLong(detail.point.date)}${
+              detail.point.shift ? ` · ${detail.point.shift} shift` : ''
+            }`
+            : ''
+        }
+        onClose={() => setDetail(null)}
+      >
+        {detail && (
+          <>
+            <div className="calc">
+              {detail.metric.calc ? (
+                <>
+                  <div>
+                    <b>Formula:</b> {detail.metric.calc.formula}
+                  </div>
+                  {detail.metric.calc.lines.map((line, i) => (
+                    <div key={i}>{line}</div>
+                  ))}
+                  <div>
+                    = <b className="res">{detail.metric.calc.result}</b>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  {detail.metric.value} {detail.metric.unit}
+                </div>
+              )}
+            </div>
+
+            {/* Against the manager's figure, and which way is the good way. */}
+            <div className="roRow">
+              <span className="k">Target</span>
+              <span className="v">
+                {detail.metric.ideal == null ? 'none set' : `${detail.metric.ideal} ${detail.metric.unit}`}
+                {detail.metric.ideal != null && (
+                  <span className="muted">
+                    {' · '}
+                    {detail.metric.lowerIsBetter ? 'lower is better' : 'higher is better'}
+                  </span>
+                )}
+              </span>
+            </div>
+            {detail.metric.ideal != null && (
+              <div className="roRow">
+                <span className="k">Against it</span>
+                <span className="v">
+                  <Delta metric={detail.metric} />
+                </span>
+              </div>
+            )}
+
+            {/*
+              What else was true that shift. The arithmetic says how the number
+              was reached and this says why it was that number - the crew, the
+              hours, the batches on the line. It is the half somebody actually
+              goes looking for.
+            */}
+            <div className="grouphead">That shift</div>
+            {detail.point.out != null && (
+              <div className="roRow">
+                <span className="k">Weighed out</span>
+                <span className="v">{num(detail.point.out, 0)} kg</span>
+              </div>
+            )}
+            {detail.point.labour != null && (
+              <div className="roRow">
+                <span className="k">Labour</span>
+                <span className="v">
+                  {num(detail.point.labour, 2)} man-hours
+                  <span className="muted">
+                    {' · '}
+                    {detail.point.workers} crew over {num(detail.point.hours, 2)} h
+                  </span>
+                </span>
+              </div>
+            )}
+            {detail.point.kwh != null && (
+              <div className="roRow">
+                <span className="k">Energy</span>
+                <span className="v">{num(detail.point.kwh, 1)} kWh</span>
+              </div>
+            )}
+            {detail.point.charge != null && (
+              <div className="roRow">
+                <span className="k">Charge</span>
+                <span className="v">{num(detail.point.charge, 0)} kg</span>
+              </div>
+            )}
+            {Boolean(detail.point.batches?.length) && (
+              <div className="roRow">
+                <span className="k">Batches</span>
+                <span className="v">{detail.point.batches?.join(', ')}</span>
+              </div>
+            )}
+            <div className="roRow">
+              <span className="k">Operator</span>
+              <span className="v">
+                {detail.point.operator === undefined
+                  ? 'not a line'
+                  : (detail.point.operator ?? 'nobody set')}
+              </span>
+            </div>
+
+            {detail.metric.calc?.note && <div className="sub mt-2">{detail.metric.calc.note}</div>}
+          </>
+        )}
+      </BoModal>
     </>
   );
 }

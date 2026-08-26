@@ -2408,6 +2408,31 @@
    * would outweigh the heading it sits in, and plain text would not look like
    * anything to press.
    */
+  /*
+   * A figure in a table that opens its own working.
+   *
+   * It has to read as a number first and a control second - a table where every
+   * cell shouted would be unreadable - so it keeps the cell's alignment and
+   * type, and says it is pressable with a dotted underline and the cursor.
+   */
+  .figure {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: right;
+    cursor: pointer;
+  }
+  .figure b {
+    border-bottom: 1px dotted var(--muted);
+  }
+  .figure:hover b,
+  .figure:focus-visible b {
+    border-bottom-color: var(--brand);
+    color: var(--brand);
+  }
+
   .linkish {
     font: inherit;
     color: var(--brand);

@@ -1251,6 +1251,18 @@ export interface TrendMetric {
   offTarget: boolean;
   lowerIsBetter: boolean;
   parameter: string;
+  /**
+   * How the figure was worked out - the same arithmetic the shift cards offer
+   * when a figure is tapped, and built on the server so the two screens cannot
+   * come to divide the same numbers differently.
+   */
+  calc: {
+    title: string;
+    formula: string;
+    lines: string[];
+    result: string;
+    note?: string;
+  } | null;
 }
 
 /** One shift, day or batch in a series, and what it measured. */
@@ -1263,6 +1275,8 @@ export interface TrendPoint {
   out?: number | null;
   workers?: number | null;
   hours?: number | null;
+  /** Crew times hours per record, added up - not the sums multiplied. */
+  labour?: number | null;
   kwh?: number | null;
   charge?: number | null;
   batches?: string[];

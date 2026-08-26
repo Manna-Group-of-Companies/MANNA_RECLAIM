@@ -748,13 +748,65 @@ export const efficiencyService = {
       return made;
     };
 
-    /** One figure on one point, measured against whatever the manager set. */
-    const metric = (key, label, value, unit, digits = 2) => ({
+    /**
+     * One figure on one point, measured against whatever the manager set, and
+     * carrying the arithmetic behind it.
+     *
+     * The `calc` is the same thing the shift cards offer when a figure is
+     * tapped, and it is here for the same reason: a screen that a wage is
+     * argued from has to be able to show its working. Over a period it matters
+     * more, not less - the answer to "why was Tuesday night 3.15" is in the
+     * hours and the crew that made it, and a table of bare numbers ends every
+     * such question with somebody going back to the paper.
+     *
+     * Built here rather than on the client, so the two screens cannot come to
+     * divide the same figures differently.
+     */
+    const metric = (key, label, value, unit, digits = 2, calc = null) => ({
       key,
       label,
       unit,
       value: round(value, digits),
       ...idealFor(key, value, ideals, digits),
+      calc: value == null ? null : calc,
+    });
+
+    /** kg ÷ labour-hours, with the labour-hours spelled out. */
+    const pmhCalc = (u, what) => ({
+      title: `${what} · production per man-hour`,
+      formula: 'what it weighed out ÷ the labour-hours that made it',
+      lines: [
+        `out = ${round(u.out, 0)} kg`,
+        `labour = ${round(u.labour, 2)} man-hours (${u.workers} crew over ${round(u.hours, 2)} h)`,
+        `= ${round(u.out, 0)} ÷ ${round(u.labour, 2)}`,
+      ],
+      result: `${round(u.out / u.labour, 2)} kg/man-hour`,
+      note:
+        'Labour-hours are each record\'s crew times its own hours, added up - not '
+        + 'the summed crew times the summed hours, which on a line worked in several '
+        + 'passes is more than twice the labour actually spent.',
+    });
+
+    /** kWh ÷ kg. */
+    const kwhCalc = (u, what) => ({
+      title: `${what} · electricity`,
+      formula: 'the energy it drew ÷ what it weighed out',
+      lines: [`energy = ${round(u.kwh, 1)} kWh`, `out = ${round(u.out, 0)} kg`,
+        `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`],
+      result: `${round(u.kwh / u.out, 3)} kWh/kg`,
+      note: 'Fewer is better here: the same rubber made for less electricity.',
+    });
+
+    /** What it weighed, and out of what. */
+    const outCalc = (u, what) => ({
+      title: `${what} · output`,
+      formula: 'what the line weighed out over the shift',
+      lines: [
+        `out = ${round(u.out, 0)} kg`,
+        `crew = ${u.workers} over ${round(u.hours, 2)} h`,
+      ],
+      result: `${round(u.out, 0)} kg`,
+      note: 'The weight recorded against the line for this shift, and nothing else.',
     });
 
     const point = (subjectKey, { date, shift, station, label, context, metrics }) => {
@@ -785,12 +837,16 @@ export const efficiencyService = {
           out: round(u.out, 0),
           workers: u.workers,
           hours: round(u.hours, 2),
+          /* Crew x hours per record, added up - see runLabour. */
+          labour: round(u.labour, 2),
           kwh: round(u.kwh, 1),
           batches: u.batches,
         },
         metrics: [
-          metric(idealKey.specialPerManHour(u.quality), 'Production per man-hour', u.pmh, 'kg/man-h'),
-          metric(idealKey.specialKwhPerKg(u.quality), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+          metric(idealKey.specialPerManHour(u.quality), 'Production per man-hour', u.pmh,
+            'kg/man-h', 2, pmhCalc(u, `Special line ${u.quality}`)),
+          metric(idealKey.specialKwhPerKg(u.quality), 'Electricity', u.kwhkg, 'kWh/kg', 3,
+            kwhCalc(u, `Special line ${u.quality}`)),
         ],
       });
     }
@@ -807,12 +863,17 @@ export const efficiencyService = {
           out: round(u.out, 0),
           workers: u.workers,
           hours: round(u.hours, 2),
+          /* Crew x hours per record, added up - see runLabour. */
+          labour: round(u.labour, 2),
           kwh: round(u.kwh, 1),
         },
         metrics: [
-          metric(idealKey.production(u.machineId), 'Output', u.out, 'kg', 0),
-          metric(idealKey.perManHour(u.machineId), 'Production per man-hour', u.pmh, 'kg/man-h'),
-          metric(idealKey.kwhPerKg(u.machineId), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+          metric(idealKey.production(u.machineId), 'Output', u.out, 'kg', 0,
+            outCalc(u, u.machine ?? u.machineId)),
+          metric(idealKey.perManHour(u.machineId), 'Production per man-hour', u.pmh,
+            'kg/man-h', 2, pmhCalc(u, u.machine ?? u.machineId)),
+          metric(idealKey.kwhPerKg(u.machineId), 'Electricity', u.kwhkg, 'kWh/kg', 3,
+            kwhCalc(u, u.machine ?? u.machineId)),
         ],
       });
     }
@@ -829,12 +890,17 @@ export const efficiencyService = {
           out: round(u.out, 0),
           workers: u.workers,
           hours: round(u.hours, 2),
+          /* Crew x hours per record, added up - see runLabour. */
+          labour: round(u.labour, 2),
           kwh: round(u.kwh, 1),
         },
         metrics: [
-          metric(idealKey.production('COARSE'), 'Output', u.out, 'kg', 0),
-          metric(idealKey.perManHour('COARSE'), 'Production per man-hour', u.pmh, 'kg/man-h'),
-          metric(idealKey.kwhPerKg('COARSE'), 'Electricity', u.kwhkg, 'kWh/kg', 3),
+          metric(idealKey.production('COARSE'), 'Output', u.out, 'kg', 0,
+            outCalc(u, 'Coarse line')),
+          metric(idealKey.perManHour('COARSE'), 'Production per man-hour', u.pmh, 'kg/man-h',
+            2, pmhCalc(u, 'Coarse line')),
+          metric(idealKey.kwhPerKg('COARSE'), 'Electricity', u.kwhkg, 'kWh/kg', 3,
+            kwhCalc(u, 'Coarse line')),
         ],
       });
     }
@@ -849,7 +915,17 @@ export const efficiencyService = {
         date: u.day,
         shift: null,
         context: {},
-        metrics: [metric(idealKey.autoclaveRuns(vessel.key), 'Charges a day', u.runs, 'charges', 0)],
+        metrics: [
+          metric(idealKey.autoclaveRuns(vessel.key), 'Charges a day', u.runs, 'charges', 0, {
+            title: `${vessel.label} · charges a day`,
+            formula: 'charges logged on this vessel across the whole day',
+            lines: [
+              `${vessel.label} on ${u.day} = ${u.runs}`,
+              'counted per day, not per shift - a charge crosses the handover',
+            ],
+            result: `${u.runs} charge${u.runs === 1 ? '' : 's'}`,
+          }),
+        ],
       });
     }
 
@@ -862,7 +938,16 @@ export const efficiencyService = {
         shift: y.outShift,
         label: `Batch ${y.batch}`,
         context: { charge: y.charge, out: round(y.out, 0) },
-        metrics: [metric(idealKey.batchYield(), 'Yield', y.pct, '%', 1)],
+        metrics: [
+          metric(idealKey.batchYield(), 'Yield', y.pct, '%', 1, {
+            title: `Batch ${y.batch} · yield`,
+            formula: 'what came off the charge ÷ what went into it',
+            lines: [`out = ${round(y.out, 0)} kg`, `charge = ${y.charge} kg`,
+              `= ${round(y.out, 0)} ÷ ${y.charge} × 100`],
+            result: `${round(y.pct, 1)}%`,
+            note: 'Everything weighed off the batch, on whichever machine finished it.',
+          }),
+        ],
       });
     }
 
