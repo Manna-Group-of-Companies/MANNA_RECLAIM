@@ -82,10 +82,28 @@ export function createApp() {
   // Unauthenticated on purpose - a load balancer has to be able to ask. So in
   // production it answers only what a health check needs, and keeps the runtime
   // and the database host to itself.
+  /**
+   * Whether the machine feeds are switched on, as a word rather than a secret.
+   *
+   * Answered in production too, unlike everything else here, and that is a
+   * deliberate exception. Setting up the plant server's sync means somebody
+   * standing at a dashboard in one building and somebody reading a log in
+   * another, and the question between them is only ever "has the token landed".
+   * Without an answer they take turns guessing: the variable is misspelt, or it
+   * was saved with an empty value, or it went onto the wrong service, and each
+   * guess costs a redeploy and a phone call.
+   *
+   * It gives nothing away. The sync route already tells any anonymous caller
+   * exactly this, in a whole sentence, because a script that cannot post has to
+   * be told why - so a boolean here reveals nothing that a single POST does not,
+   * and it can be read without pretending to be the plant server.
+   */
+  const feeds = () => ({ sapSync: env.sapSyncToken ? 'configured' : 'not configured' });
+
   app.get('/health', (_req, res) =>
     env.isProd
-      ? res.json({ success: true, status: 'up' })
-      : res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo() }),
+      ? res.json({ success: true, status: 'up', feeds: feeds() })
+      : res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo(), feeds: feeds() }),
   );
 
   app.use(env.apiPrefix, apiLimiter, writeLimiter, routes);

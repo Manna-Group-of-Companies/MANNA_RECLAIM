@@ -245,3 +245,28 @@ test('kilograms and pieces are never added together, on either route', async (t)
   const yard = (await (await api.call('/stock/sap', { role: 'manager' })).json()).data;
   assert.deepEqual(yard.totals.byUnit, { kg: 4250, pieces: 120 });
 });
+
+test('the health check says whether the feed is switched on, without saying more', async (t) => {
+  const api = await withToken('');
+  t.after(() => api.stop());
+
+  /*
+   * Setting this up means somebody at a dashboard in one building and somebody
+   * reading a log in another, and the only question between them is whether the
+   * token landed. Without an answer they take turns guessing - misspelt, saved
+   * empty, wrong service - and each guess costs a redeploy and a phone call.
+   */
+  const off = await fetch(`${api.base.replace(/\/api\/v1$/, '')}/health`);
+  assert.equal(off.status, 200);
+  assert.equal((await off.json()).feeds.sapSync, 'not configured');
+
+  const { env } = await import('../src/config/env.js');
+  env.sapSyncToken = TOKEN;
+
+  const on = await fetch(`${api.base.replace(/\/api\/v1$/, '')}/health`);
+  const body = await on.json();
+  assert.equal(body.feeds.sapSync, 'configured');
+  // A word, never the value. The point is to answer "is it there", and the
+  // answer to "what is it" is nobody's but the plant server's.
+  assert.ok(!JSON.stringify(body).includes(TOKEN));
+});
