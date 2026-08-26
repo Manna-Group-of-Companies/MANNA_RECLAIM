@@ -37,3 +37,9 @@ backups/
 .idea/
 .DS_Store
 Thumbs.db
+
+# The SAP feed report - regenerated from the live database by
+# `npm run sap:report`, so it is an output rather than a source. Committed it
+# would be a snapshot of one afternoon's yard going stale in the repository,
+# and read months later as though it were current.
+sap-report.html
