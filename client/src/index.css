@@ -2402,6 +2402,40 @@
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
+  /*
+   * A control that reads as a link rather than a button, for the one inside a
+   * heading: "show the whole window" beside a filter that is on. A .btn there
+   * would outweigh the heading it sits in, and plain text would not look like
+   * anything to press.
+   */
+  .linkish {
+    font: inherit;
+    color: var(--brand);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /*
+   * An .effline the whole of which is pressable - the day list on the dispatch
+   * board. A button carries its own alignment and background from the browser,
+   * so both are put back to what the row around it expects.
+   */
+  button.effline {
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+  }
+  button.effline:last-child {
+    border-bottom: none;
+  }
+  button.effline.miss {
+    background: var(--panel2);
+  }
+
   /* -------------------------------------------------------------------------
    * Machine utilisation - hours run against the twelve the shift is.
    *

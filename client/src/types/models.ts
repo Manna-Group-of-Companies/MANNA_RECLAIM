@@ -1181,6 +1181,14 @@ export interface SapDispatchRow {
   docNo: string;
   /** `invoice` here - this SAP install raises no delivery notes at all. */
   docType: string | null;
+  /**
+   * SAP's own line number within the document.
+   *
+   * The only thing that tells two lines of the same item apart: this install
+   * carries no batch on any invoice line, and invoice 149 genuinely holds
+   * I-10061 twice. Null on a feed that does not send one.
+   */
+  lineNum: number | null;
   docDate: string | null;
   customer: string | null;
   customerCode: string | null;

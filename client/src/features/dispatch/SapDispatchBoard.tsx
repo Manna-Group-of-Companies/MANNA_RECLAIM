@@ -15,15 +15,22 @@ import type { SapDispatchRow, SapDispatches } from '@/types/models';
  * the plant server reads three months of them once a day and posts what it
  * finds.
  *
- * Read three ways down the page, because "what have we been shipping" is really
- * three questions and they have different answers: how much and what it came to,
- * which grades it went out as, and who bought it. The documents themselves are
- * last - they are the evidence rather than the answer.
+ * Read four ways down the page, because "what have we been shipping" is really
+ * four questions with different answers: which days it went out on, which grades
+ * it went out as, who bought it, and then the documents themselves - which are
+ * the evidence rather than the answer.
  *
- * Every figure here is a line off a document, never an aggregate SAP was asked
- * for. That is what lets the page show a total and then explain it; a feed that
- * arrived pre-totalled would make every disagreement between the two systems
- * unanswerable.
+ * A day can be picked out of the quarter, and everything below narrows to it.
+ * The picker is the list of days that actually had a dispatch rather than a date
+ * box, for the reason a date box is wrong here: most days in a quarter had none,
+ * so a calendar mostly offers empty answers and gives no clue which days are
+ * worth opening. The list is the answer to "when did we ship" before anything
+ * is clicked.
+ *
+ * Every figure is a line off a document, never an aggregate SAP was asked for.
+ * That is what lets the page show a total and then explain it, and it is why a
+ * day can be picked at all - the whole window is here, so narrowing is instant
+ * and costs no request.
  */
 
 /** How much, in whichever units the rows carry - kg and pieces stay apart. */
@@ -50,6 +57,9 @@ const valueSaid = (rows: SapDispatchRow[]) => {
   const currency = [...currencies][0];
   return currency === 'INR' || !currency ? rupees(amount) : `${num(amount, 0)} ${currency}`;
 };
+
+const docsIn = (rows: SapDispatchRow[]) =>
+  new Set(rows.map((r) => `${r.docType}|${r.docNo}`)).size;
 
 /** One heading and its lines - a grade, or a customer. */
 function Group({ label, rows, aside }: { label: string; rows: SapDispatchRow[]; aside?: string }) {
@@ -78,6 +88,8 @@ export function SapDispatchBoard() {
   const [data, setData] = useState<SapDispatches | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /** '' is the whole window. A day narrows everything below it. */
+  const [day, setDay] = useState('');
 
   useEffect(() => {
     let live = true;
@@ -92,7 +104,27 @@ export function SapDispatchBoard() {
     };
   }, [refreshTick]);
 
-  const rows = useMemo(() => data?.rows ?? [], [data]);
+  const all = useMemo(() => data?.rows ?? [], [data]);
+
+  /**
+   * Every day that had a dispatch, newest first.
+   *
+   * Worked out before the filter is applied, so picking a day does not empty the
+   * list you picked it from - which is the way a filter that narrows its own
+   * picker traps somebody on one day with no way back.
+   */
+  const days = useMemo(() => {
+    const map = new Map<string, SapDispatchRow[]>();
+    for (const r of all) {
+      const key = r.docDate ?? '';
+      map.set(key, [...(map.get(key) ?? []), r]);
+    }
+    return [...map]
+      .map(([date, rows]) => ({ date, rows }))
+      .sort((a, b) => (a.date === '' ? 1 : b.date === '' ? -1 : b.date.localeCompare(a.date)));
+  }, [all]);
+
+  const rows = useMemo(() => (day ? all.filter((r) => r.docDate === day) : all), [all, day]);
 
   const byGrade = useMemo(() => {
     const map = new Map<string, SapDispatchRow[]>();
@@ -146,6 +178,7 @@ export function SapDispatchBoard() {
   }
 
   const window = data.sync.window;
+  const showing = day ? dayLong(day) : 'the whole window';
 
   return (
     <>
@@ -160,7 +193,7 @@ export function SapDispatchBoard() {
             <span>invoiced</span>
           </div>
           <div className="kpi">
-            <b>{data.totals.documents}</b>
+            <b>{docsIn(rows)}</b>
             <span>documents</span>
           </div>
           <div className="kpi">
@@ -174,13 +207,15 @@ export function SapDispatchBoard() {
             The window the query covered, not the span the rows happen to fill.
             A quarter whose oldest row is three weeks old is either a quiet
             month or a query that silently narrowed, and only this tells the two
-            apart.
+            apart. It stays on screen while a day is picked, so the day is
+            always read against what it is a day out of.
           */}
-          {window?.from ? `${dayLong(window.from)} to ${dayLong(window.to ?? '')}` : 'the window SAP was asked for'}
+          Showing <b>{showing}</b> ·{' '}
+          {window?.from
+            ? `read over ${dayLong(window.from)} to ${dayLong(window.to ?? '')}`
+            : 'the window SAP was asked for'}
           {' · read '}
           {whenLast(data.sync.asOf)}
-          {' · '}
-          {data.totals.rows} lines off {data.totals.documents} documents
         </div>
         {data.totals.value == null && rows.length > 0 && (
           <div className="sub mt-1">
@@ -190,26 +225,73 @@ export function SapDispatchBoard() {
         )}
       </div>
 
-      <div className="grouphead">By grade</div>
+      <div className="grouphead">
+        By day · {days.length} day{days.length === 1 ? '' : 's'} shipped
+        {day && (
+          <>
+            {' · '}
+            <button type="button" className="linkish" onClick={() => setDay('')}>
+              show the whole window
+            </button>
+          </>
+        )}
+      </div>
+      <div className="panel">
+        {days.map(({ date, rows: dayRows }) => (
+          /*
+           * The day list is the answer to "when did we ship" before anything is
+           * clicked, and the way into a single day. A row rather than a date
+           * box: most days in a quarter had no dispatch at all, so a calendar
+           * would mostly offer empty answers and give no clue which days are
+           * worth opening.
+           */
+          <button
+            key={date || 'undated'}
+            type="button"
+            className={cn('effline w-full text-left', day === date && 'miss')}
+            onClick={() => setDay(day === date ? '' : date)}
+            aria-pressed={day === date}
+          >
+            <div className="effname">
+              <div>
+                {date ? dayLong(date) : 'Not dated'}
+                <div className="muted text-[11px]">
+                  {docsIn(dayRows)} document{docsIn(dayRows) === 1 ? '' : 's'} ·{' '}
+                  {new Set(dayRows.map((r) => r.customer ?? '')).size} customer
+                  {new Set(dayRows.map((r) => r.customer ?? '')).size === 1 ? '' : 's'}
+                </div>
+              </div>
+            </div>
+            <div className="effnums">
+              <b>{quantitySaid(dayRows)}</b>
+              {valueSaid(dayRows) && <span className="efftarget">{valueSaid(dayRows)}</span>}
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="grouphead">By grade · {showing}</div>
       <div className="panel">
         {byGrade.map(({ grade, rows: rs }) => (
           <Group key={grade || 'unmapped'} label={grade || 'Not mapped to a grade'} rows={rs} />
         ))}
       </div>
 
-      <div className="grouphead">By customer · biggest first</div>
+      <div className="grouphead">By customer · biggest first · {showing}</div>
       <div className="panel">
         {byCustomer.map(({ customer, rows: rs }) => (
           <Group
             key={customer}
             label={customer}
             rows={rs}
-            aside={`${new Set(rs.map((r) => `${r.docType}|${r.docNo}`)).size} documents`}
+            aside={`${docsIn(rs)} documents`}
           />
         ))}
       </div>
 
-      <div className="grouphead">Every document · newest first</div>
+      <div className="grouphead">
+        Every document · newest first · {documents.length} of them
+      </div>
       <div className="panel scroll-x mt-0 p-0">
         <table className="tt min-w-[640px]">
           <thead>
@@ -241,7 +323,7 @@ export function SapDispatchBoard() {
                   </td>
                   <td>
                     {lines.map((l) => (
-                      <div key={`${l.sku}|${l.batch ?? ''}`} className="text-[11px]">
+                      <div key={`${l.sku}|${l.lineNum ?? ''}|${l.batch ?? ''}`} className="text-[11px]">
                         <span className={cn(!l.grade && 'muted')}>
                           {l.grade ?? l.description ?? l.sku}
                         </span>
