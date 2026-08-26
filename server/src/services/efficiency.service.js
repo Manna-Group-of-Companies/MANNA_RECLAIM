@@ -437,38 +437,93 @@ function batchYields(rows) {
  * rather than anything per-machine. It has a card because the manager sets an
  * ideal against it, and a target with nothing beside it is a number in a form.
  */
-function coarseUnits(rows) {
+export function coarseUnits(rows) {
+  /*
+   * The two coarse machines, not the vessels that feed them.
+   *
+   * A coarse-form autoclave charge is logged with `line: 'coarse'` - correctly,
+   * it is coarse work - and there are 354 of them carrying 9,147 labour-hours
+   * against PR1 and R2's 4,777. Counted as the line's labour they put its
+   * productivity at about 51 kg/man-hour where the line itself runs at about
+   * 149: a vessel cooking for eight hours with one hand attending is not the
+   * same kind of labour-hour as a crew working a refiner, and a benchmark built
+   * on the mixture would be three times too lax on the crew it is meant to hold
+   * to account. A grinder is measured on its own crew and so is this.
+   *
+   * They carry no meter either, so they were never in the energy figure.
+   */
+  const onTheLine = rows.filter((r) => r.line === 'coarse' && r.kind !== 'autoclave');
+
+  /*
+   * The line is two machines and one flow: PR1 pre-refines and never weighs
+   * anything - nought of its 103 passes on record - and R2 finishes and always
+   * does, all 104 of its own. So PR1's crew is half the labour that made every
+   * kilogram R2 books, and a shift counted on its own passes alone is counted
+   * on whichever half of the line happened to be logged against it.
+   *
+   * On 89 of the 91 days the line has run, both machines are logged in the same
+   * shift and the question does not arise. On 16 August it did: PR1 worked 31.2
+   * man-hours through the day, R2 weighed out 7,046 kg that night, and the night
+   * was credited with 546.2 kg per man-hour on its own 12.9 - three and a half
+   * times what the line does, on a figure the plant pays an incentive against,
+   * while the day showed no card at all for a shift that had worked the line all
+   * day.
+   *
+   * So a pass is counted in the shift the line weighed out in, which is the same
+   * rule the special line follows. Scoped to the production day rather than
+   * chained to the next weighing whenever it falls: material moves through a
+   * buffer here rather than as a batch anybody can trace, so past midnight the
+   * record cannot say which pre-refining fed which weighing, and a rule that
+   * guessed would rewrite the 89 ordinary days to answer the two odd ones.
+   */
+  const slotOf = (r) => `${r.shift_date}|${r.shift ?? ''}`;
+  const weighs = (r) => (num(r.weight_kg) ?? 0) > 0;
+
+  const weighedIn = new Map();
+  for (const r of onTheLine) {
+    if (!weighs(r)) continue;
+    const slots = weighedIn.get(r.shift_date) ?? new Set();
+    slots.add(slotOf(r));
+    weighedIn.set(r.shift_date, slots);
+  }
+
+  /**
+   * Where each pass is counted.
+   *
+   * Its own shift wherever that shift weighed, which is every ordinary day and
+   * leaves them exactly as they were. Otherwise the day's one weighing shift.
+   * If the day weighed nothing at all, no shift owns the labour - see
+   * coarsePending, which is what keeps that visible rather than silent.
+   */
+  const homeOf = new Map();
+  for (const r of onTheLine) {
+    const slots = weighedIn.get(r.shift_date);
+    if (!slots?.size) continue;
+    if (slots.has(slotOf(r))) homeOf.set(r.id, slotOf(r));
+    else if (slots.size === 1) homeOf.set(r.id, [...slots][0]);
+  }
+
   const byKey = new Map();
-  for (const r of rows) {
-    if (r.line !== 'coarse') continue;
-    /*
-     * The two coarse machines, not the vessels that feed them.
-     *
-     * A coarse-form autoclave charge is logged with `line: 'coarse'` - correctly,
-     * it is coarse work - and there are 354 of them carrying 9,147 labour-hours
-     * against PR1 and R2's 4,777. Counted as the line's labour they put its
-     * productivity at about 51 kg/man-hour where the line itself runs at about
-     * 149: a vessel cooking for eight hours with one hand attending is not the
-     * same kind of labour-hour as a crew working a refiner, and a benchmark built
-     * on the mixture would be three times too lax on the crew it is meant to hold
-     * to account. A grinder is measured on its own crew and so is this.
-     *
-     * They carry no meter either, so they were never in the energy figure.
-     */
-    if (r.kind === 'autoclave') continue;
-    const key = `${r.shift_date}|${r.shift ?? ''}`;
-    const u = byKey.get(key) ?? {
-      day: r.shift_date, shift: r.shift ?? '',
+  for (const r of onTheLine) {
+    const home = homeOf.get(r.id);
+    if (!home) continue;
+    const [day, shift] = home.split('|');
+    const u = byKey.get(home) ?? {
+      day, shift,
       out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, parts: [],
     };
-    u.parts.push(runPart(r));
+    // The pass carries the shift it actually ran in, for the same reason the
+    // special line's does: the figure belongs to the weighing shift and the
+    // hours were still worked when they were worked.
+    u.parts.push({ ...runPart(r), ranOn: r.shift_date ?? null, ranIn: r.shift ?? null });
     u.out += num(r.weight_kg) ?? 0;
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
     u.labour += runLabour(r);
     u.kwh += runKwh(r) ?? 0;
-    byKey.set(key, u);
+    byKey.set(home, u);
   }
+
   // The same two rates every other line is judged on. The line has always
   // carried the figures they are made of - crew, hours and the meter - and only
   // ever reported what it weighed, so a shift could miss on energy or on labour
@@ -480,6 +535,41 @@ function coarseUnits(rows) {
       pmh: u.out > 0 && u.labour > 0 ? u.out / u.labour : null,
       kwhkg: u.out > 0 && u.kwh > 0 ? u.kwh / u.out : null,
     }));
+}
+
+/**
+ * Coarse work on days the line never weighed anything out.
+ *
+ * The same exclusion refinerPending covers, for the same reason: a rate is
+ * kilograms over the hours that produced those kilograms, and this labour
+ * produced none that anybody recorded. It cannot be carried to the next day
+ * the line ran either - there is no batch on this line to carry it with.
+ *
+ * One day on the record, 9 March, where PR1 worked 24.6 man-hours and neither
+ * shift weighed. Exported so that is a thing somebody can look at rather than a
+ * silence, because the other direction of the same gap is not fixable here
+ * either: on 9 April R2 weighed 4,767 kg with no pre-refining logged anywhere
+ * that day, and it reads at 397 kg per man-hour because half its line is
+ * missing from the record rather than from the arithmetic.
+ */
+export function coarsePending(rows) {
+  const onTheLine = rows.filter((r) => r.line === 'coarse' && r.kind !== 'autoclave');
+  const byDay = new Map();
+  for (const r of onTheLine) byDay.set(r.shift_date, [...(byDay.get(r.shift_date) ?? []), r]);
+
+  const out = [];
+  for (const [day, group] of byDay) {
+    if (group.some((r) => (num(r.weight_kg) ?? 0) > 0)) continue;
+    out.push({
+      day: day ?? null,
+      shifts: [...new Set(group.map((r) => r.shift).filter(Boolean))].sort(),
+      machines: [...new Set(group.map((r) => r.machine_id).filter(Boolean))].sort(),
+      passes: group.length,
+      labour: round(group.reduce((sum, r) => sum + runLabour(r), 0), 2),
+      hours: round(group.reduce((sum, r) => sum + (runHours(r) ?? 0), 0), 2),
+    });
+  }
+  return out.sort((a, b) => b.labour - a.labour);
 }
 
 /**
@@ -1515,7 +1605,7 @@ export const efficiencyService = {
                 `output = ${round(day.out, 0)} kg (${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
                 `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
                 `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
-                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ ${round(u.labour, 1)} = ${round(u.pmh, 1)}`,
               ],
               result: `${round(day.pmh, 1)} kg/man-hour`,
               note: `Measured over the whole day, which is how the ideal for ${name} is set - a shift that ran on a machine the other shift had already warmed up is not a worse crew.`,
@@ -1710,9 +1800,24 @@ export const efficiencyService = {
               formula: "the day's output ÷ the day's labour-hours",
               lines: [
                 `output = ${round(day.out, 0)} kg (${day.shifts} shift${day.shifts === 1 ? '' : 's'})`,
-                `labour = ${round(day.labourHours, 1)} labour-hours (crew × hours, summed per shift)`,
+                `labour = ${round(day.labourHours, 1)} labour-hours (each pass's own crew × its own hours)`,
                 `= ${round(day.out, 0)} ÷ ${round(day.labourHours, 1)}`,
-                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ (${u.workers} × ${round(u.hours)}) = ${round(u.pmh, 1)}`,
+                `this ${shift || 'shift'} on its own = ${round(u.out, 0)} ÷ ${round(u.labour, 1)} = ${round(u.pmh, 1)}`,
+                /*
+                 * Every pass that made it, named, and the ones that ran in the
+                 * other shift said so. The line is two machines and only R2
+                 * weighs, so a card showing R2 alone is a card missing half the
+                 * labour that made the figure - and the reader has no way to
+                 * tell from a single number whether PR1 is in it.
+                 */
+                ...u.parts.map(
+                  (part) =>
+                    `   ${part.machine ?? part.machineId}`
+                    + `${part.ranIn && part.ranIn !== u.shift ? ` · ran in the ${part.ranIn} shift` : ''}`
+                    + ` · ${part.workers ?? '?'} crew × ${round(part.hours ?? 0, 1)} h`
+                    + ` = ${round(part.labour ?? 0, 1)} man-hours`
+                    + `${(part.out ?? 0) > 0 ? `, weighed ${round(part.out, 0)} kg` : ', weighed nothing'}`,
+                ),
               ],
               result: `${round(day.pmh, 1)} kg/man-hour`,
               note: 'PR1 and R2 together - the coarse line is crewed and measured as one line, not per machine.',
