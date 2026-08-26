@@ -1265,6 +1265,30 @@ export interface TrendMetric {
   } | null;
 }
 
+/**
+ * One record inside a shift - a pass, a charge, a run on a machine.
+ *
+ * A shift on the special line is two to four passes, often on different
+ * machines and sometimes across two batches, and the shift's figure is their
+ * sum. These are what it was added up from.
+ *
+ * Split by record rather than by batch, because a run can name more than one -
+ * the plant writes "3134,3140" on a pass that worked both. Splitting by batch
+ * would mean cutting a pass in two and inventing the proportion.
+ */
+export interface TrendPart {
+  runId: string;
+  machineId: string | null;
+  machine: string | null;
+  batch: string | null;
+  workers: number | null;
+  hours: number | null;
+  /** This record's own crew times its own hours. */
+  labour: number | null;
+  out: number | null;
+  kwh: number | null;
+}
+
 /** One shift, day or batch in a series, and what it measured. */
 export interface TrendPoint {
   date: string;
@@ -1277,6 +1301,8 @@ export interface TrendPoint {
   hours?: number | null;
   /** Crew times hours per record, added up - not the sums multiplied. */
   labour?: number | null;
+  /** The records the figure was added up from, machine order. */
+  parts?: TrendPart[];
   kwh?: number | null;
   charge?: number | null;
   batches?: string[];

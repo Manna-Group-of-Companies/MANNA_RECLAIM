@@ -102,6 +102,34 @@ export function runLabour(r) {
   return crew * hours;
 }
 
+/**
+ * One record as a line of the shift it belongs to.
+ *
+ * A shift on the special line is two to four passes, often on different
+ * machines and sometimes across two batches, and the shift's own figure is
+ * their sum. Kept alongside the sum so the sum can be opened: "why was
+ * Tuesday night 3.15" is answered by which pass was long and what it weighed,
+ * and a total on its own ends that question at the paper record.
+ *
+ * The batch is the run's own, and a run can name more than one - the plant
+ * writes "3134,3140" on a pass that worked both. So this splits by record,
+ * which is a real division, rather than by batch, which would mean cutting a
+ * pass in two and inventing the proportion.
+ */
+function runPart(r) {
+  return {
+    runId: r.id,
+    machineId: r.machine_id ?? null,
+    machine: r.machine ?? r.machine_id ?? null,
+    batch: r.batch_no ?? null,
+    workers: num(r.workers),
+    hours: round(runHours(r), 2),
+    labour: round(runLabour(r), 2),
+    out: num(r.weight_kg),
+    kwh: round(runKwh(r), 1),
+  };
+}
+
 export function runKwh(r) {
   if (num(r.kwh) != null) return num(r.kwh);
   if (num(r.elec_end) != null && num(r.elec_start) != null) {
@@ -134,8 +162,9 @@ export function refinerUnits(rows) {
     const key = `${r.shift_date}|${r.shift ?? ''}|${r.quality}`;
     const u = byKey.get(key) ?? {
       day: r.shift_date, shift: r.shift ?? '', quality: r.quality,
-      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, batches: new Set(),
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, batches: new Set(), parts: [],
     };
+    u.parts.push(runPart(r));
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
     u.labour += runLabour(r);
@@ -186,8 +215,9 @@ export function grinderUnits(rows) {
     const u = byKey.get(key) ?? {
       machineId: r.machine_id, machine: r.machine ?? r.machine_id,
       day: r.shift_date, shift: r.shift ?? '',
-      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0,
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, parts: [],
     };
+    u.parts.push(runPart(r));
     u.out += w;
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
@@ -318,8 +348,9 @@ function coarseUnits(rows) {
     const key = `${r.shift_date}|${r.shift ?? ''}`;
     const u = byKey.get(key) ?? {
       day: r.shift_date, shift: r.shift ?? '',
-      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0,
+      out: 0, workers: 0, hours: 0, labour: 0, kwh: 0, parts: [],
     };
+    u.parts.push(runPart(r));
     u.out += num(r.weight_kg) ?? 0;
     u.workers += num(r.workers) ?? 0;
     u.hours += runHours(r) ?? 0;
@@ -839,6 +870,14 @@ export const efficiencyService = {
           hours: round(u.hours, 2),
           /* Crew x hours per record, added up - see runLabour. */
           labour: round(u.labour, 2),
+          /*
+           * The records the shift's figure was added up from - see runPart.
+           * Sorted by machine so two shifts of the same line read down in the
+           * same order, which is what makes them comparable at a glance.
+           */
+          parts: [...u.parts].sort((x, y) =>
+            String(x.machineId ?? '').localeCompare(String(y.machineId ?? '')),
+          ),
           kwh: round(u.kwh, 1),
           batches: u.batches,
         },
@@ -865,6 +904,14 @@ export const efficiencyService = {
           hours: round(u.hours, 2),
           /* Crew x hours per record, added up - see runLabour. */
           labour: round(u.labour, 2),
+          /*
+           * The records the shift's figure was added up from - see runPart.
+           * Sorted by machine so two shifts of the same line read down in the
+           * same order, which is what makes them comparable at a glance.
+           */
+          parts: [...u.parts].sort((x, y) =>
+            String(x.machineId ?? '').localeCompare(String(y.machineId ?? '')),
+          ),
           kwh: round(u.kwh, 1),
         },
         metrics: [
@@ -892,6 +939,14 @@ export const efficiencyService = {
           hours: round(u.hours, 2),
           /* Crew x hours per record, added up - see runLabour. */
           labour: round(u.labour, 2),
+          /*
+           * The records the shift's figure was added up from - see runPart.
+           * Sorted by machine so two shifts of the same line read down in the
+           * same order, which is what makes them comparable at a glance.
+           */
+          parts: [...u.parts].sort((x, y) =>
+            String(x.machineId ?? '').localeCompare(String(y.machineId ?? '')),
+          ),
           kwh: round(u.kwh, 1),
         },
         metrics: [

@@ -371,12 +371,13 @@ export function EfficiencyTrend() {
             )}
             {detail.point.labour != null && (
               <div className="roRow">
-                <span className="k">Labour</span>
+                <span className="k">Man-hours</span>
                 <span className="v">
-                  {num(detail.point.labour, 2)} man-hours
+                  <b>{num(detail.point.labour, 2)}</b>
                   <span className="muted">
-                    {' · '}
-                    {detail.point.workers} crew over {num(detail.point.hours, 2)} h
+                    {' over '}
+                    {detail.point.parts?.length ?? 0} record
+                    {(detail.point.parts?.length ?? 0) === 1 ? '' : 's'}
                   </span>
                 </span>
               </div>
@@ -407,6 +408,77 @@ export function EfficiencyTrend() {
                   : (detail.point.operator ?? 'nobody set')}
               </span>
             </div>
+
+            {/*
+              And the shift opened up, record by record.
+
+              A shift on the special line is two to four passes, often on
+              different machines and sometimes across two batches, and every
+              figure above is their sum. This is what it was added up from - the
+              hours each pass took, the crew on it, and the man-hours that came
+              to. Without it the answer to "why was that one low" stops at a
+              total, and the next place to look is the paper.
+
+              Split by record rather than by batch, because a pass can name two
+              - the plant writes "3134,3140" on one that worked both. Splitting
+              by batch would mean cutting a pass in two and inventing the
+              proportion, which is a worse answer than showing where the two
+              actually met.
+            */}
+            {Boolean(detail.point.parts?.length) && (
+              <>
+                <div className="grouphead">
+                  Every record · {detail.point.parts?.length}
+                </div>
+                <div className="scroll-x">
+                  <table className="tt min-w-[420px]">
+                    <thead>
+                      <tr>
+                        <th>Machine</th>
+                        <th>Batch</th>
+                        <th className="tnum">Crew</th>
+                        <th className="tnum">Hours</th>
+                        <th className="tnum">Man-hours</th>
+                        <th className="tnum">Out</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.point.parts?.map((part) => (
+                        <tr key={part.runId}>
+                          <td>{part.machine ?? part.machineId ?? '—'}</td>
+                          <td>
+                            {part.batch ? (
+                              <span className="batchref text-xs">{part.batch}</span>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td className="tnum">{part.workers ?? '—'}</td>
+                          <td className="tnum">{num(part.hours, 2)}</td>
+                          <td className="tnum">
+                            <b>{num(part.labour, 2)}</b>
+                          </td>
+                          {/*
+                            Blank where the pass weighed nothing, which is most
+                            of them: on the special line only the finishing pass
+                            is weighed, and the ones before it are the same
+                            material moving on. A nought there would read as a
+                            pass that produced nothing.
+                          */}
+                          <td className="tnum">
+                            {part.out == null ? (
+                              <span className="muted">not weighed</span>
+                            ) : (
+                              `${num(part.out, 0)} kg`
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
 
             {detail.metric.calc?.note && <div className="sub mt-2">{detail.metric.calc.note}</div>}
           </>
