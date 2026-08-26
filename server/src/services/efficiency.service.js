@@ -802,43 +802,98 @@ export const efficiencyService = {
       calc: value == null ? null : calc,
     });
 
-    /** kg ÷ labour-hours, with the labour-hours spelled out. */
-    const pmhCalc = (u, what) => ({
-      title: `${what} · production per man-hour`,
-      formula: 'what it weighed out ÷ the labour-hours that made it',
-      lines: [
-        `out = ${round(u.out, 0)} kg`,
-        `labour = ${round(u.labour, 2)} man-hours (${u.workers} crew over ${round(u.hours, 2)} h)`,
-        `= ${round(u.out, 0)} ÷ ${round(u.labour, 2)}`,
-      ],
-      result: `${round(u.out / u.labour, 2)} kg/man-hour`,
-      note:
-        'Labour-hours are each record\'s crew times its own hours, added up - not '
-        + 'the summed crew times the summed hours, which on a line worked in several '
-        + 'passes is more than twice the labour actually spent.',
-    });
+    /**
+     * What to call one record on a line of the working.
+     *
+     * The machine and the batch, because those are what a person recognises a
+     * pass by - "R4 on 3140" is a thing somebody remembers doing, and a run id
+     * is not.
+     */
+    const partName = (part) =>
+      `${part.machine ?? part.machineId ?? '?'}${part.batch ? ` · ${part.batch}` : ''}`;
 
-    /** kWh ÷ kg. */
-    const kwhCalc = (u, what) => ({
-      title: `${what} · electricity`,
-      formula: 'the energy it drew ÷ what it weighed out',
-      lines: [`energy = ${round(u.kwh, 1)} kWh`, `out = ${round(u.out, 0)} kg`,
-        `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`],
-      result: `${round(u.kwh / u.out, 3)} kWh/kg`,
-      note: 'Fewer is better here: the same rubber made for less electricity.',
-    });
+    /** The width to pad names to, so the sums under them line up. */
+    const padded = (parts) => {
+      const width = Math.max(...parts.map((x) => partName(x).length), 0);
+      return (part) => partName(part).padEnd(width);
+    };
 
-    /** What it weighed, and out of what. */
-    const outCalc = (u, what) => ({
-      title: `${what} · output`,
-      formula: 'what the line weighed out over the shift',
-      lines: [
-        `out = ${round(u.out, 0)} kg`,
-        `crew = ${u.workers} over ${round(u.hours, 2)} h`,
-      ],
-      result: `${round(u.out, 0)} kg`,
-      note: 'The weight recorded against the line for this shift, and nothing else.',
-    });
+    /**
+     * kg ÷ labour-hours, with every pass that made up the labour shown.
+     *
+     * The total on its own answers "what is the number" and nothing else. A
+     * shift on the special line is two to four passes on different machines
+     * and sometimes across two batches, and "why was that one low" is answered
+     * by which pass ran long - so the working lists them, each one's own crew
+     * times its own hours, and then adds them up in front of the reader.
+     *
+     * Which is also the only way anybody would catch the mistake this figure
+     * used to carry. Summed crew times summed hours reads plausibly and was
+     * more than twice the labour actually spent; four lines that add to the
+     * total do not let that pass unnoticed.
+     */
+    const pmhCalc = (u, what) => {
+      const name = padded(u.parts);
+      return {
+        title: `${what} · production per man-hour`,
+        formula: 'what it weighed out ÷ the labour-hours that made it',
+        lines: [
+          ...u.parts.map(
+            (part) =>
+              `${name(part)}  ${part.workers ?? 0} crew × ${round(part.hours, 2)} h = ${round(part.labour, 2)} man-hours`,
+          ),
+          `labour = ${round(u.labour, 2)} man-hours over ${u.parts.length} record${u.parts.length === 1 ? '' : 's'}`,
+          `out = ${round(u.out, 0)} kg`,
+          `= ${round(u.out, 0)} ÷ ${round(u.labour, 2)}`,
+        ],
+        result: `${round(u.out / u.labour, 2)} kg/man-hour`,
+        note:
+          'Labour-hours are each record\'s own crew times its own hours, added up - '
+          + 'not the summed crew times the summed hours, which on a line worked in '
+          + 'several passes is more than twice the labour actually spent.',
+      };
+    };
+
+    /** kWh ÷ kg, with what each pass drew. */
+    const kwhCalc = (u, what) => {
+      const name = padded(u.parts);
+      const metered = u.parts.filter((x) => x.kwh != null);
+      return {
+        title: `${what} · electricity`,
+        formula: 'the energy it drew ÷ what it weighed out',
+        lines: [
+          ...metered.map((part) => `${name(part)}  ${round(part.kwh, 1)} kWh`),
+          `energy = ${round(u.kwh, 1)} kWh`,
+          `out = ${round(u.out, 0)} kg`,
+          `= ${round(u.kwh, 1)} ÷ ${round(u.out, 0)}`,
+        ],
+        result: `${round(u.kwh / u.out, 3)} kWh/kg`,
+        note: 'Fewer is better here: the same rubber made for less electricity.',
+      };
+    };
+
+    /**
+     * What it weighed, and which passes weighed it.
+     *
+     * Only the ones that recorded a weight. On the special line the earlier
+     * passes are the same material moving on and are not weighed at all, so
+     * listing them at nought would read as passes that produced nothing.
+     */
+    const outCalc = (u, what) => {
+      const weighed = u.parts.filter((x) => x.out != null && x.out > 0);
+      const name = padded(weighed);
+      return {
+        title: `${what} · output`,
+        formula: 'what the line weighed out over the shift',
+        lines: [
+          ...weighed.map((part) => `${name(part)}  ${round(part.out, 0)} kg`),
+          `= ${round(u.out, 0)} kg`,
+          `crew = ${u.workers} over ${round(u.hours, 2)} h, ${round(u.labour, 2)} man-hours`,
+        ],
+        result: `${round(u.out, 0)} kg`,
+        note: 'The weight recorded against the line for this shift, and nothing else.',
+      };
+    };
 
     const point = (subjectKey, { date, shift, station, label, context, metrics }) => {
       const held = series.get(subjectKey);

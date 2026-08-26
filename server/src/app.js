@@ -100,10 +100,28 @@ export function createApp() {
    */
   const feeds = () => ({ sapSync: env.sapSyncToken ? 'configured' : 'not configured' });
 
+  /**
+   * Which commit is actually running, so nobody has to infer it.
+   *
+   * Render sets RENDER_GIT_COMMIT on every deploy. Without it the only way to
+   * tell whether a change is live is to find some behaviour that changed and
+   * probe for it, and where the change is inside an authenticated response
+   * there is no probe at all - which has cost this project several rounds of
+   * "it is deployed" / "the screen says otherwise", each one a person waiting
+   * on a guess.
+   *
+   * Seven characters, which is enough to compare against `git log --oneline`
+   * and not enough to be mistaken for anything else. Null off Render, where
+   * the working tree is whatever the developer has open.
+   */
+  const commit = process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null;
+
   app.get('/health', (_req, res) =>
     env.isProd
-      ? res.json({ success: true, status: 'up', feeds: feeds() })
-      : res.json({ success: true, status: 'up', env: env.nodeEnv, db: dbInfo(), feeds: feeds() }),
+      ? res.json({ success: true, status: 'up', commit, feeds: feeds() })
+      : res.json({
+        success: true, status: 'up', commit, env: env.nodeEnv, db: dbInfo(), feeds: feeds(),
+      }),
   );
 
   app.use(env.apiPrefix, apiLimiter, writeLimiter, routes);
