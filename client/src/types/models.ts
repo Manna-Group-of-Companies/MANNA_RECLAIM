@@ -1363,6 +1363,107 @@ export interface EfficiencyTrend {
   summary: TrendSummary[];
 }
 
+/**
+ * One batch of the special line read end to end: what a charge gave up, what it
+ * cost, and in what order the grades were taken off it.
+ *
+ * `faults` is what makes the figures wrong and `limits` is what makes them
+ * narrow. A batch with a fault is still returned - hiding a bad record is how
+ * it stays bad - but it is kept out of the recipe comparison, because a
+ * comparison is a recommendation and a recommendation built on a pass with no
+ * crew on it sends somebody off to copy a batch that was never worked that way.
+ */
+export interface BatchCut {
+  quality: string;
+  out: number | null;
+  labour: number | null;
+  kwh: number | null;
+  passes: number;
+  pmh: number | null;
+  kwhkg: number | null;
+  share: number | null;
+}
+
+export interface BatchNote {
+  key: string;
+  what: string;
+  why: string;
+  passes?: string[];
+}
+
+export interface BatchPart {
+  runId: string;
+  machineId: string | null;
+  machine: string | null;
+  batch: string | null;
+  quality: string | null;
+  day: string | null;
+  shift: string | null;
+  workers: number | null;
+  hours: number | null;
+  labour: number | null;
+  out: number | null;
+  kwh: number | null;
+  entered: string | null;
+}
+
+export interface BatchUnit {
+  batch: string;
+  formulation: string | null;
+  family: string | null;
+  charged: number | null;
+  chargedOn: string | null;
+  chargedShift: string | null;
+  out: number | null;
+  labour: number | null;
+  kwh: number | null;
+  pmh: number | null;
+  kwhkg: number | null;
+  yieldPct: number | null;
+  recipe: string[];
+  recipeKey: string;
+  cuts: BatchCut[];
+  mixedWith: string[];
+  passes: number;
+  machines: string[];
+  firstDay: string | null;
+  lastDay: string | null;
+  shifts: number;
+  faults: BatchNote[];
+  limits: BatchNote[];
+  comparable: boolean;
+  parts: BatchPart[];
+}
+
+/** The same batches gathered by how they were worked. One batch is an anecdote. */
+export interface BatchRecipe {
+  key: string;
+  family: string | null;
+  recipeKey: string;
+  recipe: string[];
+  batches: number;
+  refs: string[];
+  out: number | null;
+  pmh: number | null;
+  kwhkg: number | null;
+  yieldPct: number | null;
+  yieldFrom: number;
+  best: string;
+}
+
+export interface BatchEfficiency {
+  window: { from: string | null; to: string | null };
+  batches: BatchUnit[];
+  recipes: BatchRecipe[];
+  summary: {
+    batches: number;
+    comparable: number;
+    withYield: number;
+    out: number | null;
+    pmh: number | null;
+  };
+}
+
 export interface ShiftOption {
   date: string;
   shifts: Shift[];

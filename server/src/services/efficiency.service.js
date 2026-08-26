@@ -738,6 +738,300 @@ const DIGITS_OF = {
   'kg/man-h': 2,
 };
 
+/**
+ * The special line read one batch at a time, instead of one shift at a time.
+ *
+ * Every other figure in here is a shift's: what a crew got out of the hours
+ * they worked. That answers "was last night a good night" and cannot answer the
+ * question the plant is actually stuck on, which is what to do with a charge
+ * once it is out of the vessel.
+ *
+ * The grades come off the special line in sequence - Special first, then the
+ * finer cuts out of what is left - and which of them are taken is decided by
+ * what the market is asking for that week. Special and skip SuperFine, then
+ * Fine and Medium. Sometimes Fine alone. Sometimes Special, SuperFine and
+ * Medium. Each of those is a different amount of refining done to the same
+ * 2,200 kg, and the plant has never been able to see what each one costs,
+ * because the cost lands in whichever shifts the batch happened to straddle.
+ *
+ * A batch is the unit that holds that decision, so this reads the record by
+ * batch: what came out of one charge, what it cost in labour and electricity,
+ * and in what order the grades were taken. Two batches worked the same way are
+ * then comparable in a way that two shifts never were.
+ *
+ * THE WHOLE LIFE OF THE BATCH, always, whatever window is asked for. A window
+ * that cut a batch in half would report the passes inside it against output
+ * weighed outside it, which is the error this is meant to end rather than
+ * repeat. `from` and `to` choose which batches are listed, by whether the batch
+ * worked at all in that period; the figures against each one are its own from
+ * charge to last weighing.
+ *
+ * WHAT IT REFUSES TO RANK. A ranking is a recommendation, and a recommendation
+ * built on a defective record sends somebody off to copy a batch that was
+ * never worked the way the record says. Three defects make a batch's rate
+ * arithmetically wrong rather than merely unflattering, and they are common
+ * enough to matter:
+ *
+ *   A pass with no crew recorded counts as nought labour. Seven passes on the
+ *   record, and batch 2920 tops the plant at 281 kg per man-hour on the
+ *   strength of three of them - which is not a batch anybody should study.
+ *   A pass with impossible hours: 88.2 hours inside a twelve-hour shift is a
+ *   slipped decimal, and it puts batch 3018 last on the plant at 11.2.
+ *   A pass repeating another's meter readings exactly - the same machine
+ *   crossing the same meter twice - is one pass entered twice.
+ *
+ * Those batches are still returned, with what is wrong with them named, and
+ * they are kept out of the comparison rather than out of sight. Two further
+ * marks limit what a batch can be compared on without making its rate wrong:
+ * a batch mixed with another carries output that was not charged as itself, so
+ * its yield means nothing though its labour is sound; and a batch with no
+ * charge on record has nothing to yield against at all.
+ */
+export function batchUnits(rows) {
+  const passes = rows.filter(
+    (r) => r.line === 'special' && r.quality && r.kind !== 'autoclave' && r.batch_no,
+  );
+  const charges = rows.filter((r) => r.kind === 'autoclave' && r.batch_no);
+
+  /*
+   * A pass entered twice, found by the meters rather than by the figures.
+   *
+   * Two passes of the same batch on the same machine can weigh the same and run
+   * the same hours - that is a plant working steadily. What they cannot do is
+   * start and finish at the same reading on both meters: the electricity meter
+   * and the hour meter only move forward, so the same span on both is the same
+   * pass on the record twice, whatever dates were typed against them.
+   */
+  const twice = new Set();
+  const spans = new Map();
+  for (const r of passes) {
+    if (r.elec_start == null || r.hour_start == null) continue;
+    const key = [
+      r.machine_id, r.batch_no, r.quality,
+      r.elec_start, r.elec_end, r.hour_start, r.hour_end,
+    ].join('|');
+    spans.set(key, [...(spans.get(key) ?? []), r]);
+  }
+  for (const group of spans.values()) {
+    for (const r of group.slice(1)) twice.add(r.id);
+  }
+
+  /*
+   * The order the passes were worked in, which the recipe depends on and which
+   * takes two keys to recover.
+   *
+   * The shift first. Then `started_at` inside it - which is when the record was
+   * typed rather than when the machine ran, and is still the right tie-break:
+   * a supervisor transcribing a shift sheet works down it in order, so the
+   * typing order is the sheet's order even on a batch entered three months
+   * late.
+   *
+   * Without it the passes of one shift come back in whatever order the table
+   * hands them over, and that is not a small thing here. Sorted by shift alone
+   * the plant appears to work 44 batches Special-then-Fine and 8 the other way
+   * about; by the sheet it is 51 and 1. The eight were one recipe cut in two,
+   * and a comparison of how the plant works cannot afford to invent a practice
+   * out of row order.
+   */
+  const slot = (r) => `${r.shift_date}|${r.shift === 'Day' ? 0 : 1}`;
+  const worked = (a, b) =>
+    slot(a).localeCompare(slot(b))
+    || String(a.started_at ?? '').localeCompare(String(b.started_at ?? ''));
+
+  const byBatch = new Map();
+  for (const r of passes) byBatch.set(r.batch_no, [...(byBatch.get(r.batch_no) ?? []), r]);
+
+  const out = [];
+  for (const [batch, group] of byBatch) {
+    const sorted = [...group].sort(worked);
+    const charge = charges.find((c) => c.batch_no === batch) ?? null;
+
+    const kg = sorted.reduce((sum, r) => sum + (num(r.weight_kg) ?? 0), 0);
+    const labour = sorted.reduce((sum, r) => sum + runLabour(r), 0);
+    const kwh = sorted.reduce((sum, r) => sum + (runKwh(r) ?? 0), 0);
+    const charged = charge ? num(charge.capacity) : null;
+
+    /* The order the grades were taken in - the decision this is here to show. */
+    const recipe = [];
+    for (const r of sorted) if (!recipe.includes(r.quality)) recipe.push(r.quality);
+
+    const cuts = [];
+    for (const quality of recipe) {
+      const cut = sorted.filter((r) => r.quality === quality);
+      const gKg = cut.reduce((sum, r) => sum + (num(r.weight_kg) ?? 0), 0);
+      const gLabour = cut.reduce((sum, r) => sum + runLabour(r), 0);
+      const gKwh = cut.reduce((sum, r) => sum + (runKwh(r) ?? 0), 0);
+      cuts.push({
+        quality,
+        out: round(gKg, 0),
+        labour: round(gLabour, 2),
+        kwh: round(gKwh, 1),
+        passes: cut.length,
+        pmh: gKg > 0 && gLabour > 0 ? round(gKg / gLabour, 2) : null,
+        kwhkg: gKg > 0 && gKwh > 0 ? round(gKwh / gKg, 3) : null,
+        /** What share of everything the batch gave up came off as this grade. */
+        share: kg > 0 ? round((gKg / kg) * 100, 1) : null,
+      });
+    }
+
+    const mixedWith = [
+      ...new Set(
+        sorted.flatMap((r) => [r.src2, r.src3, r.src4])
+          .map((v) => String(v ?? '').trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    /*
+     * What is wrong with the record of this batch, in the reader's words rather
+     * than a code. Each one names the pass it came from, because "a pass with no
+     * crew" is a thing somebody can go and fix and "flagged" is not.
+     */
+    const faults = [];
+    const noCrew = sorted.filter((r) => num(r.workers) == null || num(r.workers) === 0);
+    if (noCrew.length) {
+      faults.push({
+        key: 'no-crew',
+        what: `${noCrew.length} pass${noCrew.length === 1 ? '' : 'es'} with no crew recorded`,
+        why: 'a pass with nobody on it counts as no labour, which lifts the rate for work that was done',
+        passes: noCrew.map((r) => r.id),
+      });
+    }
+    const wildHours = sorted.filter((r) => {
+      const hours = runHours(r);
+      return hours == null || hours === 0 || hours > 24;
+    });
+    if (wildHours.length) {
+      faults.push({
+        key: 'hours',
+        what: `${wildHours.length} pass${wildHours.length === 1 ? '' : 'es'} with hours a shift cannot hold`,
+        why: 'the hours are missing or a slipped decimal, so the labour under this batch is not what it cost',
+        passes: wildHours.map((r) => r.id),
+      });
+    }
+    const repeats = sorted.filter((r) => twice.has(r.id));
+    if (repeats.length) {
+      faults.push({
+        key: 'entered-twice',
+        what: `${repeats.length} pass${repeats.length === 1 ? '' : 'es'} entered twice`,
+        why: 'the same machine crossing the same meters twice is one pass on the record twice, so both its kilograms and its hours are doubled',
+        passes: repeats.map((r) => r.id),
+      });
+    }
+
+    /* These two do not make the labour wrong, only the yield unreadable. */
+    const limits = [];
+    if (!charge) {
+      limits.push({
+        key: 'no-charge',
+        what: 'no autoclave charge on record',
+        why: 'there is nothing to measure the output against, so this batch has no yield',
+      });
+    }
+    if (mixedWith.length) {
+      limits.push({
+        key: 'mixed',
+        what: `worked together with ${mixedWith.join(' and ')}`,
+        why: 'the output includes material that was not charged as this batch, so its yield reads high and the other batch reads starved - the labour and the electricity are still its own',
+      });
+    }
+
+    const days = [...new Set(sorted.map((r) => r.shift_date).filter(Boolean))].sort();
+    out.push({
+      batch,
+      formulation: charge?.formulation?.trim() ?? null,
+      /*
+       * The product, without the charge size: "Special 2200" and "Special 2500"
+       * are the same thing made in two vessel sizes and belong in one
+       * comparison, and DRC is a different product that does not belong in it
+       * at all. It comes off in one pass at the charge weight and reads at 126
+       * kg per man-hour, which would sit at the top of any ranking of how to
+       * work a Special charge and answer a question nobody asked.
+       */
+      family: charge?.formulation ? String(charge.formulation).trim().split(/\s+/)[0] : null,
+      charged,
+      chargedOn: charge?.shift_date ?? null,
+      chargedShift: charge?.shift ?? null,
+      out: round(kg, 0),
+      labour: round(labour, 2),
+      kwh: round(kwh, 1),
+      pmh: kg > 0 && labour > 0 ? round(kg / labour, 2) : null,
+      kwhkg: kg > 0 && kwh > 0 ? round(kwh / kg, 3) : null,
+      /** Suppressed rather than computed where it cannot be read - see limits. */
+      yieldPct:
+        charged && charged > 0 && !mixedWith.length ? round((kg / charged) * 100, 1) : null,
+      recipe,
+      recipeKey: recipe.join(' › '),
+      cuts,
+      mixedWith,
+      passes: sorted.length,
+      machines: [...new Set(sorted.map((r) => r.machine_id).filter(Boolean))].sort(),
+      firstDay: days[0] ?? null,
+      lastDay: days[days.length - 1] ?? null,
+      shifts: [...new Set(sorted.map((r) => `${r.shift_date} ${r.shift ?? ''}`.trim()))].length,
+      faults,
+      limits,
+      /** Sound enough to rank. Yield may still be absent - see yieldPct. */
+      comparable: faults.length === 0,
+      parts: sorted.map((r) => ({
+        ...runPart(r),
+        quality: r.quality,
+        day: r.shift_date ?? null,
+        shift: r.shift ?? null,
+        entered: twice.has(r.id) ? 'twice' : null,
+      })),
+    });
+  }
+
+  return out.sort((a, b) => String(b.lastDay).localeCompare(String(a.lastDay)));
+}
+
+/**
+ * The same batches gathered by how they were taken.
+ *
+ * One batch is an anecdote. The plant's question is which way of working a
+ * charge pays, and that is a question about the group: forty-two batches taken
+ * Special then Fine against fifteen taken as Fine alone.
+ *
+ * Only sound batches count towards a recipe - see batchUnits - and only batches
+ * that were charged and not mixed count towards its yield, because a mixed
+ * batch's kilograms are partly another batch's. Recipes worked once are still
+ * returned, marked by their count: they are not evidence of anything, and
+ * hiding them would hide that somebody tried it.
+ */
+export function recipeSummary(batches) {
+  const byRecipe = new Map();
+  for (const b of batches) {
+    if (!b.comparable || !(b.out > 0) || b.pmh == null) continue;
+    const key = `${b.family ?? 'Unknown'}|${b.recipeKey}`;
+    byRecipe.set(key, [...(byRecipe.get(key) ?? []), b]);
+  }
+
+  const mean = (list, pick) => {
+    const values = list.map(pick).filter((v) => v != null);
+    if (!values.length) return null;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  };
+
+  return [...byRecipe]
+    .map(([key, list]) => ({
+      key,
+      family: list[0].family ?? null,
+      recipeKey: list[0].recipeKey,
+      recipe: list[0].recipe,
+      batches: list.length,
+      refs: list.map((b) => b.batch),
+      out: round(mean(list, (b) => b.out), 0),
+      pmh: round(mean(list, (b) => b.pmh), 2),
+      kwhkg: round(mean(list, (b) => b.kwhkg), 3),
+      yieldPct: round(mean(list, (b) => b.yieldPct), 1),
+      /** How many of them the yield is an average of, which is not all of them. */
+      yieldFrom: list.filter((b) => b.yieldPct != null).length,
+      best: list.reduce((a, b) => (b.pmh > a.pmh ? b : a)).batch,
+    }))
+    .sort((a, b) => (b.pmh ?? 0) - (a.pmh ?? 0));
+}
+
 export const efficiencyService = {
   notes,
 
@@ -944,6 +1238,51 @@ export const efficiencyService = {
    * offering the whole plant and answering half of them with nothing reads as a
    * broken screen rather than as a line that did not run.
    */
+  /**
+   * The special line by batch, and by how the batch was taken.
+   *
+   * `from` and `to` choose which batches are listed - a batch is in if it
+   * worked at all inside them - and never what is counted against one. A batch
+   * is a thing with a start and an end and its rate is a property of the whole
+   * of it; cutting it at a window edge would report passes against output
+   * weighed on the other side, which is the error the whole view exists to
+   * end.
+   */
+  async batchEfficiency({ from, to } = {}) {
+    const all = await runs.all({}, { sort: 'shift_date' });
+    const every = batchUnits(all);
+
+    const within = (batch) => {
+      if (from && String(batch.lastDay ?? '') < from) return false;
+      if (to && String(batch.firstDay ?? '') > to) return false;
+      return true;
+    };
+    const batches = every.filter(within);
+
+    return {
+      window: { from: from ?? null, to: to ?? null },
+      batches,
+      recipes: recipeSummary(batches),
+      summary: {
+        batches: batches.length,
+        comparable: batches.filter((b) => b.comparable).length,
+        withYield: batches.filter((b) => b.yieldPct != null).length,
+        out: round(batches.reduce((sum, b) => sum + (b.out ?? 0), 0), 0),
+        /*
+         * The plant's own rate over these batches, weighted by weight rather
+         * than averaged over batches: a 2,400 kg batch and a 300 kg batch are
+         * not two equal opinions about how the line runs.
+         */
+        pmh: (() => {
+          const sound = batches.filter((b) => b.comparable);
+          const kg = sound.reduce((sum, b) => sum + (b.out ?? 0), 0);
+          const labour = sound.reduce((sum, b) => sum + (b.labour ?? 0), 0);
+          return kg > 0 && labour > 0 ? round(kg / labour, 2) : null;
+        })(),
+      },
+    };
+  },
+
   async trend({ from, to, subject } = {}) {
     const [all, idealSheet, rosterRows] = await Promise.all([
       runs.all({}, { sort: 'shift_date' }),

@@ -135,6 +135,16 @@ export const efficiencyTrend = asyncHandler(async (req, res) =>
   ok(res, await efficiencyService.trend(req.query)),
 );
 
+/**
+ * The special line one batch at a time, rather than one shift at a time.
+ *
+ * The window picks which batches are listed. What is counted against each one
+ * is the whole of that batch, wherever its passes fell.
+ */
+export const batchEfficiency = asyncHandler(async (req, res) =>
+  ok(res, await efficiencyService.batchEfficiency(req.query)),
+);
+
 export const addVarianceReason = asyncHandler(async (req, res) =>
   created(
     res,

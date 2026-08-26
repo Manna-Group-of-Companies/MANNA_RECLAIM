@@ -166,6 +166,7 @@ export const endpoints = {
      * normal.
      */
     efficiencyTrend: '/reports/efficiency-trend',
+    batchEfficiency: '/reports/batch-efficiency',
     varianceReasonById: (id: string) => `/reports/variance-reasons/${id}`,
     approveVarianceReason: (id: string) => `/reports/variance-reasons/${id}/approve`,
     /**

@@ -13,6 +13,7 @@ import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
 import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
+import { BatchEfficiency } from '@/features/reports/BatchEfficiency';
 import { ChargeList } from '@/features/reports/ChargeList';
 import { UtilisationTable } from '@/features/reports/Utilisation';
 import { OperatorChip } from '@/features/operators/OperatorChip';
@@ -186,13 +187,16 @@ function Metric({ metric, onCalc }: { metric: EfficiencyMetric; onCalc: (c: Calc
   );
 }
 
-/** Which question is being asked: how did that shift go, or is that normal. */
+/**
+ * Which of three questions is being asked: how did that shift go, is that
+ * normal, or what should we be doing with a charge.
+ */
 function ViewToggle({
   view,
   onView,
 }: {
-  view: 'shift' | 'period';
-  onView: (v: 'shift' | 'period') => void;
+  view: 'shift' | 'period' | 'batch';
+  onView: (v: 'shift' | 'period' | 'batch') => void;
 }) {
   return (
     <div className="chips mt-3 mx-0.5">
@@ -209,6 +213,21 @@ function ViewToggle({
         onClick={() => onView('period')}
       >
         Compare a period
+      </button>
+      {/*
+        The third question this page can answer, and the one the plant is
+        actually stuck on: not how a shift went, but what to do with a charge.
+        The grades come off in sequence and which of them are taken is decided
+        by the week's orders, and until this there was nowhere to see what each
+        way of working costs - the cost lands in whichever shifts the batch
+        happened to straddle.
+      */}
+      <button
+        type="button"
+        className={cn('chip', view === 'batch' && 'on')}
+        onClick={() => onView('batch')}
+      >
+        By batch
       </button>
     </div>
   );
@@ -253,7 +272,7 @@ export function EfficiencyPage() {
    * belongs to one shift. A period has no single shift to write a reason
    * against, so it carries none of them and says so by being its own screen.
    */
-  const [view, setView] = useState<'shift' | 'period'>('shift');
+  const [view, setView] = useState<'shift' | 'period' | 'batch'>('shift');
   const [calc, setCalc] = useState<CalcTarget>(null);
   const [noteFor, setNoteFor] = useState<NoteTarget>(null);
   const [varianceFor, setVarianceFor] = useState<VarianceTarget>(null);
@@ -657,6 +676,15 @@ export function EfficiencyPage() {
       <>
         <ViewToggle view={view} onView={setView} />
         <EfficiencyTrend />
+      </>
+    );
+  }
+
+  if (view === 'batch') {
+    return (
+      <>
+        <ViewToggle view={view} onView={setView} />
+        <BatchEfficiency />
       </>
     );
   }

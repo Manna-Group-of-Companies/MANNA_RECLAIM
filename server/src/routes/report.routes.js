@@ -98,6 +98,20 @@ router.get(
   validate({ query: dateRange }),
   reports.efficiencyTrend,
 );
+
+/**
+ * The same figures gathered by batch instead of by shift.
+ *
+ * Open to whoever may see the shift view, and for the same reason: this is the
+ * plant's own production read back to it, and a crew that may see what last
+ * night made may see what the batch they worked made.
+ */
+router.get(
+  '/batch-efficiency',
+  shiftReview,
+  validate({ query: dateRange }),
+  reports.batchEfficiency,
+);
 router.get(
   '/variance-reasons',
   shiftReview,

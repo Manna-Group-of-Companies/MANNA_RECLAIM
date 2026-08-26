@@ -2,6 +2,7 @@ import { axiosClient } from '../axiosClient';
 import { endpoints } from '../endpoints';
 import type { ApiEnvelope } from '@/types/api';
 import type {
+  BatchEfficiency,
   CostingReport,
   DowntimeDetail,
   DowntimeReport,
@@ -128,6 +129,15 @@ export const reportService = {
    */
   efficiencyTrend: (params: DateRange & { subject?: string }) =>
     get<EfficiencyTrend>(endpoints.reports.efficiencyTrend, params),
+
+  /**
+   * The special line by batch. The window picks which batches are listed and
+   * never what is counted against one - a batch's rate is a property of the
+   * whole batch, so cutting it at a window edge would report passes against
+   * output weighed on the other side.
+   */
+  batchEfficiency: (params: DateRange) =>
+    get<BatchEfficiency>(endpoints.reports.batchEfficiency, params),
 
   varianceReasons: (range?: DateRange) =>
     get<VarianceReason[]>(endpoints.reports.varianceReasons, range),
