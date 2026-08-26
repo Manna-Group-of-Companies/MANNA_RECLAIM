@@ -42,11 +42,19 @@ const forSampling = authorize(ROLES.LAB, ROLES.SUPERVISOR, ROLES.WORKER, ...ADMI
 /**
  * Stock as SAP holds it, with how old the reading is.
  *
- * Open to the same people the yard summary is, and no wider: it is what is in
- * the yard and carries no rate and no customer. Listed before `/:id` for the
- * same reason `/summary` is - Express matches in order.
+ * The floor, the bench, the office - and the managing director, who is on this
+ * one and on none of the others in this file. What is in the yard is exactly
+ * the kind of thing that account exists to read: it carries no rate, no wage
+ * and no customer, so opening it costs nothing that SUMMARY_ROLES was drawn to
+ * protect. Left off, the MD's own Stock tab answers 403 - which is how it was
+ * until somebody went looking for it.
+ *
+ * Listed before `/:id` for the same reason `/summary` is: Express matches in
+ * order, and `sap` is a perfectly good group id as far as that route knows.
  */
-router.get('/sap', forSampling, validate({ query: sapStockQuery }), sapStock.current);
+const forYard = authorize(ROLES.LAB, ROLES.SUPERVISOR, ROLES.WORKER, ROLES.MD, ...ADMIN_ROLES);
+
+router.get('/sap', forYard, validate({ query: sapStockQuery }), sapStock.current);
 
 router.get('/pools', forSampling, validate({ query: stockQuery }), stock.pools);
 

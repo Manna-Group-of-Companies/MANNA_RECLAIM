@@ -270,3 +270,20 @@ test('the health check says whether the feed is switched on, without saying more
   // answer to "what is it" is nobody's but the plant server's.
   assert.ok(!JSON.stringify(body).includes(TOKEN));
 });
+
+test('the managing director can read the yard', async (t) => {
+  const api = await withToken();
+  t.after(() => api.stop());
+  await post(api, snapshot());
+
+  /*
+   * On this route and on none of the others in the stock file. What is in the
+   * yard carries no rate, no wage and no customer, so it costs nothing that
+   * SUMMARY_ROLES was drawn to protect - and left off, the MD's own Stock tab
+   * answers 403, which is how it was until somebody went looking for it.
+   */
+  for (const role of ['md', 'manager', 'supervisor', 'worker', 'lab']) {
+    const res = await api.call('/stock/sap', { role });
+    assert.equal(res.status, 200, `${role} could not read the yard`);
+  }
+});

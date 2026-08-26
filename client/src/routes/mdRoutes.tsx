@@ -5,11 +5,12 @@ import { AdminHistoryPage, ApprovalsPage, EfficiencyPage } from '@/pages/admin';
 import { MdOverviewPage } from '@/pages/md';
 import { BatchQualityBoard } from '@/features/quality/BatchQualityBoard';
 import { SapDispatchBoard } from '@/features/dispatch/SapDispatchBoard';
+import { MdStockPage } from '@/pages/md';
 import { mdPaths } from '@/config/paths';
 import { SUMMARY_ROLES } from '@/config/constants';
 
 /**
- * The managing director's six screens.
+ * The managing director's seven screens.
  *
  * Gated on SUMMARY_ROLES, which is md plus the back office - a manager opening
  * these reads the same two pages rather than being bounced, and the guard stays
@@ -52,6 +53,13 @@ export const mdRoutes: RouteObject[] = [
            * dispatch screen, which raises them and is the supervisor's - this
            * account reads a quarter and issues nothing.
            */
+          /*
+           * What is in the yard right now, and when it was read. Not the shop
+           * floor's Stock tab, which carries the dispatch form and the old
+           * ledger beside it - this account reads the figure and issues
+           * nothing.
+           */
+          { path: 'stock', element: <MdStockPage /> },
           { path: 'dispatches', element: <SapDispatchBoard /> },
         ],
       },

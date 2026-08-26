@@ -103,6 +103,14 @@ export const mdPaths = {
    * SAP, so this end never had them.
    */
   dispatches: '/md/dispatches',
+  /**
+   * What is in the yard, as SAP holds it, with how old the reading is.
+   *
+   * The shop floor's /stock is the yard plus the machinery around it - the QC
+   * bands, the dispatch form, the old ledger. This is the figure alone, which
+   * is the whole of what this account wants from it.
+   */
+  stock: '/md/stock',
 } as const;
 
 /**
