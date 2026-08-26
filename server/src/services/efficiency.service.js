@@ -787,34 +787,93 @@ const DIGITS_OF = {
  * its yield means nothing though its labour is sound; and a batch with no
  * charge on record has nothing to yield against at all.
  */
+/**
+ * Passes entered twice, found by the meters rather than by the figures.
+ *
+ * Two passes on the same machine can weigh the same and run the same hours -
+ * that is a plant working steadily. What they cannot do is start and finish at
+ * the same reading on both meters: the electricity meter and the hour meter
+ * only ever move forward, so the same span on both is one pass on the record
+ * twice, whatever dates were typed against them.
+ *
+ * Returns the later ones, so the first entry of a pass is the one that counts.
+ */
+export function enteredTwice(passes) {
+  const spans = new Map();
+  for (const r of passes) {
+    if (r.elec_start == null || r.hour_start == null) continue;
+    const key = [
+      r.machine_id, r.batch_no ?? '', r.quality ?? '',
+      r.elec_start, r.elec_end, r.hour_start, r.hour_end,
+    ].join('|');
+    spans.set(key, [...(spans.get(key) ?? []), r]);
+  }
+  const twice = new Set();
+  for (const group of spans.values()) {
+    for (const r of group.slice(1)) twice.add(r.id);
+  }
+  return twice;
+}
+
+/**
+ * What is wrong with a set of passes, in the reader's words rather than a code.
+ *
+ * Shared by the batch view and the coarse view so that both mean the same thing
+ * by a defective record. Each fault names the passes it came from, because "a
+ * pass with no crew" is a thing somebody can go and fix and "flagged" is not.
+ *
+ * These three make a rate arithmetically wrong rather than merely unflattering,
+ * which is the line that decides whether a figure may be ranked: a ranking is a
+ * recommendation, and a recommendation built on a pass with nobody on it sends
+ * somebody off to copy work that was never done the way the record says.
+ */
+export function faultsIn(passes, twice) {
+  const faults = [];
+  const s = (n) => (n === 1 ? '' : 'es');
+
+  const noCrew = passes.filter((r) => num(r.workers) == null || num(r.workers) === 0);
+  if (noCrew.length) {
+    faults.push({
+      key: 'no-crew',
+      what: `${noCrew.length} pass${s(noCrew.length)} with no crew recorded`,
+      why: 'a pass with nobody on it counts as no labour, which lifts the rate for work that was done',
+      passes: noCrew.map((r) => r.id),
+    });
+  }
+
+  const wildHours = passes.filter((r) => {
+    const hours = runHours(r);
+    return hours == null || hours === 0 || hours > 24;
+  });
+  if (wildHours.length) {
+    faults.push({
+      key: 'hours',
+      what: `${wildHours.length} pass${s(wildHours.length)} with hours a shift cannot hold`,
+      why: 'the hours are missing or a slipped decimal, so the labour here is not what the work cost',
+      passes: wildHours.map((r) => r.id),
+    });
+  }
+
+  const repeats = passes.filter((r) => twice.has(r.id));
+  if (repeats.length) {
+    faults.push({
+      key: 'entered-twice',
+      what: `${repeats.length} pass${s(repeats.length)} entered twice`,
+      why: 'the same machine crossing the same meters twice is one pass on the record twice, so both its kilograms and its hours are doubled',
+      passes: repeats.map((r) => r.id),
+    });
+  }
+
+  return faults;
+}
+
 export function batchUnits(rows) {
   const passes = rows.filter(
     (r) => r.line === 'special' && r.quality && r.kind !== 'autoclave' && r.batch_no,
   );
   const charges = rows.filter((r) => r.kind === 'autoclave' && r.batch_no);
 
-  /*
-   * A pass entered twice, found by the meters rather than by the figures.
-   *
-   * Two passes of the same batch on the same machine can weigh the same and run
-   * the same hours - that is a plant working steadily. What they cannot do is
-   * start and finish at the same reading on both meters: the electricity meter
-   * and the hour meter only move forward, so the same span on both is the same
-   * pass on the record twice, whatever dates were typed against them.
-   */
-  const twice = new Set();
-  const spans = new Map();
-  for (const r of passes) {
-    if (r.elec_start == null || r.hour_start == null) continue;
-    const key = [
-      r.machine_id, r.batch_no, r.quality,
-      r.elec_start, r.elec_end, r.hour_start, r.hour_end,
-    ].join('|');
-    spans.set(key, [...(spans.get(key) ?? []), r]);
-  }
-  for (const group of spans.values()) {
-    for (const r of group.slice(1)) twice.add(r.id);
-  }
+  const twice = enteredTwice(passes);
 
   /*
    * The order the passes were worked in, which the recipe depends on and which
@@ -887,37 +946,7 @@ export function batchUnits(rows) {
      * than a code. Each one names the pass it came from, because "a pass with no
      * crew" is a thing somebody can go and fix and "flagged" is not.
      */
-    const faults = [];
-    const noCrew = sorted.filter((r) => num(r.workers) == null || num(r.workers) === 0);
-    if (noCrew.length) {
-      faults.push({
-        key: 'no-crew',
-        what: `${noCrew.length} pass${noCrew.length === 1 ? '' : 'es'} with no crew recorded`,
-        why: 'a pass with nobody on it counts as no labour, which lifts the rate for work that was done',
-        passes: noCrew.map((r) => r.id),
-      });
-    }
-    const wildHours = sorted.filter((r) => {
-      const hours = runHours(r);
-      return hours == null || hours === 0 || hours > 24;
-    });
-    if (wildHours.length) {
-      faults.push({
-        key: 'hours',
-        what: `${wildHours.length} pass${wildHours.length === 1 ? '' : 'es'} with hours a shift cannot hold`,
-        why: 'the hours are missing or a slipped decimal, so the labour under this batch is not what it cost',
-        passes: wildHours.map((r) => r.id),
-      });
-    }
-    const repeats = sorted.filter((r) => twice.has(r.id));
-    if (repeats.length) {
-      faults.push({
-        key: 'entered-twice',
-        what: `${repeats.length} pass${repeats.length === 1 ? '' : 'es'} entered twice`,
-        why: 'the same machine crossing the same meters twice is one pass on the record twice, so both its kilograms and its hours are doubled',
-        passes: repeats.map((r) => r.id),
-      });
-    }
+    const faults = faultsIn(sorted, twice);
 
     /* These two do not make the labour wrong, only the yield unreadable. */
     const limits = [];
@@ -1028,6 +1057,178 @@ export function recipeSummary(batches) {
       /** How many of them the yield is an average of, which is not all of them. */
       yieldFrom: list.filter((b) => b.yieldPct != null).length,
       best: list.reduce((a, b) => (b.pmh > a.pmh ? b : a)).batch,
+    }))
+    .sort((a, b) => (b.pmh ?? 0) - (a.pmh ?? 0));
+}
+
+/**
+ * The coarse line read one shift at a time, which is the only unit it has.
+ *
+ * The special line hangs its record on a batch number and this one does not:
+ * PR1 and R2 work a continuous flow out of a buffer, and no pass on the line
+ * carries a batch at all. So the shift is the unit, which suits the question
+ * anyway - the plant wants the most out of a shift, and here a shift is a thing
+ * that can be compared with the shift before it.
+ *
+ * Built on coarseUnits, so a shift already carries the pre-refining that fed it
+ * wherever that ran. What is added here is what a comparison needs and a card
+ * does not: which machines worked it, what is wrong with the record, and the
+ * grouping underneath.
+ *
+ * NO YIELD PER SHIFT, deliberately, though every coarse charge on the record
+ * carries its capacity and it would be a simple division. The line is charged
+ * on the night shift and refined on the day - of 103 shifts that weighed
+ * anything, 85 are day shifts, and the vessels that fed them were cooking
+ * overnight. Divided inside one shift that reads 292% on 17 August and 57% on
+ * the 19th, and both are arithmetic about a buffer rather than facts about a
+ * crew. Over a window the same division is worth having and it is on the
+ * summary, where the buffer averages out: 735,728 kg weighed against 859,900
+ * charged over the record as it stands.
+ */
+export function coarseShifts(rows) {
+  const onTheLine = rows.filter((r) => r.line === 'coarse' && r.kind !== 'autoclave');
+  const twice = enteredTwice(onTheLine);
+  const byId = new Map(onTheLine.map((r) => [r.id, r]));
+
+  /*
+   * What this line normally does, from its own record, so that a figure it has
+   * never come near can be told from a good shift.
+   *
+   * Medians rather than means: the whole point is to be unmoved by the outlier
+   * being looked for. The line weighs between about three-quarters and one and
+   * a half times its median on nearly every shift it has ever worked.
+   */
+  const middle = (values) => {
+    const sorted = values.filter((v) => v != null && v > 0).sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+  };
+  const units = coarseUnits(rows);
+  /*
+   * Both taken over the shifts rather than over the passes, so that the figure
+   * a shift is compared with is the same kind of figure. A shift's kWh a
+   * kilogram counts PR1's meter as well as R2's over the weight only R2 puts on
+   * the scale, and a per-pass median does not - reading one against the other
+   * is off by a factor of three, which was enough to let 24 June through.
+   */
+  const typicalOut = middle(units.map((u) => u.out));
+  const typicalKwhKg = middle(units.map((u) => u.kwhkg));
+
+  return units
+    .map((u) => {
+      const passes = u.parts.map((p) => byId.get(p.runId)).filter(Boolean);
+      const machines = [...new Set(u.parts.map((p) => p.machineId).filter(Boolean))].sort();
+      const faults = faultsIn(passes, twice);
+
+      /*
+       * A weight the meters do not believe.
+       *
+       * On 24 June a shift is on record at 66,972 kg. The line's largest
+       * weighing before or since is 10,487, the vessels were charged with 7,500
+       * that day, and the shift's own electricity meter moved 96 kWh - which is
+       * what the line burns for about seven tonnes. It is a decimal point, and
+       * left alone it is the best shift the plant has ever had by a factor of
+       * nine and it sets the top of this table.
+       *
+       * Two meters have to disagree before it is called: the weight far above
+       * what the line does, and the electricity far below what that weight
+       * would have cost. A genuinely enormous shift burns power in proportion
+       * and is not caught by this; a slipped decimal cannot, because nobody
+       * mistyped the meter as well.
+       */
+      if (
+        typicalOut && typicalKwhKg
+        && u.out > typicalOut * 3
+        && u.kwhkg != null && u.kwhkg < typicalKwhKg / 3
+      ) {
+        faults.push({
+          key: 'weight-and-meter',
+          what: `weighed ${round(u.out, 0)} kg on ${round(u.kwh, 0)} kWh`,
+          why: `the line normally weighs about ${round(typicalOut, 0)} kg a shift and burns about `
+            + `${round(typicalKwhKg, 3)} kWh a kilogram - this weight against this meter reading is a `
+            + 'slipped decimal rather than a record shift',
+          passes: passes.filter((r) => (num(r.weight_kg) ?? 0) > 0).map((r) => r.id),
+        });
+      }
+
+      /*
+       * And half the line missing from the record. PR1 never weighs anything,
+       * so a shift with no pre-refining against it is not a shift that ran R2
+       * alone - it is a shift whose other machine nobody logged, and its rate
+       * is the output of two machines over the hours of one.
+       */
+      if (u.out > 0 && !machines.includes('PR1')) {
+        faults.push({
+          key: 'no-pre-refining',
+          what: 'no pre-refining logged for this shift',
+          why: 'PR1 feeds R2 and never weighs anything, so a shift with only R2 against it is missing '
+            + 'the labour of half the line and reads about twice what it earned',
+          passes: [],
+        });
+      }
+
+      return {
+        day: u.day,
+        shift: u.shift,
+        out: round(u.out, 0),
+        labour: round(u.labour, 2),
+        hours: round(u.hours, 2),
+        kwh: round(u.kwh, 1),
+        pmh: u.pmh == null ? null : round(u.pmh, 2),
+        kwhkg: u.kwhkg == null ? null : round(u.kwhkg, 3),
+        machines,
+        passes: u.parts.length,
+        faults,
+        comparable: faults.length === 0,
+        /*
+         * Each pass carrying the day and shift it actually ran in, under the
+         * same names the batch view uses. coarseUnits calls them ranOn/ranIn
+         * because there the shift is the frame and a pass from elsewhere is the
+         * exception; here the shift is what is being compared, so a pass says
+         * plainly when it happened and the reader compares it with the heading.
+         */
+        parts: u.parts.map((p) => ({
+          ...p,
+          day: p.ranOn ?? null,
+          shift: p.ranIn ?? null,
+          entered: twice.has(p.runId) ? 'twice' : null,
+        })),
+      };
+    })
+    .sort((a, b) => `${b.day}|${b.shift}`.localeCompare(`${a.day}|${a.shift}`));
+}
+
+/**
+ * The coarse shifts gathered by which shift of the day they were.
+ *
+ * The special line's equivalent question is which grades to take off a charge.
+ * This line has no such choice - it is one flow through two machines - so the
+ * comparison it can make is the one the plant asked for first: is a night worth
+ * as much as a day. It is not quite, and the gap is in the labour rather than
+ * in the output.
+ */
+export function coarseGroups(shifts) {
+  const byShift = new Map();
+  for (const u of shifts) {
+    if (!u.comparable || !(u.out > 0) || u.pmh == null) continue;
+    byShift.set(u.shift || 'Unrecorded', [...(byShift.get(u.shift || 'Unrecorded') ?? []), u]);
+  }
+
+  const mean = (list, pick) => {
+    const values = list.map(pick).filter((v) => v != null);
+    if (!values.length) return null;
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  };
+
+  return [...byShift]
+    .map(([shift, list]) => ({
+      key: shift,
+      shift,
+      shifts: list.length,
+      out: round(mean(list, (u) => u.out), 0),
+      labour: round(mean(list, (u) => u.labour), 1),
+      pmh: round(mean(list, (u) => u.pmh), 2),
+      kwhkg: round(mean(list, (u) => u.kwhkg), 3),
+      best: list.reduce((a, b) => (b.pmh > a.pmh ? b : a)),
     }))
     .sort((a, b) => (b.pmh ?? 0) - (a.pmh ?? 0));
 }
@@ -1259,10 +1460,51 @@ export const efficiencyService = {
     };
     const batches = every.filter(within);
 
+    /*
+     * And the coarse line, which has no batches to hang a record on - PR1 and
+     * R2 work a continuous flow and no pass on the line carries a batch number.
+     * So it is read by shift, in the same window and on the same request,
+     * because it is the same question asked of the other half of the plant.
+     */
+    const everyShift = coarseShifts(all);
+    const coarse = everyShift.filter((u) => {
+      if (from && String(u.day ?? '') < from) return false;
+      if (to && String(u.day ?? '') > to) return false;
+      return true;
+    });
+    const charges = all.filter(
+      (r) => r.kind === 'autoclave'
+        && r.line === 'coarse'
+        && (!from || String(r.shift_date ?? '') >= from)
+        && (!to || String(r.shift_date ?? '') <= to),
+    );
+    const coarseOut = coarse.reduce((sum, u) => sum + (u.out ?? 0), 0);
+    const coarseLabour = coarse.reduce((sum, u) => sum + (u.labour ?? 0), 0);
+    const charged = charges.reduce((sum, r) => sum + (num(r.capacity) ?? 0), 0);
+
     return {
       window: { from: from ?? null, to: to ?? null },
       batches,
       recipes: recipeSummary(batches),
+      coarse: {
+        shifts: coarse,
+        groups: coarseGroups(coarse),
+        summary: {
+          shifts: coarse.length,
+          comparable: coarse.filter((u) => u.comparable).length,
+          out: round(coarseOut, 0),
+          labour: round(coarseLabour, 1),
+          pmh: coarseOut > 0 && coarseLabour > 0 ? round(coarseOut / coarseLabour, 2) : null,
+          /*
+           * Over the window rather than per shift - the vessels cook overnight
+           * for the day that follows, so inside one shift this division is
+           * arithmetic about a buffer rather than a fact about a crew.
+           */
+          charges: charges.length,
+          charged: round(charged, 0),
+          yieldPct: charged > 0 ? round((coarseOut / charged) * 100, 1) : null,
+        },
+      },
       summary: {
         batches: batches.length,
         comparable: batches.filter((b) => b.comparable).length,

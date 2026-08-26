@@ -14,6 +14,7 @@ import { BoModal } from '@/components/ui';
 import { isReadOnly } from '@/config/constants';
 import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
 import { BatchEfficiency } from '@/features/reports/BatchEfficiency';
+import { CoarseEfficiency } from '@/features/reports/CoarseEfficiency';
 import { ChargeList } from '@/features/reports/ChargeList';
 import { UtilisationTable } from '@/features/reports/Utilisation';
 import { OperatorChip } from '@/features/operators/OperatorChip';
@@ -195,8 +196,8 @@ function ViewToggle({
   view,
   onView,
 }: {
-  view: 'shift' | 'period' | 'batch';
-  onView: (v: 'shift' | 'period' | 'batch') => void;
+  view: 'shift' | 'period' | 'batch' | 'coarse';
+  onView: (v: 'shift' | 'period' | 'batch' | 'coarse') => void;
 }) {
   return (
     <div className="chips mt-3 mx-0.5">
@@ -228,6 +229,21 @@ function ViewToggle({
         onClick={() => onView('batch')}
       >
         By batch
+      </button>
+      {/*
+        And the same question of the other half of the plant, which cannot be
+        asked by batch: PR1 and R2 work a continuous flow and no pass on the
+        coarse line carries a batch number. Its own chip rather than a filter
+        inside the batch view, because the unit is different - a shift, not a
+        charge - and a table that changed what its rows meant when a chip was
+        pressed would be one table answering two questions.
+      */}
+      <button
+        type="button"
+        className={cn('chip', view === 'coarse' && 'on')}
+        onClick={() => onView('coarse')}
+      >
+        Coarse line
       </button>
     </div>
   );
@@ -272,7 +288,7 @@ export function EfficiencyPage() {
    * belongs to one shift. A period has no single shift to write a reason
    * against, so it carries none of them and says so by being its own screen.
    */
-  const [view, setView] = useState<'shift' | 'period' | 'batch'>('shift');
+  const [view, setView] = useState<'shift' | 'period' | 'batch' | 'coarse'>('shift');
   const [calc, setCalc] = useState<CalcTarget>(null);
   const [noteFor, setNoteFor] = useState<NoteTarget>(null);
   const [varianceFor, setVarianceFor] = useState<VarianceTarget>(null);
@@ -685,6 +701,15 @@ export function EfficiencyPage() {
       <>
         <ViewToggle view={view} onView={setView} />
         <BatchEfficiency />
+      </>
+    );
+  }
+
+  if (view === 'coarse') {
+    return (
+      <>
+        <ViewToggle view={view} onView={setView} />
+        <CoarseEfficiency />
       </>
     );
   }

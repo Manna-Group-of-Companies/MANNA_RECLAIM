@@ -1451,10 +1451,64 @@ export interface BatchRecipe {
   best: string;
 }
 
+/**
+ * One shift of the coarse line, which is the only unit that line has: PR1 and
+ * R2 work a continuous flow out of a buffer and no pass on the line carries a
+ * batch number at all.
+ *
+ * No yield here. The vessels are charged on the night shift for the day that
+ * follows, so dividing one shift's output by one shift's charges reads 292% on
+ * a Tuesday and 57% on the Thursday - arithmetic about a buffer rather than a
+ * fact about a crew. It is on the summary instead, where the buffer averages
+ * out over the window.
+ */
+export interface CoarseShift {
+  day: string;
+  shift: string;
+  out: number | null;
+  labour: number | null;
+  hours: number | null;
+  kwh: number | null;
+  pmh: number | null;
+  kwhkg: number | null;
+  machines: string[];
+  passes: number;
+  faults: BatchNote[];
+  comparable: boolean;
+  parts: BatchPart[];
+}
+
+export interface CoarseGroup {
+  key: string;
+  shift: string;
+  shifts: number;
+  out: number | null;
+  labour: number | null;
+  pmh: number | null;
+  kwhkg: number | null;
+  best: CoarseShift;
+}
+
+export interface CoarseEfficiency {
+  shifts: CoarseShift[];
+  groups: CoarseGroup[];
+  summary: {
+    shifts: number;
+    comparable: number;
+    out: number | null;
+    labour: number | null;
+    pmh: number | null;
+    charges: number;
+    charged: number | null;
+    yieldPct: number | null;
+  };
+}
+
 export interface BatchEfficiency {
   window: { from: string | null; to: string | null };
   batches: BatchUnit[];
   recipes: BatchRecipe[];
+  coarse: CoarseEfficiency;
   summary: {
     batches: number;
     comparable: number;
