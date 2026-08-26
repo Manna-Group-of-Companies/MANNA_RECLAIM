@@ -13,6 +13,37 @@ import { logger } from '../config/logger.js';
  * single day, because that is the common case and an equality reads better in
  * a log than a pair of inequalities that mean the same thing.
  */
+/**
+ * Runs that name a batch, including the ones that name it alongside another.
+ *
+ * `batch_no` is usually one number and sometimes a list - the plant writes
+ * "3134,3140" on a pass that worked both - so an equality match finds the first
+ * kind and silently misses the second. Searching for 3134 and being shown some
+ * of its runs is worse than being shown none: the answer looks complete.
+ *
+ * Four clauses rather than a contains: `like '*3134*'` would also match 13134
+ * and 31340, and a batch search that returns another batch's runs is the one
+ * failure this must not have. So it is the number alone, or the number at
+ * either end of a list, or in the middle of one.
+ *
+ * Quoted throughout because the patterns contain commas, which PostgREST would
+ * otherwise read as the separator between clauses.
+ */
+const batchClause = (batch) => {
+  const wanted = String(batch ?? '').trim();
+  if (!wanted) return {};
+  // The same escaping the query builder does for a quoted value.
+  const safe = wanted.replace(/(["\\])/g, '\\$1');
+  return {
+    or: [
+      `batch_no.eq."${safe}"`,
+      `batch_no.like."${safe},*"`,
+      `batch_no.like."*,${safe}"`,
+      `batch_no.like."*,${safe},*"`,
+    ],
+  };
+};
+
 const dayOrWindow = ({ date, from, to } = {}) => {
   if (date) return date;
   const clauses = [];
@@ -40,7 +71,7 @@ export const list = asyncHandler(async (req, res) =>
     shift_date: dayOrWindow(req.query),
     shift: req.query.shift,
     quality: req.query.quality,
-    batch_no: req.query.batch ?? req.query.batchNo,
+    ...batchClause(req.query.batch ?? req.query.batchNo),
     status: req.query.status,
   })),
 );

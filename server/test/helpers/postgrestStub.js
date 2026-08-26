@@ -33,19 +33,24 @@ const json = (res, status, body, extraHeaders = {}) => {
   res.end(text);
 };
 
-/** `id=eq.abc` / `dispatch_id=in.("a","b")` -> a predicate over a row. */
-function predicateFor(params) {
-  const tests = [];
-  for (const [field, raw] of params.entries()) {
-    if (['select', 'order', 'limit', 'offset', 'on_conflict'].includes(field)) continue;
+/**
+ * `column=eq.abc` -> one predicate over a row, or null for an operator this
+ * stub does not know.
+ *
+ * Split out of predicateFor so the `or` list below can use the same vocabulary.
+ * Two implementations of "what does gte mean" would drift, and the half that
+ * drifted would be the half nothing tests.
+ */
+function testFor(field, raw) {
+  {
     const [operator, ...rest] = String(raw).split('.');
     const value = rest.join('.');
     const unquote = (v) => v.replace(/^"|"$/g, '').replace(/\\(["\\])/g, '$1');
-    if (operator === 'eq') tests.push((row) => String(row[field]) === unquote(value));
-    else if (operator === 'neq') tests.push((row) => String(row[field]) !== unquote(value));
+    if (operator === 'eq') return (row) => String(row[field]) === unquote(value);
+    else if (operator === 'neq') return (row) => String(row[field]) !== unquote(value);
     else if (operator === 'in') {
       const list = value.replace(/^\(|\)$/g, '').split(',').map(unquote);
-      tests.push((row) => list.includes(String(row[field])));
+      return (row) => list.includes(String(row[field]));
     }
     /*
      * Ordered comparisons, on numbers or on text.
@@ -74,10 +79,10 @@ function predicateFor(params) {
         lt: (c) => c < 0,
         lte: (c) => c <= 0,
       }[operator];
-      tests.push((row) => {
+      return (row) => {
         const c = cmp(row);
         return c != null && passes(c);
-      });
+      };
     }
     /*
      * `is.null` and `not.is.null`.
@@ -89,13 +94,74 @@ function predicateFor(params) {
      * test that seeded a finished run and then started another got a spurious
      * "that machine already has a run in progress".
      */
-    else if (operator === 'is') tests.push((row) => (row[field] ?? null) === null);
+    else if (operator === 'is') return (row) => (row[field] ?? null) === null;
     else if (operator === 'not' && value === 'is.null') {
-      tests.push((row) => (row[field] ?? null) !== null);
-    } else if (operator === 'ilike') {
-      const rx = new RegExp(`^${unquote(value).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 'i');
-      tests.push((row) => rx.test(String(row[field] ?? '')));
+      return (row) => (row[field] ?? null) !== null;
+    } else if (operator === 'like' || operator === 'ilike') {
+      const rx = new RegExp(
+        `^${unquote(value).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`,
+        operator === 'ilike' ? 'i' : '',
+      );
+      return (row) => rx.test(String(row[field] ?? ''));
     }
+  }
+  return null;
+}
+
+/**
+ * `or=(batch_no.eq."3134",batch_no.like."3134,*")` - any one clause matching.
+ *
+ * Split on the commas that separate clauses and not on the ones inside a quoted
+ * value, which is the whole reason PostgREST asks for such values to be quoted:
+ * the batch search sends `like."3134,*"`, and a plain split would cut it into
+ * two clauses that mean nothing.
+ *
+ * Missing entirely until now, and it failed the way the note above warns about:
+ * an unrecognised parameter added no test, so `or=(...)` matched every row in
+ * the table. A batch search asserted against that would have passed while
+ * quietly returning the whole plant.
+ */
+function orTest(raw) {
+  const body = String(raw).replace(/^\(|\)$/g, '');
+  const clauses = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === '\\') {
+      current += ch + (body[i + 1] ?? '');
+      i += 1;
+    } else if (ch === '"') {
+      quoted = !quoted;
+      current += ch;
+    } else if (ch === ',' && !quoted) {
+      clauses.push(current);
+      current = '';
+    } else current += ch;
+  }
+  if (current) clauses.push(current);
+
+  const tests = clauses
+    .map((clause) => {
+      const at = clause.indexOf('.');
+      return at === -1 ? null : testFor(clause.slice(0, at), clause.slice(at + 1));
+    })
+    .filter(Boolean);
+
+  return (row) => tests.some((test) => test(row));
+}
+
+/** `id=eq.abc` / `dispatch_id=in.("a","b")` -> a predicate over a row. */
+function predicateFor(params) {
+  const tests = [];
+  for (const [field, raw] of params.entries()) {
+    if (['select', 'order', 'limit', 'offset', 'on_conflict'].includes(field)) continue;
+    if (field === 'or') {
+      tests.push(orTest(raw));
+      continue;
+    }
+    const test = testFor(field, raw);
+    if (test) tests.push(test);
   }
   return (row) => tests.every((test) => test(row));
 }

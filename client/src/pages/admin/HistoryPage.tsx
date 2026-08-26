@@ -492,6 +492,15 @@ export function AdminHistoryPage() {
   const [category, setCategory] = useState('');
   const [quality, setQuality] = useState('');
   /**
+   * A batch number, typed or picked.
+   *
+   * Free text with the known numbers behind it rather than a dropdown of the
+   * lot: the plant has hundreds and somebody looking one up has it written on
+   * a sack in front of them. The list is there so a half-remembered number
+   * completes rather than so it has to be hunted for.
+   */
+  const [batch, setBatch] = useState('');
+  /**
    * The shift is the one picked above the tab strip, not a second choice.
    *
    * It used to be its own filter starting on "Both shifts", which made the
@@ -534,6 +543,7 @@ export function AdminHistoryPage() {
     machineId?: string;
     category?: string;
     quality?: string;
+    batch?: string;
     shift?: string;
   } = useMemo(
     () => ({
@@ -541,9 +551,10 @@ export function AdminHistoryPage() {
       machineId: machineId || undefined,
       category: category || undefined,
       quality: quality || undefined,
+      batch: batch.trim() || undefined,
       shift: shift || undefined,
     }),
-    [span, day, from, to, machineId, category, quality, shift],
+    [span, day, from, to, machineId, category, quality, batch, shift],
   );
 
   useEffect(() => {
@@ -728,6 +739,33 @@ export function AdminHistoryPage() {
               ))}
             </select>
           </div>
+
+          <div className="f">
+            <label htmlFor="h-batch">Batch</label>
+            {/*
+              Typed, with the numbers on record behind it. A dropdown of the
+              lot would be hundreds long, and somebody looking a batch up has
+              it written on a sack in front of them - the list is so a
+              half-remembered number completes, not so it has to be hunted.
+
+              A batch is found even where the run names it beside another:
+              the plant writes "3134,3140" on a pass that worked both, and
+              being shown some of a batch's runs is worse than none, because
+              the answer looks complete. See batchClause on the server.
+            */}
+            <input
+              id="h-batch"
+              list="h-batches"
+              value={batch}
+              placeholder="any batch"
+              onChange={(e) => setBatch(e.target.value)}
+            />
+            <datalist id="h-batches">
+              {filters?.batches?.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+          </div>
         </div>
 
         <div className="chips mt-2.5">
@@ -772,8 +810,8 @@ export function AdminHistoryPage() {
         {total > rows.length && (
           <div className="sub mt-2">
             Showing the {rows.length} most recent of {total} matching runs, and the totals above
-            are of those {rows.length} — narrow the period, the machine or the grade to bring the
-            rest in. The export covers all {total} whatever is on screen.
+            are of those {rows.length} — narrow the period, the machine, the grade or the batch to bring
+            the rest in. The export covers all {total} whatever is on screen.
           </div>
         )}
       </div>

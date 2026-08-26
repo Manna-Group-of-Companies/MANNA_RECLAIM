@@ -157,3 +157,47 @@ test('the pickers offer the categories the record actually holds', async (t) => 
   assert.equal(machines.find((m) => m.id === 'CRK').category, 'cracker');
   assert.equal(machines.find((m) => m.id === 'PR2').category, 'refiners');
 });
+
+test('a batch search finds the runs that name it beside another', async (t) => {
+  const api = await startApi({
+    tables: {
+      machines: PLANT,
+      runs: [
+        run('b-1', { batch_no: '3134' }),
+        // A pass that worked two batches - the plant writes both on the run.
+        run('b-2', { batch_no: '3134,3140' }),
+        run('b-3', { batch_no: '3140,3134' }),
+        run('b-4', { batch_no: '3140' }),
+        // The ones a contains-match would wrongly drag in.
+        run('b-5', { batch_no: '13134' }),
+        run('b-6', { batch_no: '31340' }),
+      ],
+    },
+  });
+  t.after(() => api.stop());
+
+  /*
+   * Being shown some of a batch's runs is worse than being shown none: the
+   * answer looks complete. So the two passes that name 3134 alongside 3140
+   * count, and 13134 does not - a batch search that returns another batch's
+   * runs is the one failure this must not have.
+   */
+  assert.deepEqual(await ids(api, 'batch=3134'), ['b-1', 'b-2', 'b-3']);
+  assert.deepEqual(await ids(api, 'batch=3140'), ['b-2', 'b-3', 'b-4']);
+});
+
+test('a batch search narrows with everything else', async (t) => {
+  const api = await startApi({
+    tables: {
+      machines: PLANT,
+      runs: [
+        run('m-1', { batch_no: '3134', machine_id: 'GRD_K' }),
+        run('m-2', { batch_no: '3134', machine_id: 'CRK', machine: 'Cracker' }),
+      ],
+    },
+  });
+  t.after(() => api.stop());
+
+  // The or-clause is one filter among the others, not instead of them.
+  assert.deepEqual(await ids(api, 'batch=3134&category=grinders'), ['m-1']);
+});
