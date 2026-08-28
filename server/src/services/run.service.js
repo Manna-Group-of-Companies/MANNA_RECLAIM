@@ -55,6 +55,25 @@ const sourcesOf = (row) =>
     .map((value) => (value == null ? '' : String(value).trim()))
     .filter(Boolean);
 
+/**
+ * The mix a sheet sends, made safe to store.
+ *
+ * The first column is not a free field: it is the batch the run is filed under.
+ * So it is taken from the run rather than from the request, and a sheet that
+ * sends the numbers in the wrong order - or sends the lead twice - cannot
+ * re-file the run by way of its mix.
+ *
+ * One batch is no mix. That is what `batch_no` already says, and writing it
+ * into src1 on its own would leave a run reading as mixed with nothing.
+ */
+const mixColumns = (sources, batchNo) => {
+  const lead = String(batchNo ?? '').trim();
+  const tailings = (Array.isArray(sources) ? sources : [])
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && value !== lead);
+  return sourceColumns(lead && tailings.length ? [lead, ...tailings] : []);
+};
+
 /** The same list on the way in: de-duplicated, and capped at the four columns. */
 const sourceColumns = (sources) => {
   const list = (Array.isArray(sources) ? sources : [])
@@ -1252,6 +1271,21 @@ export const runService = {
       // a figure arriving against a grinder is a sheet sent by something that
       // has not been told which machine it is stopping.
       ...pickingPatch(run, payload),
+      /*
+       * And the batches that went through together.
+       *
+       * Asked at both ends of the run because only one of them is the moment
+       * the crew can answer. A pass is started on the batch that is ready and
+       * the tailings of the last one go in when they are tipped, which is after
+       * the machine is running - so a mix that could only be said at the start
+       * sheet was a mix said before it had happened.
+       *
+       * Only the lines that merge legs would lose this, and none of them refine
+       * a batch: a run that mixes keeps its own row - see mergesByShift().
+       */
+      ...(payload.sources !== undefined
+        ? mixColumns(payload.sources, run.batch_no)
+        : {}),
     };
 
     const record = await shiftRecordFor(run);
@@ -1364,18 +1398,14 @@ export const runService = {
      *     batch it is no longer filed under.
      */
     if (payload.sources !== undefined) {
-      const list = (Array.isArray(payload.sources) ? payload.sources : [])
-        .map((value) => String(value ?? '').trim())
-        .filter(Boolean);
-      Object.assign(patch, sourceColumns(list.length > 1 ? list : []));
+      Object.assign(
+        patch,
+        mixColumns(payload.sources, patch.batch_no ?? run.batch_no),
+      );
     } else if (patch.batch_no !== undefined) {
       const standing = sourcesOf(run);
       if (standing.length > 1) {
-        const lead = String(patch.batch_no ?? '').trim();
-        Object.assign(
-          patch,
-          sourceColumns(lead ? [lead, ...standing.slice(1)] : []),
-        );
+        Object.assign(patch, mixColumns(standing.slice(1), patch.batch_no));
       }
     }
 

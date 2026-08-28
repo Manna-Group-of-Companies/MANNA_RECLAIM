@@ -378,6 +378,20 @@ export function MachinesPage() {
   const [tyre, setTyre] = useState<TyreType | null>(null);
   const [outWeight, setOutWeight] = useState('');
   const [stop, setStop] = useState(blankStop);
+  /**
+   * The batches mixed into the one a running pass is filed under.
+   *
+   * The start sheet asks for this too, and asking again here is the point: a
+   * pass is started on the batch that is ready and the tailings of the last one
+   * go in when they are tipped, which is after the machine is running. A mix
+   * that could only be named at the start sheet was a mix named before it had
+   * happened - so the crew either guessed or, as five runs in August show, typed
+   * both numbers into the batch box with a comma between them.
+   *
+   * Opens on whatever the run already carries, so stopping a pass that was
+   * started with two batches does not quietly drop the second.
+   */
+  const [stopMix, setStopMix] = useState<string[]>([]);
   /** Autoclave only: what it is being charged with, and when. */
   const [form, setForm] = useState<AutoclaveForm | null>(null);
   const [load, setLoad] = useState(blankLoad);
@@ -657,6 +671,25 @@ export function MachinesPage() {
    * anybody has to add.
    */
   const stopIsCracker = Boolean(stopping) && isCracker(stopping?.machine_id);
+  /**
+   * Whether this run could have had a second batch going through it: the
+   * refining passes, which is where the plant mixes. A shift on the grinding or
+   * coarse line has no batch at all, a press and a bench make finished goods,
+   * and an autoclave charge is one batch by definition - it is the vessel that
+   * makes it.
+   */
+  const stopCanMix =
+    Boolean(stopping?.batch_no) &&
+    !stopShiftwise &&
+    !stopIsAutoclave &&
+    !stopCountsPieces;
+  /**
+   * The open batches a stopping pass could have taken tailings from - out of
+   * the vessel, and not the batch the run is already filed under.
+   */
+  const stopMixable = stopCanMix
+    ? pickableBatches.filter((b) => b.autoclave_done && b.ref !== stopping?.batch_no)
+    : [];
   // A machine that weighs at the sheet asks for the figure here; one weighed
   // shiftwise is told where the figure gets entered instead.
   const stopWeighs = stopMachine ? Boolean(stopMachine.weigh) && !stopShiftwise : Boolean(stopping?.needs_weigh);
@@ -1163,6 +1196,15 @@ export function MachinesPage() {
           stoppedAt,
           outWeight: stopIsAutoclave ? null : weightValue,
           workers: asNumber(stop.workers),
+          // The batches that went through together. Sent whenever the sheet
+          // asked - an emptied list is the crew taking a mix back off, which is
+          // a different thing from a sheet that never asked, and the server
+          // tells the two apart by the field being absent.
+          sources: stopCanMix
+            ? stopMix.length
+              ? [String(sheet.run.batch_no ?? ''), ...stopMix]
+              : []
+            : undefined,
           firewoodKg: stopIsAutoclave ? asNumber(unload.firewood) : null,
           /*
            * The cycle's three clock times, all read against the discharge date -
@@ -1507,6 +1549,9 @@ export function MachinesPage() {
                         ? String(coarse ? FIREWOOD_KG_PER_COARSE_LOAD : FIREWOOD_KG_PER_LOAD)
                         : '',
                     });
+                    // The mix as the run already has it: the batch it is filed
+                    // under leads the stored list, so the tailings are the rest.
+                    setStopMix((r.sources ?? []).slice(1));
                     setSheet({ kind: 'stop', run: r });
                   }}
                   onPause={(r, paused) => {
@@ -2363,6 +2408,71 @@ export function MachinesPage() {
                   vessel standing open being emptied and re-charged. Leave either blank if it
                   was not noted.
                 </div>
+              </>
+            )}
+
+            {/*
+              The batches that went through together, asked at the machine as it
+              is stopped.
+
+              The start sheet asks too, and this is the same question at the
+              moment the crew can actually answer it: a pass is started on the
+              batch that is ready, and the tailings of the last one go in when
+              they are tipped. Whatever was picked at the start is already lit,
+              so stopping a pass that began with two batches does not drop the
+              second by saying nothing.
+
+              "Nothing mixed" is a tile rather than an empty grid, so skipping it
+              is an answer somebody gave rather than a question they missed.
+            */}
+            {stopCanMix && (
+              <>
+                <SheetLabel>
+                  Mixed in{' '}
+                  <span className="muted normal-case tracking-normal">
+                    — other batches that went through with {stopping.batch_no}
+                  </span>
+                </SheetLabel>
+                {stopMixable.length ? (
+                  <PickGrid>
+                    <Pick
+                      title="Nothing mixed"
+                      sub="just this batch"
+                      selected={!stopMix.length}
+                      onClick={() => setStopMix([])}
+                    />
+                    {stopMixable.map((b) => (
+                      <Pick
+                        key={'stopmix-' + b.id}
+                        title={b.ref}
+                        dot={b.grade ? gradeVar(b.grade) : undefined}
+                        sub={<BatchPickSub batch={b} />}
+                        selected={stopMix.includes(b.ref)}
+                        onClick={() => {
+                          if (stopMix.includes(b.ref)) {
+                            setStopMix(stopMix.filter((ref) => ref !== b.ref));
+                          } else if (stopMix.length >= 3) {
+                            // Four columns is all the record has room for, and
+                            // one of them is the batch it is filed under.
+                            notify('Up to 4 batches per mix', 'warn');
+                          } else {
+                            setStopMix([...stopMix, b.ref]);
+                          }
+                        }}
+                      />
+                    ))}
+                  </PickGrid>
+                ) : (
+                  <div className="hint">No other batch is open to have gone through with it.</div>
+                )}
+                {stopMix.length > 0 && (
+                  <div className="hint">
+                    Filed under {stopping.batch_no} — {stopMix.join(' and ')}{' '}
+                    {stopMix.length === 1 ? 'goes' : 'go'} through with it as tailings. The run
+                    stays recorded against {stopping.batch_no}, which is what the batch card, the
+                    weighing and the costing all follow.
+                  </div>
+                )}
               </>
             )}
 

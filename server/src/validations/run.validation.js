@@ -58,6 +58,15 @@ export const startRunSchema = z.object({
  */
 export const stopRunSchema = z.object({
   stoppedAt: z.string().datetime().optional(),
+  /**
+   * The batches that went through together, as the machine is stopped.
+   *
+   * The same list the start sheet sends, asked again at the other end of the
+   * run because that is when the crew know the answer: the second batch goes in
+   * when it is ready, which is usually after the pass has begun. The batch the
+   * run is filed under is not moved by it - see mixColumns().
+   */
+  sources: z.array(z.string().max(60)).max(4).optional().nullable(),
   outWeight: z.coerce.number().min(0).optional().nullable(),
   workers: z.coerce.number().int().min(0).max(20).optional().nullable(),
   remarks: z.string().max(500).optional().nullable(),

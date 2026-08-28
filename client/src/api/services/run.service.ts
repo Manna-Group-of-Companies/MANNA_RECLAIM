@@ -50,6 +50,14 @@ export interface StartRunPayload {
 export interface StopRunPayload {
   /** The unloading time an autoclave sheet asks for; blank means now. */
   stoppedAt?: string;
+  /**
+   * The batches that went through together, the one the run is filed under
+   * first. Asked at the stop as well as at the start, because the second batch
+   * goes in when it is ready - which is usually after the pass has begun. An
+   * empty list takes a mix back off; leaving the field out says the sheet never
+   * asked.
+   */
+  sources?: string[] | null;
   outWeight?: number | null;
   workers?: number | null;
   remarks?: string | null;

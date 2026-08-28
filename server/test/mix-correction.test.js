@@ -109,3 +109,43 @@ test('a run with no mix is left alone when its batch number is corrected', async
 
   assert.deepEqual(after.sources, [], 'nothing invented for a run that never mixed');
 });
+
+test('the machine can be told at the stop, which is when the crew know', async (t) => {
+  const api = await boot();
+  t.after(() => api.stop());
+
+  // Started on the one batch that was ready. The tailings of the last pass go
+  // in ten minutes later, which is the ordinary way round and was unsayable.
+  const run = await start();
+  const stopped = await runService.stop(run.id, {
+    outWeight: 900,
+    sources: ['3125', '3123'],
+  });
+
+  assert.deepEqual(stopped.sources, ['3125', '3123']);
+  assert.equal(stopped.ended_at != null, true, 'and it still stopped');
+});
+
+test('a stop sheet cannot re-file the run by way of its mix', async (t) => {
+  const api = await boot();
+  t.after(() => api.stop());
+
+  const run = await start();
+  // src1 is the batch the run is filed under, not a free field: a list naming
+  // some other batch first leaves the run where it was.
+  const stopped = await runService.stop(run.id, { sources: ['3123', '3125'] });
+
+  assert.equal(stopped.batch_no, '3125');
+  assert.deepEqual(stopped.sources, ['3125', '3123'], 'the run leads its own mix');
+});
+
+test('a stop that says nothing about the mix leaves the one it was started with', async (t) => {
+  const api = await boot();
+  t.after(() => api.stop());
+
+  const run = await start();
+  await runService.edit(run.id, { sources: ['3125', '3123'] });
+  const stopped = await runService.stop(run.id, { outWeight: 900 });
+
+  assert.deepEqual(stopped.sources, ['3125', '3123']);
+});

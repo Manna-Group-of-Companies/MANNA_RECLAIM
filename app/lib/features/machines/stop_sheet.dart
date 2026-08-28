@@ -77,6 +77,17 @@ Future<StopResult?> showStopSheet({
   /// anybody has to add.
   final crackerShift = isCracker(run.machineId);
 
+  /// Whether this run could have had a second batch going through it: the
+  /// refining passes, which is where the plant mixes. A shift on the grinding
+  /// or coarse line has no batch at all, a press and a bench make finished
+  /// goods, and an autoclave charge is one batch by definition - it is the
+  /// vessel that makes it.
+  final canMix =
+      (run.batchNo ?? '').trim().isNotEmpty &&
+      !shiftwise &&
+      !isAutoclave &&
+      !countsPieces;
+
   // A machine that weighs at the sheet asks for the figure here; one weighed
   // shiftwise is told where the figure gets entered instead.
   final weighsHere = machine != null
@@ -113,6 +124,20 @@ Future<StopResult?> showStopSheet({
 
   final pieces = TextEditingController();
   final flash = TextEditingController();
+
+  /// The batches mixed into the one this pass is filed under.
+  ///
+  /// The start sheet asks for this too, and asking again here is the point: a
+  /// pass is started on the batch that is ready and the tailings of the last
+  /// one go in when they are tipped, which is after the machine is running. A
+  /// mix that could only be named at the start sheet was a mix named before it
+  /// had happened - so the crew either guessed or, as five runs in August show,
+  /// typed both numbers into the batch box with a comma between them.
+  ///
+  /// Opens on whatever the run already carries - the batch it is filed under
+  /// leads the stored list, so the tailings are the rest - which is what keeps
+  /// stopping a pass from quietly dropping a mix picked at the start.
+  var mix = run.sources.skip(1).toList();
 
   // A lot stopped and started again inside the shift is one record, so the
   // sheet opens on the note the earlier stop left rather than asking twice.
@@ -215,6 +240,14 @@ Future<StopResult?> showStopSheet({
 
       final tally = run.weighEntries;
 
+      // The open batches this pass could have taken tailings from: out of the
+      // vessel, and not the batch it is already filed under.
+      final mixable = canMix
+          ? batches.refinable
+                .where((b) => b.ref != (run.batchNo ?? '').trim())
+                .toList()
+          : const <Batch>[];
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -247,6 +280,67 @@ Future<StopResult?> showStopSheet({
               value: unloadTime,
               onChanged: (v) => setSheetState(() => unloadTime = v),
             ),
+          ],
+
+          // The batches that went through together, asked at the machine as it
+          // is stopped.
+          //
+          // The start sheet asks too, and this is the same question at the
+          // moment the crew can actually answer it: a pass is started on the
+          // batch that is ready, and the tailings of the last one go in when
+          // they are tipped. Whatever was picked at the start is already lit,
+          // so stopping a pass that began with two batches does not drop the
+          // second by saying nothing.
+          //
+          // "Nothing mixed" is a tile rather than an empty grid, so skipping it
+          // is an answer somebody gave rather than a question they missed.
+          if (canMix) ...[
+            SheetLabel(
+              'Mixed in',
+              note: '— other batches that went through with ${run.batchNo}',
+            ),
+            if (mixable.isEmpty)
+              const Hint('No other batch is open to have gone through with it.')
+            else
+              PickGrid(
+                children: [
+                  Pick(
+                    title: 'Nothing mixed',
+                    sub: 'just this batch',
+                    selected: mix.isEmpty,
+                    onTap: () => setSheetState(() => mix = []),
+                  ),
+                  for (final b in mixable)
+                    Pick(
+                      title: b.ref,
+                      mono: true,
+                      dot: b.grade == null ? null : qualityColour[b.grade],
+                      sub: b.formulation,
+                      selected: mix.contains(b.ref),
+                      onTap: () {
+                        if (mix.contains(b.ref)) {
+                          setSheetState(
+                            () => mix = mix.where((r) => r != b.ref).toList(),
+                          );
+                        } else if (mix.length >= 3) {
+                          // Four columns is all the record has room for, and
+                          // one of them is the batch it is filed under.
+                          ui.notify('Up to 4 batches per mix', ToastKind.warn);
+                        } else {
+                          setSheetState(() => mix = [...mix, b.ref]);
+                        }
+                      },
+                    ),
+                ],
+              ),
+            if (mix.isNotEmpty)
+              Hint(
+                'Filed under ${run.batchNo} — ${mix.join(' and ')} '
+                '${mix.length == 1 ? 'goes' : 'go'} through with it as '
+                'tailings. The run stays recorded against ${run.batchNo}, '
+                'which is what the batch card, the weighing and the costing '
+                'all follow.',
+              ),
           ],
 
           if (withMeters) ...[
@@ -607,6 +701,8 @@ Future<StopResult?> showStopSheet({
                     hourDiff: hourDiff.text,
                     pieces: pieces.text,
                     flash: flash.text,
+                    canMix: canMix,
+                    mix: mix,
                     remarks: remarks.text,
                     pickLabourers: pickLabourers.text,
                     pickHours: pickHours.text,
@@ -825,6 +921,13 @@ Future<bool> _confirmStop({
   required String hourDiff,
   required String pieces,
   required String flash,
+
+  /// Whether the sheet asked about a mix at all, and what it was left on. An
+  /// emptied list is the crew taking a mix back off, which is a different thing
+  /// from a sheet that never asked - so the field is left out entirely when it
+  /// did not.
+  required bool canMix,
+  required List<String> mix,
   required String remarks,
   required String pickLabourers,
   required String pickHours,
@@ -895,6 +998,13 @@ Future<bool> _confirmStop({
     // sheet, and the server ignores it from anywhere else.
     'pickingLabourers': crackerShift ? asNumber(pickLabourers) : null,
     'pickingHours': crackerShift ? asNumber(pickHours) : null,
+    // The batches that went through together. The one the run is filed under
+    // leads the list the server stores; the server takes it off the run rather
+    // than off this sheet, so a mix cannot re-file the pass.
+    if (canMix)
+      'sources': mix.isEmpty
+          ? <String>[]
+          : [run.batchNo!.trim(), ...mix],
   });
 
   if (logged == null) return false;
