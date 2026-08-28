@@ -135,9 +135,30 @@ export const registry = {
    */
   [TABLES.operators]: table('id', [
     'id', 'name', 'station', 'note', 'active', 'created_at', 'updated_at',
+    // The code the gate's punch reader knows this person by. An operator row
+    // carrying one is what makes a punch a production worker rather than
+    // somebody from the office - see migrations/0023.
+    'punch_code',
   ]),
   [TABLES.shiftOperators]: table('id', [
     'id', 'shift_date', 'shift', 'station', 'operator_id', 'operator',
+    'assigned_by', 'created_at', 'updated_at',
+  ]),
+
+  /**
+   * Who came through the gate, and where the supervisor put them.
+   *
+   * `local_date` and `local_time` are the device's own clock and are what the
+   * shift is derived from. The server runs in UTC: derive it from `punched_at`
+   * and every punch between half past midnight and half past five IST lands on
+   * the wrong shift, which is most of the night crew. See migrations/0023.
+   */
+  [TABLES.attendancePunches]: table('id', [
+    'id', 'device', 'code', 'name', 'punched_at', 'local_date', 'local_time',
+    'direction', 'shift_date', 'shift', 'created_at',
+  ]),
+  [TABLES.shiftLabour]: table('id', [
+    'id', 'shift_date', 'shift', 'code', 'operator_id', 'operator', 'station',
     'assigned_by', 'created_at', 'updated_at',
   ]),
 

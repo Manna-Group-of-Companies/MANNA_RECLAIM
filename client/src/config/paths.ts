@@ -5,6 +5,7 @@ export const userPaths = {
   root: '/',
   login: '/login',
   machines: '/machines',
+  labour: '/labour',
   batches: '/batches',
   weigh: '/weigh',
 

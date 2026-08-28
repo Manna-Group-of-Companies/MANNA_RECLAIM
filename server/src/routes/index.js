@@ -14,6 +14,7 @@ import maintenanceRoutes from './maintenance.routes.js';
 import reportRoutes from './report.routes.js';
 import operatorRoutes from './operator.routes.js';
 import syncRoutes from './sync.routes.js';
+import attendanceRoutes from './attendance.routes.js';
 import { dbInfo } from '../config/supabase.js';
 import { env } from '../config/env.js';
 import { ok } from '../utils/ApiResponse.js';
@@ -39,6 +40,12 @@ router.use('/batches', batchRoutes);
 router.use('/runs', runRoutes);
 router.use('/quality-tests', qualityRoutes);
 router.use('/stock', stockRoutes);
+
+/**
+ * Who came through the gate, and where the supervisor put them. The reader
+ * itself posts through /sync - this is the board that reads off it.
+ */
+router.use('/attendance', attendanceRoutes);
 router.use('/dispatches', dispatchRoutes);
 router.use('/customers', customerRoutes);
 router.use('/rates', rateRoutes);

@@ -3,6 +3,8 @@ import * as sapStock from '../controllers/sapStock.controller.js';
 import { machineToken } from '../middlewares/machineAuth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { sapStockSnapshot, sapDispatchSnapshot } from '../validations/sapStock.validation.js';
+import * as attendance from '../controllers/attendance.controller.js';
+import { punchWindow } from '../validations/attendance.validation.js';
 
 /**
  * The way in for machines rather than people.
@@ -44,6 +46,26 @@ router.post(
   machineToken,
   validate({ body: sapDispatchSnapshot }),
   sapStock.receiveDispatch,
+);
+
+/**
+ * A window of punches off the gate reader.
+ *
+ * The reader is an Identix K90+ID on the plant LAN at 192.168.1.40 and this API
+ * runs on a rack in another country: it cannot reach the device and never will,
+ * so the punches come the way the SAP figures do - a script inside the plant
+ * reads the machine and posts through this door.
+ *
+ * The same gate as the stock feeds, and the same reasoning about what a leaked
+ * token costs. What is behind this writes attendance and nothing else: somebody
+ * holding it could file a punch that did not happen, which the supervisor would
+ * see on the board at the start of the shift. It reads nothing at all.
+ */
+router.post(
+  '/attendance',
+  machineToken,
+  validate({ body: punchWindow }),
+  attendance.receive,
 );
 
 export default router;

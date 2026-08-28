@@ -21,6 +21,9 @@ interface Tab {
 /** The seven shop-floor tabs, in the prototype's order. */
 const tabs: Tab[] = [
   { to: userPaths.machines, label: 'Machines', icon: 'machines' },
+  // Who came in and where they are working - read at the start of a shift,
+  // before anything is started on a machine.
+  { to: userPaths.labour, label: 'Labour', icon: 'crew' },
   { to: userPaths.batches, label: 'Batches', icon: 'batches' },
   { to: userPaths.weigh, label: 'Weigh', icon: 'weigh', badge: 'weigh' },
 

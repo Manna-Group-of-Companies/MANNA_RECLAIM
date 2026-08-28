@@ -176,6 +176,16 @@ export const endpoints = {
      */
     machineLog: '/reports/machine-log.csv',
   },
+
+  /**
+   * Who came through the gate, and where the supervisor put them. The reader
+   * itself posts through /sync, which no browser ever calls.
+   */
+  attendance: {
+    shift: '/attendance/shift',
+    assign: '/attendance/assign',
+    claim: '/attendance/claim',
+  },
 } as const;
 
 export default endpoints;

@@ -1462,6 +1462,56 @@ export interface BatchRecipe {
  * fact about a crew. It is on the summary instead, where the buffer averages
  * out over the window.
  */
+/**
+ * Who came through the gate for one shift, and where the supervisor put them.
+ *
+ * `people` is the floor: a punch whose code matches an operator on the roster.
+ * `offRoster` is everybody else the gate saw - the office, the drivers, and any
+ * new hand the roster has not met yet. They are listed rather than filtered
+ * away, because a worker silently missing from the board works a shift nobody
+ * records.
+ */
+export interface LabourPerson {
+  code: string;
+  name: string;
+  deviceName: string | null;
+  operatorId: string | null;
+  onRoster: boolean;
+  active: boolean | null;
+  usualStation: string | null;
+  station: string | null;
+  assignedBy: string | null;
+  firstAt: string | null;
+  lastAt: string | null;
+  punches: { at: string; direction: string | null; device: string }[];
+}
+
+export interface LabourStation {
+  key: string;
+  label: string;
+  kind?: string;
+  /** False for Packing and Cleaning - real places to spend a shift, no machine. */
+  machine: boolean;
+  people: LabourPerson[];
+}
+
+export interface LabourBoard {
+  date: string;
+  shift: Shift;
+  people: LabourPerson[];
+  offRoster: LabourPerson[];
+  stations: LabourStation[];
+  /** Placed at a station that is not on the list any more - shown, not dropped. */
+  stray: LabourPerson[];
+  summary: {
+    punchedIn: number;
+    onFloor: number;
+    assigned: number;
+    unassigned: number;
+    offRoster: number;
+  };
+}
+
 export interface CoarseShift {
   day: string;
   shift: string;

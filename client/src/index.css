@@ -2890,6 +2890,117 @@
     font-family: var(--mono);
     font-size: 20px;
   }
+  /*
+    The labour board: a station, and the crew standing at it.
+
+    Built out of the same tokens as .pick and deliberately larger. This is read
+    at the start of a shift by somebody in gloves, standing next to a machine,
+    and every tap on it either puts a person somewhere or takes them off - so
+    the target is a whole card rather than a row in a list.
+  */
+  .stationbox {
+    border: 1.5px solid var(--line2);
+    border-radius: var(--r-sm);
+    background: var(--sunken);
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .stationhead {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    text-align: left;
+    padding: 13px 14px;
+    color: var(--ink);
+    background: transparent;
+  }
+  .stationhead b {
+    font-size: 15.5px;
+    font-weight: 700;
+  }
+  .stationhead small {
+    font-size: 11.5px;
+    color: var(--ink-faint);
+  }
+  /*
+    Only alive while somebody is picked. A station that could always be tapped
+    would be a station that does nothing nine times out of ten, and on a tablet
+    a control that sometimes does nothing reads as a broken one.
+  */
+  .stationhead.open {
+    border-left: 3px solid var(--brand);
+    background: var(--t-brand-bg);
+  }
+  .stationhead:disabled {
+    opacity: 1;
+  }
+  .stationcrew {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 14px 13px;
+  }
+  .crewchip {
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line2);
+    background: var(--card);
+    color: var(--ink);
+  }
+  .crewchip:active {
+    transform: scale(0.97);
+  }
+
+  /* Three counts across the top: who is here, who is placed, who is not. */
+  .tallies {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .tally {
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 11px;
+    text-align: center;
+  }
+  .tally b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .tally small {
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  /* Nobody left to place is the finished state, so the count only shouts while
+     there is something to do about it. */
+  .tally.warn b {
+    color: var(--warn);
+  }
+
+  .fieldrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+  .fld {
+    background: var(--sunken);
+    border: 1.5px solid var(--line2);
+    border-radius: var(--r-sm);
+    padding: 11px 12px;
+    color: var(--ink);
+    font-size: 15px;
+  }
+
   .ro {
     background: var(--sunken);
     border: 1px solid var(--line);

@@ -440,6 +440,8 @@ export const TABLES = {
    */
   operators: 'operators',
   shiftOperators: 'shift_operators',
+  attendancePunches: 'attendance_punches',
+  shiftLabour: 'shift_labour',
   /**
    * Stock as SAP holds it, and the record of each read of it.
    *
@@ -751,6 +753,31 @@ export const OPERATOR_STATIONS = [
 ];
 
 export const OPERATOR_STATION_KEYS = OPERATOR_STATIONS.map((s) => s.key);
+
+/**
+ * Where a pair of hands can be put for a shift, beyond the machines.
+ *
+ * The labour board is a different question from the roster above and takes a
+ * different list. The roster names who is answerable for a line - one name, and
+ * the incentive is paid on it - so its stations are lines. This is where every
+ * person who came through the gate actually spent the shift, and a supervisor
+ * deploying eleven people thinks in machines: two on the grinder, three on the
+ * special line's refiners, one on the cracker.
+ *
+ * So the board offers the machines themselves, and these. Packing and cleaning
+ * are work: they take hands off the lines for a whole shift, and a board that
+ * could not say so would show a supervisor assigning eleven people to fourteen
+ * machines and leave him wondering where the other six had gone. Neither is a
+ * row in `machines` and neither should be - nothing runs, nothing is weighed and
+ * nothing has a meter.
+ *
+ * Add to this list to add a station. It is the only place the board's
+ * off-machine stations are named.
+ */
+export const OFF_MACHINE_STATIONS = [
+  { key: 'PACKING', label: 'Packing', kind: 'packing' },
+  { key: 'CLEANING', label: 'Cleaning', kind: 'cleaning' },
+];
 
 /**
  * Which station's figures a machine's runs belong to.

@@ -1,5 +1,6 @@
 export { LoginPage } from './LoginPage';
 export { MachinesPage } from './MachinesPage';
+export { LabourPage } from './LabourPage';
 export { BatchesPage } from './BatchesPage';
 export { WeighPage } from './WeighPage';
 

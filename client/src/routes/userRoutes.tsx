@@ -7,6 +7,7 @@ import {
   BearingPage,
   HistoryPage,
   LogPage,
+  LabourPage,
   MachinesPage,
 
   QualityPage,
@@ -43,6 +44,13 @@ export const userRoutes: RouteObject[] = [
             element: <ProtectedRoute redirectTo={userPaths.login} allow={FLOOR_ROLES} />,
             children: [
               { path: 'machines', element: <MachinesPage /> },
+
+              // Who came through the gate, and where the supervisor put them.
+              // Floor work: the crew is paid an incentive on figures built out
+              // of a crew count, and who was counted is not a secret from the
+              // people being counted. Placing somebody is refused by the server
+              // for a worker account, not hidden here.
+              { path: 'labour', element: <LabourPage /> },
               { path: 'batches', element: <BatchesPage /> },
               { path: 'weigh', element: <WeighPage /> },
 
