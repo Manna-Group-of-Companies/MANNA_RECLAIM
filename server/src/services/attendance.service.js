@@ -48,21 +48,76 @@ const dayBefore = (date) => {
 };
 
 /**
- * Which shift a punch belongs to, from the device's own clock.
+ * How early a crew punches in, and how late they punch out.
  *
- * The night shift starts at half past eight in the evening and runs past
- * midnight, and the plant files it under the date it began - a night shift on
- * the 16th has runs stamped one in the morning on the 17th. So a punch before
- * half past eight in the morning belongs to the night before, and that is the
- * only case here that is not the obvious one. Get it wrong and the whole night
- * crew appears on the wrong day, half of them on a shift that has not started.
+ * Not guesses. 79,250 punches off the gate say the plant arrives in the 08:00
+ * hour and in the 20:00 hour - both of them *before* the shift they are coming
+ * for - and leaves in the same two hours. On 28 August the day crew punched in
+ * between 08:13 and 08:35 and the night crew punched out between 08:30 and
+ * 08:33, all around one boundary.
+ *
+ * Three hours before covers the four who arrive at six for a shift that starts
+ * at half past eight. Ninety minutes after covers a crew signing out late,
+ * without reaching a genuine mid-morning departure - somebody leaving at half
+ * past twelve went home from the shift they were on, not from the night before.
  */
-export function shiftOfPunch(localDate, localTime) {
+const EARLY_IN_MIN = 180;
+const LATE_OUT_MIN = 90;
+
+/**
+ * Which shift a punch belongs to, from the device's own clock and which way
+ * through the gate it was.
+ *
+ * The night runs half past eight in the evening to half past eight in the
+ * morning and the plant files it under the date it began, so a punch at ten past
+ * midnight belongs to yesterday's night shift.
+ *
+ * WHICH WAY THROUGH THE GATE IS THE WHOLE THING, and the first version of this
+ * did not ask. It put a punch on the shift that contained it, which is wrong for
+ * most of the plant most days: nobody arrives exactly at half past eight. On the
+ * first day of real data that rule would have filed 32 of 49 punches on the
+ * wrong shift - the entire day crew, who punched in between 08:13 and 08:29, on
+ * to the night shift that had just ended.
+ *
+ * So a punch in shortly BEFORE a shift starts belongs to the shift being
+ * arrived for, and a punch out shortly AFTER one belongs to the shift being
+ * left. Both windows are one-sided on purpose: an arrival is never late for a
+ * shift that has not started, and a departure is never early for one that has
+ * not ended.
+ *
+ * With no direction recorded it falls back to plain containment, which is the
+ * best a reader that does not say can support.
+ */
+export function shiftOfPunch(localDate, localTime, direction) {
   const mins = minutesOf(localTime);
-  if (mins >= SHIFT_WINDOW.dayStart && mins < SHIFT_WINDOW.dayEnd) {
-    return { shiftDate: localDate, shift: SHIFTS.DAY };
+  const { dayStart, dayEnd } = SHIFT_WINDOW;
+  const way = String(direction ?? '').trim().toLowerCase();
+
+  if (way === 'in') {
+    const beforeDay = dayStart - mins;
+    if (beforeDay > 0 && beforeDay <= EARLY_IN_MIN) {
+      return { shiftDate: localDate, shift: SHIFTS.DAY };
+    }
+    const beforeNight = dayEnd - mins;
+    if (beforeNight > 0 && beforeNight <= EARLY_IN_MIN) {
+      return { shiftDate: localDate, shift: SHIFTS.NIGHT };
+    }
   }
-  if (mins >= SHIFT_WINDOW.dayEnd) return { shiftDate: localDate, shift: SHIFTS.NIGHT };
+
+  if (way === 'out') {
+    const afterDayStart = mins - dayStart;
+    if (afterDayStart >= 0 && afterDayStart <= LATE_OUT_MIN) {
+      return { shiftDate: dayBefore(localDate), shift: SHIFTS.NIGHT };
+    }
+    const afterNightStart = mins - dayEnd;
+    if (afterNightStart >= 0 && afterNightStart <= LATE_OUT_MIN) {
+      return { shiftDate: localDate, shift: SHIFTS.DAY };
+    }
+  }
+
+  // The shift the punch simply falls inside.
+  if (mins >= dayStart && mins < dayEnd) return { shiftDate: localDate, shift: SHIFTS.DAY };
+  if (mins >= dayEnd) return { shiftDate: localDate, shift: SHIFTS.NIGHT };
   return { shiftDate: dayBefore(localDate), shift: SHIFTS.NIGHT };
 }
 
@@ -113,7 +168,10 @@ export const attendanceService = {
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const { shiftDate, shift } = shiftOfPunch(localDate, localTime);
+      // Which way through the gate, which is what decides the shift a punch
+      // belongs to - see shiftOfPunch.
+      const direction = row.direction ? String(row.direction).trim().toLowerCase() : null;
+      const { shiftDate, shift } = shiftOfPunch(localDate, localTime, direction);
       wanted.push({
         device,
         code,
@@ -121,7 +179,7 @@ export const attendanceService = {
         punched_at: punchedAt,
         local_date: localDate,
         local_time: localTime,
-        direction: row.direction ? String(row.direction).toLowerCase() : null,
+        direction,
         shift_date: shiftDate,
         shift,
       });

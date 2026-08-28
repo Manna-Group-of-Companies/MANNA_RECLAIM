@@ -43,3 +43,10 @@ Thumbs.db
 # would be a snapshot of one afternoon's yard going stale in the repository,
 # and read months later as though it were current.
 sap-report.html
+
+# The gate reader's own data - 437 people's names and movements. Read onto
+# disk by scripts/punch-read.py to be imported; never committed.
+scripts/punches.json
+
+# Word lock files - present whenever a document is open.
+~$*

@@ -52,6 +52,56 @@ test('a punch after midnight belongs to the night before', async () => {
   assert.deepEqual(shiftOfPunch('2026-03-01', '02:00'), { shiftDate: '2026-02-28', shift: 'Night' });
 });
 
+test('an arrival just before the shift starts is that shift, not the one ending', async () => {
+  /*
+   * The case the first version of this got wrong, and it was not a corner: on
+   * 28 August 2026 the day crew punched in between 08:13 and 08:29 and the
+   * night crew punched out between 08:30 and 08:33, all around one boundary.
+   * Counted by containment alone, 32 of that day's 49 punches went to the wrong
+   * shift - the whole day crew filed on to the night that had just ended.
+   *
+   * Nobody arrives at exactly half past eight. 79,250 punches off the gate peak
+   * in the 08:00 hour and the 20:00 hour, both of them before the shift being
+   * come in for.
+   */
+  assert.deepEqual(shiftOfPunch('2026-08-28', '08:15', 'in'), { shiftDate: '2026-08-28', shift: 'Day' });
+  assert.deepEqual(shiftOfPunch('2026-08-28', '08:29', 'in'), { shiftDate: '2026-08-28', shift: 'Day' });
+  // The night crew coming in at eight in the evening, before their 20:30 start.
+  assert.deepEqual(shiftOfPunch('2026-08-28', '20:05', 'in'), { shiftDate: '2026-08-28', shift: 'Night' });
+  // And a genuine early bird - four of them punch in just before six.
+  assert.deepEqual(shiftOfPunch('2026-08-28', '05:57', 'in'), { shiftDate: '2026-08-28', shift: 'Day' });
+});
+
+test('a departure just after the next shift starts is the shift being left', async () => {
+  // Fifteen people punched out between 08:30 and 08:33 on 28 August. They had
+  // just worked the night of the 27th; they had not worked one minute of the
+  // day shift they were walking out of.
+  assert.deepEqual(shiftOfPunch('2026-08-28', '08:31', 'out'), { shiftDate: '2026-08-27', shift: 'Night' });
+  assert.deepEqual(shiftOfPunch('2026-08-28', '08:33', 'out'), { shiftDate: '2026-08-27', shift: 'Night' });
+  // The day crew signing out a few minutes after the night crew take over.
+  assert.deepEqual(shiftOfPunch('2026-08-28', '20:35', 'out'), { shiftDate: '2026-08-28', shift: 'Day' });
+  // A night ending well before the handover is still that night.
+  assert.deepEqual(shiftOfPunch('2026-08-28', '06:26', 'out'), { shiftDate: '2026-08-27', shift: 'Night' });
+});
+
+test('a departure in the middle of a shift is not dragged to the night before', async () => {
+  /*
+   * The window after a boundary is ninety minutes, not any length. Somebody
+   * leaving at half past twelve went home from the shift they were on - reach
+   * further and a half day becomes a night shift nobody worked.
+   */
+  assert.deepEqual(shiftOfPunch('2026-08-27', '12:30', 'out'), { shiftDate: '2026-08-27', shift: 'Day' });
+  assert.deepEqual(shiftOfPunch('2026-08-27', '17:00', 'out'), { shiftDate: '2026-08-27', shift: 'Day' });
+});
+
+test('with no direction recorded it falls back to the shift that contains it', async () => {
+  // Some readers are not configured to say which way through the gate. It is
+  // the best a device that does not say can support, and it is why the sync is
+  // asked for the direction whenever the device has one.
+  assert.deepEqual(shiftOfPunch('2026-08-29', '00:10'), { shiftDate: '2026-08-28', shift: 'Night' });
+  assert.deepEqual(shiftOfPunch('2026-08-28', '14:05'), { shiftDate: '2026-08-28', shift: 'Day' });
+});
+
 const punch = (code, time, over = {}) => ({
   code, name: `Person ${code}`, date: '2026-08-28', time, ...over,
 });

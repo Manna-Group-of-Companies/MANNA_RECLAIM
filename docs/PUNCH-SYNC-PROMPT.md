@@ -16,23 +16,25 @@ reader on this LAN and posts them to the MANNA RECLAIM API.
 - **Where it is:** the gate. Everybody who comes into the plant punches on it —
   production workers, the office, drivers, management.
 
-I do not know what protocol it speaks. Most Indian-market fingerprint readers of
-this class are ZKTeco-protocol compatible on **TCP/UDP port 4370**, and the
-`pyzk` library (`pip install pyzk`) talks to them, so try that first. Do not
-assume it: check what actually answers before writing the whole script around a
-guess.
+The device has already been identified from inside the plant, so you do not have
+to work it out:
 
-Work it out in this order and tell me what you find:
+- **Protocol:** ZKTeco, TCP port **4370**. `pip install pyzk` and `ZK(ip,
+  port=4370, timeout=20, password=0)` connects.
+- **Reports itself as:** name `x 2008`, firmware `Ver 6.60 Sep 19 2019`, platform
+  `ZLM60_TFT`, serial `CGKK211561350`.
+- **Holds:** 437 enrolled users and about 79,000 attendance records going back to
+  June 2023. Its clock is correct against the wall clock.
+- **Direction:** `attendance.punch` is `0` for **in** and `1` for **out**. This
+  has been confirmed against the whole log - the two values split almost exactly
+  in half, the zeros peak in the hour before each shift starts and the ones in
+  the hour after. Send it; the API decides which shift a punch belongs to from
+  it, and gets the answer wrong for most of the plant without it.
 
-1. Is it up — `ping 192.168.1.40`.
-2. What is open — try 4370 first, then 80 and 8000. Some of these devices also
-   serve a small web page that names the firmware, which settles the protocol
-   faster than anything else.
-3. If 4370 answers, try `pyzk`: connect, read the device name and firmware, read
-   the user list, read the attendance log.
-4. If it is not ZK-protocol, say so and tell me what it looks like instead
-   rather than guessing at a library. There is a real chance this needs the
-   vendor's SDK, and I would rather know that than have a script that half works.
+There is a working read-only reader in this repository at
+`server/scripts/punch-read.py`. Start from it rather than from scratch - it
+already does the connect, the user list, the log, the direction mapping and the
+JSON shape. What it does not do is post: that is the part to write.
 
 **Read only. This is important.** `pyzk` and every SDK like it can enrol users,
 change the clock, and — the dangerous one — **clear the attendance log**
