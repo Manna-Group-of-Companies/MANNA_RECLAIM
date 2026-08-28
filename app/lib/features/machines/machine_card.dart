@@ -282,6 +282,18 @@ class _MachineCardState extends State<MachineCard> {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           if (run.batchNo != null) BatchRef(run.batchNo!),
+                          // And the batches going through with it. Picked at
+                          // the machine and then nowhere to be seen: the card
+                          // led with the batch the run is filed under, which is
+                          // one of two numbers on a mixed pass, so a pass
+                          // carrying another batch's tailings read as a pass on
+                          // one. Apart from the batch rather than joined onto
+                          // it, so the number the record keys on still leads.
+                          if (run.sources.length > 1)
+                            FormChip(
+                              '+ ${run.sources.skip(1).join(' + ')}',
+                              colour: T.ember,
+                            ),
                           if (run.formulation != null)
                             FormChip(run.formulation!),
                           // A press says what it is moulding. A sleeve or loop

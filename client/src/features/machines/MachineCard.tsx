@@ -164,6 +164,25 @@ export function MachineCard({
           <div className="runline">
             <div className="what">
               {run.batch_no && <BatchRef>{run.batch_no}</BatchRef>}
+              {/*
+                And the batches going through with it.
+
+                Picked at the machine and then nowhere to be seen: the card led
+                with the batch the run is filed under, which is one of two
+                numbers on a mixed pass. A crew walking the line reads these
+                cards to know what each machine is on, and a pass carrying the
+                tailings of another batch was reading as a pass on one.
+
+                Kept apart from the batch itself rather than joined into one
+                string, and in the colour the plant already reads as "and this
+                went in too", so the number the record keys on is still the one
+                that leads.
+              */}
+              {(run.sources?.length ?? 0) > 1 && (
+                <FormChip style={{ color: 'var(--ember)' }}>
+                  + {run.sources!.slice(1).join(' + ')}
+                </FormChip>
+              )}
               {run.formulation && <FormChip>{run.formulation}</FormChip>}
               {/* A press says what it is moulding, and what it is moulding it at.
                   A sleeve or loop lot already leads with its batch number above,
