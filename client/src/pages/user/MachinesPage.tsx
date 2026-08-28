@@ -2079,59 +2079,22 @@ export function MachinesPage() {
                 </PickGrid>
 
                 {/*
-                  And what is mixed into it, as a list of its own.
+                  Which of the lit tiles the run is filed under.
 
-                  Several batches go into one grade often enough that the plant
-                  has a word for it, and this used to be a second tap on the
-                  grid above - which lit two tiles identically and said nothing
-                  about which the run was filed under. Half the plant found it
-                  and half did not: in August four jobs recorded the mix and two
-                  were typed into the batch box with a comma between them,
-                  which is a shape no report can read.
-
-                  So it is asked separately, after there is something to mix
-                  into, and the batch already picked is not on the list -
-                  nothing is mixed into itself. Nothing mixed is a tile rather
-                  than an empty grid, so that skipping it is an answer somebody
-                  gave rather than a question they did not notice.
+                  The second grid this replaced said that by standing apart: one
+                  list for the batch, one for what went through with it. The tap
+                  came back to the grid the batches are on, so the sentence is
+                  what carries it now - two tiles lit the same way say nothing
+                  about which the record keys on, and that one is the batch the
+                  card, the weighing and the costing all follow.
                 */}
-                {batchNo.trim() && (
-                  <>
-                    <SheetLabel className="mt-4">
-                      Mixed in{' '}
-                      <span className="muted normal-case tracking-normal">
-                        — optional, tailings that go through with it
-                      </span>
-                    </SheetLabel>
-                    <PickGrid>
-                      <Pick
-                        title="Nothing mixed"
-                        sub="just this batch"
-                        selected={!mix.length}
-                        onClick={() => setMix([])}
-                      />
-                      {pickableBatches
-                        .filter((b) => b.ref !== batchNo.trim())
-                        .map((b) => (
-                          <Pick
-                            key={`mix-${b.id}`}
-                            title={b.ref}
-                            dot={b.grade ? gradeVar(b.grade) : undefined}
-                            sub={<BatchPickSub batch={b} />}
-                            selected={mix.includes(b.ref)}
-                            onClick={() => toggleMix(b)}
-                          />
-                        ))}
-                    </PickGrid>
-                    {mix.length > 0 && (
-                      <div className="hint">
-                        Filed under {batchNo.trim()} — {mix.join(' and ')}{' '}
-                        {mix.length === 1 ? 'goes' : 'go'} through with it as tailings.
-                        {' '}The run is recorded against {batchNo.trim()}, which is what the
-                        batch card, the weighing and the costing all follow.
-                      </div>
-                    )}
-                  </>
+                {mix.length > 0 && (
+                  <div className="hint">
+                    Filed under {batchNo.trim()} — {mix.join(' and ')}{' '}
+                    {mix.length === 1 ? 'goes' : 'go'} through with it as tailings. The run is
+                    recorded against {batchNo.trim()}, which is what the batch card, the
+                    weighing and the costing all follow.
+                  </div>
                 )}
               </>
             )}
