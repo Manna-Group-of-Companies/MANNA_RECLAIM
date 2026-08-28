@@ -34,6 +34,11 @@ class Draft {
       capacity = numText(run.capacity),
       packedSacks = numText(run.packedSacks),
       remarks = _t(run.remarks),
+      // The batches mixed into this one, without the batch it is filed under -
+      // `batchNo` is that, and nothing is mixed into itself. A comma-joined
+      // string because a draft holds everything as text, which is what lets the
+      // payload see it move like any other field.
+      mix = run.sources.skip(1).join(','),
       pieces = numText(run.pieces),
       flashKg = numText(run.flashKg),
       cavities = numText(run.cavities),
@@ -66,6 +71,7 @@ class Draft {
   String capacity;
   String packedSacks;
   String remarks;
+  String mix;
   String pieces;
   String flashKg;
   String cavities;
@@ -92,6 +98,7 @@ class Draft {
     'capacity': capacity,
     'packedSacks': packedSacks,
     'remarks': remarks,
+    'mix': mix,
     'pieces': pieces,
     'flashKg': flashKg,
     'cavities': cavities,
@@ -243,6 +250,18 @@ Map<String, dynamic> buildPayload(Draft draft, Draft base, RunMath math) {
       if (value.isNotEmpty) payload['shift'] = value;
     } else if (field == 'shiftDate') {
       if (value.isNotEmpty) payload['shiftDate'] = value;
+    } else if (field == 'mix') {
+      // The batch it is filed under leads the list the server stores, so it is
+      // sent with the tailings rather than left to be inferred - and an emptied
+      // mix sends the empty list, which is what clears the columns.
+      final tailings = value
+          .split(',')
+          .map((ref) => ref.trim())
+          .where((ref) => ref.isNotEmpty && ref != draft.batchNo.trim())
+          .toList();
+      payload['sources'] = tailings.isEmpty
+          ? <String>[]
+          : [draft.batchNo.trim(), ...tailings];
     } else {
       payload[field] = asNumber(value);
     }

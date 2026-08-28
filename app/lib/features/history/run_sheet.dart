@@ -72,6 +72,7 @@ Future<RunSheetResult?> showRunSheet({
       ..capacity = c['capacity']!.text
       ..packedSacks = c['packedSacks']!.text
       ..remarks = c['remarks']!.text
+      ..mix = c['mix']!.text
       ..pieces = c['pieces']!.text
       ..flashKg = c['flashKg']!.text
       ..cavities = c['cavities']!.text
@@ -94,6 +95,18 @@ Future<RunSheetResult?> showRunSheet({
   final isShiftwise = run.line == 'grind' || run.line == 'coarse';
   final hasBatchFields =
       !isShiftwise || run.batchNo != null || run.quality != null;
+
+  /// Whether this run could have had a second batch going through it.
+  ///
+  /// The refining passes, which is where the plant mixes: a shift on the
+  /// grinding or coarse line has no batch at all, a press and a bench make
+  /// finished goods, and an autoclave charge is one batch by definition - it is
+  /// the vessel that makes it.
+  final canMix =
+      !isShiftwise &&
+      run.kind != 'autoclave' &&
+      run.kind != 'press' &&
+      !isMoulding(run.kind);
 
   final result = await showAppSheet<RunSheetResult>(
     context: context,
@@ -145,6 +158,23 @@ Future<RunSheetResult?> showRunSheet({
               label: isShiftwise ? 'Coarse batch number' : 'Batch number',
               onChanged: (_) => setSheetState(() {}),
             ),
+            // The other batches that went through with it.
+            //
+            // Set at the machine on the start sheet, and settable nowhere else
+            // until now - so a pass that had a second batch put through it ten
+            // minutes after it started, which is the ordinary way round, could
+            // not say so. What the crews did instead is on the record: five
+            // runs in August carry both numbers in the box above with a comma
+            // between them, which reads back as a batch number no report can
+            // match. This is where that correction belongs.
+            if (canMix)
+              TextFieldRow(
+                controller: c['mix']!,
+                label: 'Mixed in',
+                note: '— other batches that went through with it',
+                placeholder: '—',
+                onChanged: (_) => setSheetState(() {}),
+              ),
             // A press moulds finished goods, not a grade of reclaim: it has
             // neither a quality nor a formulation to correct.
             if (!math.isPress) ...[

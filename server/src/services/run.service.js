@@ -1347,6 +1347,38 @@ export const runService = {
       }
     }
 
+    /*
+     * The batches that went through together, corrected after the fact.
+     *
+     * Not one of EDITABLE_COLUMNS because it is four columns rather than a
+     * field, and because the first of them is not free: it is the batch the run
+     * is filed under, so it follows `batch_no` rather than standing beside it.
+     * Two rules, and both are about that first column:
+     *
+     *   - a list of one is no mix. That is what `batch_no` already says, so it
+     *     clears the columns rather than writing the same number into src1 and
+     *     leaving a run that reads as mixed with nothing.
+     *   - correcting the batch number of a run that carries a mix moves the
+     *     first column with it. Left alone it would name the batch the run used
+     *     to be on, and every read of the mix would report the run against a
+     *     batch it is no longer filed under.
+     */
+    if (payload.sources !== undefined) {
+      const list = (Array.isArray(payload.sources) ? payload.sources : [])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean);
+      Object.assign(patch, sourceColumns(list.length > 1 ? list : []));
+    } else if (patch.batch_no !== undefined) {
+      const standing = sourcesOf(run);
+      if (standing.length > 1) {
+        const lead = String(patch.batch_no ?? '').trim();
+        Object.assign(
+          patch,
+          sourceColumns(lead ? [lead, ...standing.slice(1)] : []),
+        );
+      }
+    }
+
     // Worked out against the run as it will read once this patch lands, not as
     // it reads now - an edit that moves only the start reading still has to
     // re-derive against the end that is already on the row.

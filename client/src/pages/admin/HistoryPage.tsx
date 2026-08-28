@@ -17,7 +17,7 @@ import {
   type Draft,
 } from '@/features/history/runDraft';
 import { RunRecord } from '@/features/history/RunRecord';
-import { QUALITIES, SHIFTS, isReadOnly } from '@/config/constants';
+import { QUALITIES, SHIFTS, isMoulding, isReadOnly } from '@/config/constants';
 import { clock, dayLong, lastNDays, todayISO } from '@/utils/date';
 import { hours, kwhOf, num } from '@/utils/format';
 import { cn } from '@/utils/cn';
@@ -69,6 +69,18 @@ function RunDetail({
 
   const math = runMath(run, draft);
   const { isAuto, isPress, isCracker, pickingLabourHours } = math;
+  /*
+   * Whether this run could have had a second batch going through it: the
+   * refining passes, which is where the plant mixes. A shift on the grinding or
+   * coarse line has no batch at all, a press and a bench make finished goods,
+   * and an autoclave charge is one batch by definition.
+   */
+  const canMix =
+    !isAuto &&
+    !isPress &&
+    !isMoulding(run.kind) &&
+    run.line !== 'grind' &&
+    run.line !== 'coarse';
   const { elecStart, elecEnd, hourStart, hourEnd } = math;
   const { elecPair, hourPair, elecDelta, hourDelta, energy, runHours, output, issues } = math;
 
@@ -172,6 +184,25 @@ function RunDetail({
       <div className="mt-3">
         <div className="grouphead mt-0">What ran</div>
         {field('Batch', <input value={draft.batchNo} onChange={(e) => set('batchNo', e.target.value)} />)}
+        {/*
+          The other batches that went through with it.
+
+          A refining pass often carries the tailings of others, and until now it
+          could only be said as the machine was started - so a second batch put
+          in after the run began had nowhere to go. Five runs in August have both
+          numbers typed into the box above with a comma between them, which is
+          where a correction that had nowhere else to go ends up. The office is
+          the screen those get put right on.
+        */}
+        {canMix &&
+          field(
+            <>Mixed in <span className="muted font-normal">(other batches)</span></>,
+            <input
+              value={draft.mix}
+              placeholder="—"
+              onChange={(e) => set('mix', e.target.value)}
+            />,
+          )}
         {/* A press moulds finished goods, so it carries neither a grade nor a
             formulation - what it was set up for is the product. */}
         {!isPress &&

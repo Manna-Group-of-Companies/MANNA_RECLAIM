@@ -132,6 +132,17 @@ export const updateRunSchema = z
     capacity: z.coerce.number().min(0).optional().nullable(),
     packedSacks: z.coerce.number().int().min(0).optional().nullable(),
     remarks: z.string().max(500).optional().nullable(),
+    /**
+     * The batches the pass drew from, the one it is filed under first.
+     *
+     * Correctable for the reason the plant's own record gives: a mix could only
+     * ever be said at the moment the machine was started, and a crew that
+     * realised afterwards - or started the run before the second batch went in,
+     * which is the ordinary way round - had nowhere to put it. Five runs in
+     * August have both numbers typed into `batch_no` with a comma between them,
+     * which is a shape no report can read. An empty list takes a mix back off.
+     */
+    sources: z.array(z.string().max(60)).max(4).optional().nullable(),
     // A press run's own figures. The compound rate is left out: it is what the
     // product cost when this was moulded, not something to correct afterwards.
     product: z.string().max(40).optional().nullable(),

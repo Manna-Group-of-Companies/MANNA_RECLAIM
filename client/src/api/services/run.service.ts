@@ -106,6 +106,12 @@ export interface UpdateRunPayload {
   capacity?: number | null;
   packedSacks?: number | null;
   remarks?: string | null;
+  /**
+   * The batches that went through together, the one it is filed under first.
+   * An empty list takes a mix back off; a list of one is the same thing, since
+   * that is what `batchNo` already says.
+   */
+  sources?: string[] | null;
   /** A press run's own figures - its compound rate is not correctable. */
   product?: string | null;
   cavities?: number | null;

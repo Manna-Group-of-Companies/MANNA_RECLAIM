@@ -42,6 +42,18 @@ export const draftOf = (run: Run) => ({
   capacity: text(run.capacity),
   packedSacks: text(run.packed_sacks),
   remarks: text(run.remarks),
+  /**
+   * The batches mixed into this one, without the batch it is filed under -
+   * `batchNo` above is that, and nothing is mixed into itself.
+   *
+   * A comma-joined string because a draft holds everything as text, which is
+   * what lets changedFields() see it move like any other field. It is the one
+   * field here that was never correctable: a mix could only be said as the
+   * machine started, so a crew that put the second batch in ten minutes later
+   * had nowhere to record it - and five runs in August have both numbers typed
+   * into the batch box with a comma between them instead.
+   */
+  mix: (run.sources ?? []).slice(1).join(','),
   // A press run. Its compound rate is not here on purpose: that is what the
   // product cost when this was moulded, not a figure to correct afterwards.
   pieces: text(run.pieces),
@@ -59,6 +71,14 @@ export const draftOf = (run: Run) => ({
 
 export type Draft = ReturnType<typeof draftOf>;
 export type DraftField = keyof Draft;
+
+/** The mixed-in batches of a draft, as a list rather than as its text. */
+export const mixList = (draft: Draft) =>
+  draft.mix
+    .split(',')
+    .map((ref) => ref.trim())
+    .filter(Boolean)
+    .filter((ref) => ref !== draft.batchNo.trim());
 
 /** Which fields the form has actually moved off the run as it stands. */
 export const changedFields = (draft: Draft, base: Draft) =>
@@ -191,6 +211,14 @@ export function buildPayload(draft: Draft, changed: DraftField[], math: RunMath)
         break;
       case 'shiftDate':
         if (draft.shiftDate) payload.shiftDate = draft.shiftDate;
+        break;
+      case 'mix':
+        // The batch it is filed under leads the list the server stores, so it
+        // is sent with the tailings rather than left to be inferred - and an
+        // emptied mix sends the empty list, which is what clears the columns.
+        payload.sources = mixList(draft).length
+          ? [draft.batchNo.trim(), ...mixList(draft)]
+          : [];
         break;
       default:
         payload[field] = asNumber(draft[field]);

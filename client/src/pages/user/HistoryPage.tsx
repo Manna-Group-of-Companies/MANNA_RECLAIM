@@ -35,6 +35,7 @@ import {
   QUALITIES,
   SHIFTS,
   counted,
+  isMoulding,
 } from '@/config/constants';
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
@@ -231,6 +232,15 @@ function RunSheet({
     // the batch, so there is no batch or grade against the run to correct.
     const isShiftwise = run.line === 'grind' || run.line === 'coarse';
     const hasBatchFields = !isShiftwise || Boolean(run.batch_no) || Boolean(run.quality);
+    /*
+     * Whether this run could have had a second batch going through it.
+     *
+     * The refining passes, which is where the plant mixes: a shift on the
+     * grinding or coarse line has no batch at all, a press and a bench make
+     * finished goods, and an autoclave charge is one batch by definition - it
+     * is the vessel that makes it.
+     */
+    const canMix = !isShiftwise && !isPress && !isAuto && !isMoulding(run.kind);
 
     const set = (field: keyof Draft, value: string) => setDraft({ ...draft, [field]: value });
     const number = (field: keyof Draft, label_: ReactNode, note?: ReactNode, suffix?: string) => (
@@ -270,6 +280,26 @@ function RunSheet({
               value={draft.batchNo}
               onChange={(e) => set('batchNo', e.target.value)}
             />
+            {/*
+              The other batches that went through with it.
+
+              Set at the machine on the start sheet, and until now settable
+              nowhere else - so a pass that had a second batch put through it
+              ten minutes after it started, which is the ordinary way round,
+              could not say so. What the supervisors did instead is on the
+              record: five runs in August carry both numbers in the box above
+              with a comma between them, which reads back as a batch number no
+              report can match. This is where that correction belongs.
+            */}
+            {canMix && (
+              <TextField
+                label="Mixed in"
+                note="— other batches that went through with it"
+                placeholder="—"
+                value={draft.mix}
+                onChange={(e) => set('mix', e.target.value)}
+              />
+            )}
             {/* A press moulds finished goods, not a grade of reclaim: it has
                 neither a quality nor a formulation to correct. */}
             {!isPress && (
