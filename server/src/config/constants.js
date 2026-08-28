@@ -717,6 +717,35 @@ export const IDEAL_EFFICIENCY_LINES = IDEAL_PRODUCTION_LINES;
  * project (see devSeed and schema.sql). If either is brought back, add it here
  * and the comparison follows.
  */
+/**
+ * The machines given a utilisation target: how much of the shift they should be
+ * turning.
+ *
+ * Every machine the plant runs except the two presses, which record no hours at
+ * all - five press runs on the whole record and not one of them with a figure
+ * against it. A target on a machine that cannot report the number it is judged
+ * on is a row that is permanently blank on the screen and permanently unmet on
+ * the report.
+ *
+ * The Soorya Grinder is here despite never having had a run logged. It is on the
+ * plant and enabled, and a machine that is never switched on is exactly what a
+ * utilisation target is for.
+ */
+export const IDEAL_UTILISATION_MACHINES = [
+  { key: 'CRK', label: 'Cracker' },
+  { key: 'GRD_K', label: 'Grinder 1' },
+  { key: 'GRD_S', label: 'Grinder 2' },
+  { key: 'GRD_O', label: 'Soorya Grinder' },
+  { key: 'PR1', label: 'Pre-Refiner 1' },
+  { key: 'PR2', label: 'Pre-Refiner 2' },
+  { key: 'R1', label: 'Refiner 1' },
+  { key: 'R2', label: 'Refiner 2' },
+  { key: 'R3', label: 'Refiner 3' },
+  { key: 'R4', label: 'Refiner 4' },
+  { key: 'AC_A', label: 'Autoclave A' },
+  { key: 'AC_M', label: 'Autoclave M' },
+];
+
 export const IDEAL_AUTOCLAVES = [
   { key: 'AC_A', label: 'Autoclave A' },
   { key: 'AC_M', label: 'Autoclave M' },
@@ -860,6 +889,23 @@ export const idealKey = {
    * plant is throwing away as the only thing on the screen nobody is ever asked
    * about.
    */
+  /**
+   * How much of a twelve-hour shift a machine should actually be running.
+   *
+   * Per machine, not per line, because it is a fact about a machine: the coarse
+   * line is PR1 and R2 and they do not run for the same hours - PR1 pre-refines
+   * for ten or twelve while R2 finishes in four or five. One target across both
+   * would flag whichever of them is meant to run less.
+   *
+   * This used to be the one flag on the efficiency screen that was not a
+   * manager's benchmark - measured against a fixed threshold on the reasoning
+   * that twelve hours is twelve hours whatever the plant has averaged. The plant
+   * has asked for a target it sets instead, which is the plant's call: a fixed
+   * bar treats a vessel that cooks for eight hours and a grinder that should run
+   * all twelve as the same question, and they are not.
+   */
+  utilisation: (key) => `util.${key}`,
+
   batchYield: () => 'yield.BATCH',
 };
 
@@ -897,6 +943,12 @@ export const IDEAL_VALUE_FIELDS = [
     unit: '%',
     lowerIsBetter: false,
   },
+  ...IDEAL_UTILISATION_MACHINES.map((machine) => ({
+    key: idealKey.utilisation(machine.key),
+    label: `${machine.label} — utilisation`,
+    unit: '%',
+    lowerIsBetter: false,
+  })),
   ...IDEAL_EFFICIENCY_LINES.map((line) => ({
     key: idealKey.kwhPerKg(line.key),
     label: `${line.label} — energy`,

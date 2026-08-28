@@ -2224,21 +2224,28 @@ export const efficiencyService = {
             span: 'shift',
             value: ranHours > 0 ? round(utilPct, 0) : null,
             unit: '%',
-            /**
-             * The one flag on this screen that is not a manager's benchmark, and
-             * the one comparison that survived the medians going: twelve hours is
-             * twelve hours whatever the plant has averaged, so this is a fixed
-             * standard rather than a bar the plant sets by drifting. It is named
-             * on the card as its own kind of flag so nobody reads it as a target
-             * off the Ideal values tab.
+            /*
+             * Held to the manager's target where one is set, and to the fixed
+             * threshold where none is.
+             *
+             * This was a fixed bar alone, on the reasoning that twelve hours is
+             * twelve hours whatever the plant has averaged. That reasoning was
+             * half right: it is a good floor, and it is a poor target. A vessel
+             * that cooks eight hours to a charge and a grinder that should be
+             * turning all twelve are not the same question, and one bar across
+             * both flags the vessel every shift it ran correctly.
+             *
+             * So the manager sets one per machine now - see IDEAL_UTILISATION_
+             * MACHINES - and the fixed threshold stays underneath as the warning
+             * for a machine nobody has set a target for yet. Both can fire: a
+             * shift under the target is off the benchmark, and a shift under the
+             * threshold is flagged for downtime whether or not anybody has got
+             * round to setting one.
              */
             context: `of 12 h · downtime ${round(downMin / 60)} h`,
             warn: ranHours > 0 && utilPct < TH.utilisation * 100,
             warnLabel: 'high downtime',
-            // Declared null rather than left off, so every metric on the wire
-            // answers the same question the same way: this is not a figure the
-            // manager sets a target against, so the card must not ask for one.
-            parameter: null,
+            ...idealFor(idealKey.utilisation(day.key), ranHours > 0 ? utilPct : null, ideals, 0),
             calc: ranHours === 0 ? null : {
               title: 'Time · utilisation',
               formula: 'run hours ÷ 12 h shift',
@@ -2248,7 +2255,8 @@ export const efficiencyService = {
                 `downtime = 12 − ${round(ranHours)} = ${round(downMin / 60)} h`,
               ],
               result: `${round(utilPct, 0)}%`,
-              note: `Flagged below ${Math.round(TH.utilisation * 100)}% utilisation (more than ${Math.round((1 - TH.utilisation) * 100)}% downtime).`,
+              note: `Held to the target set for ${name} on the Ideal values tab. `
+                + `Flagged for downtime below ${Math.round(TH.utilisation * 100)}% either way.`,
             },
           },
           {
@@ -2653,6 +2661,21 @@ export const efficiencyService = {
            * And nothing is flagged where a breakdown already answers for it.
            */
           warn: !down && runs > 0 && pct < TH.utilisation * 100,
+          /*
+           * And the manager's own target for this machine, where one is set.
+           *
+           * Per machine rather than one bar for the plant, because utilisation
+           * is not one question asked twelve times: a vessel that cooks eight
+           * hours to a charge and a grinder that should be turning all twelve
+           * are both working properly, and a single threshold calls one of them
+           * a bad shift every time it has a good one.
+           *
+           * Absent where nobody has set one, which is every machine until the
+           * manager fills the tab in. The fixed threshold above still flags a
+           * machine that ran short, so an unset target is a comparison nobody
+           * has made yet rather than a machine nobody is watching.
+           */
+          ...idealFor(idealKey.utilisation(m.id), runs > 0 ? pct : null, ideals, 0),
         };
       });
 

@@ -580,6 +580,8 @@ export const IDEAL_KEY = {
   perManHour: (key: string) => `pmh.${key}`,
   specialPerManHour: (quality: string) => `pmh.SPECIAL.${quality}`,
   /** What a charge should yield. One figure for the plant - see the server. */
+  /** How much of a twelve-hour shift a machine should be running. Per machine. */
+  utilisation: (key: string) => `util.${key}`,
   batchYield: () => 'yield.BATCH',
 } as const;
 
@@ -614,6 +616,26 @@ export const IDEAL_EFFICIENCY_LINES = IDEAL_PRODUCTION_LINES;
  * Autoclave A and M. N and O have been seeded disabled for the life of the
  * project; if either is brought back, add it here and on the server.
  */
+/**
+ * The machines given a utilisation target, mirroring IDEAL_UTILISATION_MACHINES
+ * on the server. Every machine but the two presses, which record no hours to be
+ * judged on.
+ */
+export const IDEAL_UTILISATION_MACHINES = [
+  { key: 'CRK', label: 'Cracker' },
+  { key: 'GRD_K', label: 'Grinder 1' },
+  { key: 'GRD_S', label: 'Grinder 2' },
+  { key: 'GRD_O', label: 'Soorya Grinder' },
+  { key: 'PR1', label: 'Pre-Refiner 1' },
+  { key: 'PR2', label: 'Pre-Refiner 2' },
+  { key: 'R1', label: 'Refiner 1' },
+  { key: 'R2', label: 'Refiner 2' },
+  { key: 'R3', label: 'Refiner 3' },
+  { key: 'R4', label: 'Refiner 4' },
+  { key: 'AC_A', label: 'Autoclave A' },
+  { key: 'AC_M', label: 'Autoclave M' },
+];
+
 export const IDEAL_AUTOCLAVES = [
   { key: 'AC_A', label: 'Autoclave A' },
   { key: 'AC_M', label: 'Autoclave M' },
@@ -656,6 +678,16 @@ export const IDEAL_VALUE_GROUPS: CostRateGroup[] = [
     title: 'Batch yield',
     note: 'what a charge should give back, as a percentage of what went into it',
     fields: [{ key: IDEAL_KEY.batchYield(), label: 'Batch yield', unit: '%' }],
+  },
+  {
+    title: 'Machine utilisation',
+    note: 'how much of the twelve hours each machine should be running - a vessel that cooks '
+      + 'eight hours to a charge and a grinder that should turn all twelve are both right',
+    fields: IDEAL_UTILISATION_MACHINES.map((machine) => ({
+      key: IDEAL_KEY.utilisation(machine.key),
+      label: machine.label,
+      unit: '%',
+    })),
   },
   {
     title: 'Energy — grinders & coarse',
