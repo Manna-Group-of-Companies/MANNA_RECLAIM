@@ -1093,7 +1093,11 @@ export const runService = {
       // A refiner - on its own line or on the special one - can refine one
       // batch with the tailings of others mixed into it; the batch being
       // refined is the first of them.
-      ...sourceColumns(payload.sources),
+      // Through mixColumns() like every other end of this: src1 is the batch
+      // the run is filed under rather than a free column, so a sheet that names
+      // them in the wrong order - or names only the tailings - cannot file the
+      // run against something other than its own batch.
+      ...mixColumns(payload.sources, payload.batchNo),
       // A press run: the product it is set up for and what it is moulded at.
       ...(press ?? {}),
       // A sleeve or loop run: the same, plus the batch number it will be

@@ -504,31 +504,49 @@ export function MachinesPage() {
    */
   const startNothingReady = startSpecial && pickableBatches.length === 0;
   /**
-   * The batch being refined - the one the run is filed under, and the only one
-   * the record keys on.
+   * A tap on the Batch grid.
    *
-   * Its own handler and its own grid. Both questions used to be one grid where
-   * a second tap quietly meant "and mix this in", which lit two tiles the same
-   * way and said nothing about which was which. Some crews found it and some
-   * did not - in August four jobs recorded the mix and two were typed into the
-   * batch box with a comma instead. A feature half the plant cannot see is not
-   * a feature that half works; it is one that quietly splits the record in two.
+   * The first number picked is the batch being refined - the one the run is
+   * filed under, and the only one the record keys on. What is tapped after it
+   * goes through with it as tailings, which is what `sources` keeps.
+   *
+   * Two tiles, two taps, on the grid the crew already has a thumb on. It was
+   * split into two grids to make the mix visible, and the visible half was
+   * worth keeping - the "Mixed in" list below is still there and still lit by
+   * the same state - but splitting it also took away the thing the plant asked
+   * for by name: selecting two batches at a time where the batches are. A
+   * second tap that lands on nothing reads as a machine that will not take the
+   * answer, whatever a second list further down the sheet offers.
+   *
+   * The tablet never lost this, which is the other reason to put it back: one
+   * plant, two screens, and a crew that moves between them should not have to
+   * learn the picker twice.
    */
   const pickBatch = (b: Batch) => {
-    if (batchNo.trim() === b.ref) {
-      // Untapping clears the pick rather than promoting a mixed batch into
-      // its place: with two lists on screen, silently moving a number from
-      // one to the other is a change nobody asked for and nobody would see.
-      setBatchNo('');
+    const lead = batchNo.trim();
+    if (lead === b.ref) {
+      // Untapping the one it is filed under hands that job to the next number
+      // still lit rather than dropping the whole picking: the crew is taking
+      // one batch back off the machine, not starting the pick again.
+      setBatchNo(mix[0] ?? '');
+      setMix(mix.slice(1));
       return;
     }
-    setBatchNo(b.ref);
-    // Nothing is mixed into itself.
-    setMix(mix.filter((ref) => ref !== b.ref));
-    // The grade the batch was opened for is the one it will come off at, so
-    // the picker starts there - the crew can still say otherwise before it
-    // starts.
-    if (startSpecial && b.grade) setQuality(b.grade);
+    if (mix.includes(b.ref)) {
+      setMix(mix.filter((ref) => ref !== b.ref));
+      return;
+    }
+    if (!lead) {
+      setBatchNo(b.ref);
+      // The grade the batch was opened for is the one it will come off at, so
+      // the picker starts there - the crew can still say otherwise before it
+      // starts.
+      if (startSpecial && b.grade) setQuality(b.grade);
+      return;
+    }
+    // A batch is already picked, so this is the second one going through with
+    // it - the same answer the list below takes, and the same rules.
+    toggleMix(b);
   };
 
   /**
@@ -2042,7 +2060,9 @@ export function MachinesPage() {
                 <SheetLabel>
                   Batch{' '}
                   <span className="muted normal-case tracking-normal">
-                    — the one being refined
+                    {mix.length
+                      ? '— the first is what it is filed under'
+                      : '— the one being refined, or tap a second to mix it in'}
                   </span>
                 </SheetLabel>
                 <PickGrid>
@@ -2052,7 +2072,7 @@ export function MachinesPage() {
                       title={b.ref}
                       dot={b.grade ? gradeVar(b.grade) : undefined}
                       sub={<BatchPickSub batch={b} />}
-                      selected={batchNo.trim() === b.ref}
+                      selected={batchNo.trim() === b.ref || mix.includes(b.ref)}
                       onClick={() => pickBatch(b)}
                     />
                   ))}
