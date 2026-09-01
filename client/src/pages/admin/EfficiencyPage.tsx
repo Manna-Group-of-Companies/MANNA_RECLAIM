@@ -11,6 +11,7 @@ import {
 } from '@/features/reports/reportsSlice';
 import { markDown } from '@/features/maintenance/maintenanceSlice';
 import { BoModal } from '@/components/ui';
+import { CalcBody } from '@/features/reports/CalcBody';
 import { isReadOnly } from '@/config/constants';
 import { EfficiencyTrend } from '@/features/reports/EfficiencyTrend';
 import { BatchEfficiency } from '@/features/reports/BatchEfficiency';
@@ -954,22 +955,7 @@ export function EfficiencyPage() {
         subtitle={`${dayLong(date)} · ${shift} shift`}
         onClose={() => setCalc(null)}
       >
-        {calc && (
-          <>
-            <div className="calc">
-              <div>
-                <b>Formula:</b> {calc.formula}
-              </div>
-              {calc.lines.map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
-              <div>
-                = <b className="res">{calc.result}</b>
-              </div>
-            </div>
-            {calc.note && <div className="sub mt-3">{calc.note}</div>}
-          </>
-        )}
+        {calc && <CalcBody calc={calc} />}
       </BoModal>
 
       {/* the office signing off what the shift said about a miss */}

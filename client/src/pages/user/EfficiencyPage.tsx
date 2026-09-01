@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   addVarianceReason,
@@ -14,16 +14,20 @@ import {
   ViewHead,
 } from '@/components/ui';
 import { OperatorChip } from '@/features/operators/OperatorChip';
-import { ShiftTrend } from '@/features/reports/ShiftTrend';
+import { CalcBody } from '@/features/reports/CalcBody';
 import { ChargeList } from '@/features/reports/ChargeList';
 import { UtilisationCards } from '@/features/reports/Utilisation';
 import { useToast } from '@/hooks/useToast';
 import { useSupervisor } from '@/hooks/useSupervisor';
+import { fetchMachines } from '@/features/machines/machinesSlice';
+import { maintenanceService } from '@/api/services/maintenance.service';
+import { toRequestError } from '@/api/axiosClient';
 import { dayLong } from '@/utils/date';
 import { cn } from '@/utils/cn';
 import type {
   EfficiencyCard,
   EfficiencyMetric,
+  MaintenanceLog,
   Shift,
   VarianceReason,
 } from '@/types/models';
@@ -45,6 +49,19 @@ import type {
  */
 
 type AskTarget = { card: string; metric: EfficiencyMetric } | null;
+
+/** How far off the target, and whether that is the good side to be off on. */
+function Gap({ metric }: { metric: EfficiencyMetric }) {
+  if (metric.variance == null) return null;
+  const sign = metric.variance > 0 ? '+' : '';
+  return (
+    <span className={metric.offTarget ? 'effmiss' : 'effhit'}>
+      {sign}
+      {metric.variance}
+      {metric.variancePct != null ? ` · ${sign}${metric.variancePct}%` : ''}
+    </span>
+  );
+}
 
 /** Hit or miss, in the plainest words the screen has. */
 function Verdict({ metric }: { metric: EfficiencyMetric }) {
@@ -84,10 +101,12 @@ function Row({
   metric,
   reasons,
   onAsk,
+  onCalc,
 }: {
   metric: EfficiencyMetric;
   reasons: VarianceReason[];
   onAsk: () => void;
+  onCalc: () => void;
 }) {
   const shown =
     metric.value == null ? '—' : `${metric.value}${metric.unit ? ` ${metric.unit}` : ''}`;
@@ -97,7 +116,27 @@ function Row({
         <div>
           {metric.label}
           {metric.span && <span className="effspan">{metric.span}</span>}
+          {/*
+            The same flag the office sees. It fires on things a benchmark does
+            not cover - a machine that ran short of the twelve hours - and a
+            crew reading a card with the pill missing would be reading a
+            different card from the one their shift is discussed off.
+          */}
+          {metric.warn && <span className="effmiss">{metric.warnLabel ?? 'flagged'}</span>}
         </div>
+        {/* What the figure is of - crew and hours, charges, whatever the card
+            carries. It was on the office's screen and not on the floor's. */}
+        {metric.context && <div className="effnote">{metric.context}</div>}
+        {/*
+          And the working, one tap away. This is the whole of the difference the
+          crew asked about: the office could open any figure and see what it was
+          added up from, and the shift being measured on it could not.
+        */}
+        {metric.calc && (
+          <button type="button" className="effwhy" onClick={onCalc}>
+            How was this worked out?
+          </button>
+        )}
         {reasons.map((r) => (
           <Recorded key={r.id} reason={r} />
         ))}
@@ -128,6 +167,7 @@ function Row({
             </span>
           </span>
         )}
+        <Gap metric={metric} />
         <Verdict metric={metric} />
       </div>
     </div>
@@ -151,6 +191,20 @@ export function UserEfficiencyPage() {
   const [ask, setAsk] = useState<AskTarget>(null);
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
+  const [calc, setCalc] = useState<EfficiencyMetric['calc']>(null);
+
+  /*
+   * The day's breakdowns, so a dip can be explained by the one that caused it.
+   *
+   * A machine standing idle for three hours is the commonest honest answer to
+   * "why was this off target", and until now the supervisor had to type it out
+   * in prose on the efficiency screen having already logged it on Machines -
+   * two records of one event, in different words, neither pointing at the other.
+   */
+  const machines = useAppSelector((st) => st.machines.items);
+  const [downs, setDowns] = useState<MaintenanceLog[]>([]);
+  const [reporting, setReporting] = useState(false);
+  const [down, setDown] = useState({ machineId: '', time: '', cause: '' });
 
   useEffect(() => {
     void dispatch(fetchShiftOptions());
@@ -170,6 +224,76 @@ export function UserEfficiencyPage() {
     if (!date) return;
     void dispatch(fetchShiftEfficiency({ date, shift }));
   }, [dispatch, date, shift, refreshTick]);
+
+  useEffect(() => {
+    void dispatch(fetchMachines());
+  }, [dispatch]);
+
+  /*
+   * Every breakdown that started on the day being read.
+   *
+   * Filtered here rather than asked for by date, because the maintenance list
+   * takes a machine and a status and not a day, and breakdowns are rare enough
+   * that the last two hundred always reach back past the shift on screen.
+   */
+  const loadDowns = useCallback(async () => {
+    if (!date) return;
+    try {
+      const { rows } = await maintenanceService.list({ limit: 200, order: 'desc' });
+      setDowns(rows.filter((r) => String(r.down_start ?? '').slice(0, 10) === date));
+    } catch {
+      // A breakdown list that will not load must not take the shift's figures
+      // down with it - the reason box still takes typed words.
+      setDowns([]);
+    }
+  }, [date]);
+
+  useEffect(() => {
+    void loadDowns();
+  }, [loadDowns, refreshTick]);
+
+  /** A breakdown, in the words that go on the record as the reason. */
+  const asReason = (log: MaintenanceLog) => {
+    const when = String(log.down_start ?? '').slice(11, 16);
+    const name = log.machine ?? log.machine_id;
+    const spell = log.downtime_hours != null
+      ? `${log.downtime_hours} h`
+      : log.repaired_at ? 'repaired' : 'still down';
+    return `Breakdown — ${name} down from ${when} (${spell})`
+      + `${log.root_cause ? `: ${log.root_cause}` : ''}`;
+  };
+
+  const reportDown = async () => {
+    if (!down.machineId) {
+      notify('Which machine broke down?', 'warn');
+      return;
+    }
+    setSaving(true);
+    try {
+      /*
+       * Filed against the shift being explained, not against now. The
+       * supervisor is often writing this up at the end of a shift, and a
+       * breakdown stamped with the moment he got to the tablet would sit on the
+       * wrong day the moment he does it after midnight.
+       */
+      const at = down.time ? new Date(`${date}T${down.time}`) : null;
+      const machine = machines.find((m) => m.id === down.machineId);
+      await maintenanceService.markDown({
+        machineId: down.machineId,
+        machine: machine?.name ?? null,
+        downStart: at && !Number.isNaN(at.getTime()) ? at.toISOString() : undefined,
+        rootCause: down.cause.trim() || null,
+      });
+      notify('Breakdown recorded', 'ok');
+      setDown({ machineId: '', time: '', cause: '' });
+      setReporting(false);
+      await loadDowns();
+    } catch (err) {
+      notify(toRequestError(err).message, 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   /** What has already been said about a figure on this shift. */
   const reasonsFor = (parameter?: string | null) =>
@@ -263,8 +387,10 @@ export function UserEfficiencyPage() {
             reasons={reasonsFor(m.parameter)}
             onAsk={() => {
               setReason('');
+              setReporting(false);
               setAsk({ card: title, metric: m });
             }}
+            onCalc={() => setCalc(m.calc)}
           />
         ))}
 
@@ -358,11 +484,27 @@ export function UserEfficiencyPage() {
       )}
 
       {/*
-        And how the line has been running, under the shift rather than beside
-        it. The shift is what the crew opened this tab for and it stays first;
-        the period is the question that follows once they have read it.
+        There was a period analysis under this - the same line or machine
+        followed across a fortnight. It is gone from the floor at the plant's
+        asking, and the reasoning holds: a shift is what a crew can answer for
+        and act on before the next one starts, and a fortnight's drift is a
+        question for the office. The office still has it, on the same page under
+        "Compare a period".
       */}
-      <ShiftTrend />
+
+      {/*
+        The working, in the same words the office reads it in - see CalcBody.
+        The plant pays an incentive on these figures and a crew that cannot see
+        how one was reached cannot argue with it.
+      */}
+      <BottomSheet
+        open={Boolean(calc)}
+        title={calc?.title ?? 'How this was worked out'}
+        subtitle={date ? `${dayLong(date)} · ${shift} shift` : undefined}
+        onClose={() => setCalc(null)}
+      >
+        {calc && <CalcBody calc={calc} className="effcalc" />}
+      </BottomSheet>
 
       <BottomSheet
         open={Boolean(ask)}
@@ -381,6 +523,89 @@ export function UserEfficiencyPage() {
               Made {ask.metric.value}
               {ask.metric.unit ? ` ${ask.metric.unit}` : ''} against a target of {ask.metric.ideal}.
             </div>
+            {/*
+              A breakdown already on the record, offered before the box.
+
+              A machine standing idle is the commonest honest answer here, and
+              it is nearly always already logged on Machines. Picking it writes
+              the reason in the words of that record - which machine, from when,
+              for how long - so the two say the same thing and the office can
+              find the breakdown the reason is talking about.
+            */}
+            {downs.length > 0 && (
+              <>
+                <div className="sub">Reported broken down today — tap to use as the reason</div>
+                {downs.map((log) => (
+                  <button
+                    key={log.id}
+                    type="button"
+                    className="effwhy block text-left"
+                    onClick={() => setReason(asReason(log))}
+                  >
+                    {asReason(log)}
+                  </button>
+                ))}
+              </>
+            )}
+
+            {!reporting ? (
+              <button type="button" className="effwhy" onClick={() => setReporting(true)}>
+                {downs.length ? 'Report another breakdown' : 'Was it a breakdown? Report it'}
+              </button>
+            ) : (
+              /*
+               * The same record the Machines tab writes, asked for here.
+               *
+               * Not a second kind of breakdown: this posts to the same
+               * maintenance log, so the machine goes DOWN, the repair is owed
+               * in the same three answers, and the downtime counts on the same
+               * report. What it saves is walking to another tab in the middle
+               * of explaining a figure - which in practice meant the breakdown
+               * got typed as prose here and never logged at all.
+               */
+              <div className="effdown">
+                <div className="sub">
+                  This marks the machine DOWN, exactly as the Machines tab does.
+                </div>
+                <SelectField
+                  label="Machine"
+                  value={down.machineId}
+                  onChange={(e) => setDown({ ...down, machineId: e.target.value })}
+                >
+                  <option value="">Which machine?</option>
+                  {machines
+                    .filter((m) => m.enabled !== false)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                </SelectField>
+                <div className="field">
+                  <label htmlFor="ue-down-time">Broke down at</label>
+                  <input
+                    id="ue-down-time"
+                    type="time"
+                    value={down.time}
+                    onChange={(e) => setDown({ ...down, time: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="ue-down-cause">What happened</label>
+                  <textarea
+                    id="ue-down-cause"
+                    rows={2}
+                    value={down.cause}
+                    onChange={(e) => setDown({ ...down, cause: e.target.value })}
+                    placeholder="bearing seized · belt snapped…"
+                  />
+                </div>
+                <button type="button" className="btn" onClick={reportDown} disabled={saving}>
+                  {saving ? 'Recording…' : 'Record the breakdown'}
+                </button>
+              </div>
+            )}
+
             <div className="field">
               <label htmlFor="ue-reason">What happened</label>
               <textarea

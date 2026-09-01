@@ -2898,6 +2898,43 @@
     and every tap on it either puts a person somewhere or takes them off - so
     the target is a whole card rather than a row in a list.
   */
+  /*
+    The working behind a figure, on the tablet.
+
+    `.calc` is declared under `.back-office` and nothing under that class
+    renders on the floor, so the sheet brings its own. Same content, same order
+    - see CalcBody - because a supervisor and a manager arguing about an
+    incentive must be reading one working, not two.
+  */
+  .effcalc {
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 12px 13px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.85;
+    color: var(--ink);
+    overflow-x: auto;
+  }
+  .effcalc .res {
+    color: var(--brand);
+    font-weight: 700;
+  }
+
+  /* Reporting a breakdown without leaving the figure it explains. */
+  .effdown {
+    background: var(--sunken);
+    border: 1px solid var(--line2);
+    border-radius: var(--r-sm);
+    padding: 12px;
+    margin: 8px 0;
+  }
+  .effdown .field input,
+  .effdown .field textarea {
+    width: 100%;
+  }
+
   .stationbox {
     border: 1.5px solid var(--line2);
     border-radius: var(--r-sm);
