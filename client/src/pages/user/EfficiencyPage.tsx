@@ -127,16 +127,6 @@ function Row({
         {/* What the figure is of - crew and hours, charges, whatever the card
             carries. It was on the office's screen and not on the floor's. */}
         {metric.context && <div className="effnote">{metric.context}</div>}
-        {/*
-          And the working, one tap away. This is the whole of the difference the
-          crew asked about: the office could open any figure and see what it was
-          added up from, and the shift being measured on it could not.
-        */}
-        {metric.calc && (
-          <button type="button" className="effwhy" onClick={onCalc}>
-            How was this worked out?
-          </button>
-        )}
         {reasons.map((r) => (
           <Recorded key={r.id} reason={r} />
         ))}
@@ -151,7 +141,28 @@ function Row({
         )}
       </div>
       <div className="effnums">
-        <b>{shown}</b>
+        {/*
+          The number is the way into the working.
+ 
+          Not a button on the left beside "Why was this off target?", which is
+          where it was first put and was wrong twice over: it crowded the one
+          control the supervisor needs most, and it made the reader hunt for a
+          link to explain a figure they were already looking at. Tapping the
+          figure to see how the figure was reached is the shortest line between
+          the question and the answer, and it leaves the left-hand side entirely
+          to recording the reason.
+ 
+          Still a plain number where there is no working - a control that does
+          nothing when pressed is worse than no control.
+        */}
+        {metric.calc ? (
+          <button type="button" className="effval" onClick={onCalc}>
+            <b>{shown}</b>
+            <span className="effhow">how?</span>
+          </button>
+        ) : (
+          <b>{shown}</b>
+        )}
         {metric.ideal != null && (
           <span className="efftarget">
             target {metric.ideal}

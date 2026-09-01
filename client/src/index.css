@@ -2396,6 +2396,34 @@
   .effline.miss .effnums b {
     color: var(--err);
   }
+  /*
+    The figure, as the way into its own working.
+
+    Deliberately not styled as a button: it is the number, in the same place and
+    at the same weight as a number with no working behind it, so a row does not
+    change shape depending on whether it can be opened. The "how?" underneath is
+    what says it can be - small enough to ignore, and the whole target is the
+    tap area, which is what matters on a tablet.
+  */
+  .effval {
+    display: block;
+    text-align: right;
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+  .effval:active {
+    opacity: 0.6;
+  }
+  .effhow {
+    display: block;
+    font-size: 10.5px;
+    letter-spacing: 0.03em;
+    color: var(--brand);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   .efftarget {
     display: block;
     font-size: 11.5px;
