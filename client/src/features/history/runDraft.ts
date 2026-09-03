@@ -22,6 +22,39 @@ export const asNumber = (value: string) => {
 
 export const round2 = (value: number) => Math.round(value * 100) / 100;
 
+/**
+ * An instant as a `datetime-local` box holds it - 'YYYY-MM-DDTHH:MM', in plant
+ * local time, blank for one that was never recorded.
+ *
+ * Built off the parts rather than off toISOString(), which hands back UTC and
+ * would put a 02:00 charge on the previous evening. The box carries its date as
+ * well as its clock because a charge put in at 22:00 comes out the next day, and
+ * a time on its own would quietly file the discharge before the load.
+ */
+export const localStamp = (iso?: string | null) => {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(
+    at.getHours(),
+  )}:${pad(at.getMinutes())}`;
+};
+
+/** The instant behind such a box. Null while it is empty or half-typed. */
+export const instantOf = (local: string) => {
+  const typed = local.trim();
+  if (!typed) return null;
+  const at = new Date(typed);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+};
+
+/** Whole minutes between two instants, either of which may be missing. */
+const gap = (from: string | null, to: string | null) =>
+  from == null || to == null
+    ? null
+    : Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60000);
+
 /** The editable fields of a run, as a form holds them: everything a string. */
 export const draftOf = (run: Run) => ({
   batchNo: text(run.batch_no),
@@ -54,6 +87,18 @@ export const draftOf = (run: Run) => ({
    * into the batch box with a comma between them instead.
    */
   mix: (run.sources ?? []).slice(1).join(','),
+  /*
+   * The two ends of the run, for the machine that is timed by them.
+   *
+   * Correctable for the reason the mix above is: there was one moment it could
+   * be said and that moment has passed. Neither end of an autoclave charge is
+   * stamped the way a refiner's is - the load sheet takes a loading time, and a
+   * charge pulled at 02:00 is discharged on the record when the crew get back
+   * to the office - so both are typed, and the sheet that asks is gone the
+   * moment the vessel is empty.
+   */
+  startedAt: localStamp(run.started_at),
+  endedAt: localStamp(run.ended_at),
   // A press run. Its compound rate is not here on purpose: that is what the
   // product cost when this was moulded, not a figure to correct afterwards.
   pieces: text(run.pieces),
@@ -107,6 +152,26 @@ export interface RunMath {
   energy: number | null;
   runHours: number | null;
   output: number | null;
+  /** The clock between the two ends of the run, in minutes. */
+  clockMin: number | null;
+  /**
+   * Whether an end has been moved, and whether the run time is about to follow
+   * it. A vessel has no hour meter, so the clock is what timed the charge -
+   * unless the crew type a figure themselves, which is the way in for the old
+   * rows whose two ends were both stamped when the tablet flushed them and so
+   * say nothing about what the vessel did.
+   */
+  clockMoved: boolean;
+  clockTimesRun: boolean;
+  /**
+   * A cycle time left standing outside the charge by a correction to its ends.
+   *
+   * Said rather than refused. The 21 bar and door times are recorded at the
+   * discharge and are not on this form, so refusing would leave a charge that
+   * cannot be corrected at all - and a heat-up measured against a window that
+   * no longer contains it is worth a word to whoever is standing there.
+   */
+  cycleAdrift: boolean;
   /** Readings that cannot be right, in the words the screen shows them in. */
   issues: string[];
 }
@@ -149,6 +214,23 @@ export function runMath(run: Run, draft: Draft): RunMath {
       ? round2((pickLabourers as number) * (pickHours as number))
       : null;
 
+  // The two ends of the run, read off the draft so the sheet can show what a
+  // corrected time works out to before it is saved - exactly as a meter pair is
+  // shown - and compared against the run to say whether the run time follows.
+  const startedAt = instantOf(draft.startedAt);
+  const endedAt = instantOf(draft.endedAt);
+  const clockMin = gap(startedAt, endedAt);
+  const clockMoved =
+    draft.startedAt !== localStamp(run.started_at) || draft.endedAt !== localStamp(run.ended_at);
+  // A time recorded inside the charge that the corrected ends no longer contain.
+  const outside = (iso?: string | null) => {
+    const at = instantOf(localStamp(iso));
+    if (at == null) return false;
+    const fromStart = gap(startedAt, at);
+    const toEnd = gap(at, endedAt);
+    return (fromStart != null && fromStart < 0) || (toEnd != null && toEnd < 0);
+  };
+
   const issues: string[] = [];
   if (elecDelta != null && elecDelta < 0) {
     issues.push('The electricity meter reads lower at the end than at the start.');
@@ -162,6 +244,36 @@ export function runMath(run: Run, draft: Draft): RunMath {
   if (isCracker && (pickLabourers ?? 0) > 0 !== (pickHours ?? 0) > 0) {
     issues.push('Picking needs both the labourers and the hours, or neither.');
   }
+  if (clockMin != null && clockMin < 0) {
+    issues.push('That has the run ending before it started.');
+  }
+  /*
+   * A run in progress is on the record like any other and History lists it, so
+   * its edit form opens with an empty end. Filling that in is not what stopping
+   * a machine does: the stop sheet weighs the firewood, releases the batch and
+   * marks the card, and a date typed here would do none of it and leave a
+   * charge that reads as finished and is still in the vessel.
+   */
+  if (run.status === 'running' && endedAt) {
+    issues.push('That run is still in progress - stop it on the Machines tab.');
+  }
+
+  /*
+   * Whether the run time is about to follow the clock, on the same order of
+   * preference the server applies: a figure entered by hand wins, then the hour
+   * meter, then the clock between the two ends.
+   *
+   * The hand-entered case is not a formality. The tablets stamped both ends of
+   * some old rows at the moment they flushed them, so the clock on those is a
+   * few seconds regardless of what the machine did, and the typed figure is the
+   * only record there is of what it ran.
+   */
+  const clockTimesRun =
+    clockMoved &&
+    clockMin != null &&
+    clockMin >= 0 &&
+    hourDelta == null &&
+    draft.hoursRun === text(run.hours_run);
 
   return {
     isAuto: run.kind === 'autoclave',
@@ -179,8 +291,15 @@ export function runMath(run: Run, draft: Draft): RunMath {
     elecDelta,
     hourDelta,
     energy: elecDelta != null ? round2(elecDelta) : asNumber(draft.kwh),
-    runHours: hourDelta ?? asNumber(draft.hoursRun),
+    // What the run will read once saved - so a corrected discharge shows the run
+    // time it is about to write, not the one it is replacing.
+    runHours:
+      hourDelta ?? (clockTimesRun ? round2((clockMin as number) / 60) : asNumber(draft.hoursRun)),
     output: asNumber(draft.outWeight),
+    clockMin,
+    clockMoved,
+    clockTimesRun,
+    cycleAdrift: clockMoved && (outside(run.pressure_at) || outside(run.door_open_at)),
     issues,
   };
 }
@@ -220,6 +339,17 @@ export function buildPayload(draft: Draft, changed: DraftField[], math: RunMath)
           ? [draft.batchNo.trim(), ...mixList(draft)]
           : [];
         break;
+      /*
+       * The two ends of the run. An emptied box sends nothing: a run started
+       * and one that is on record as finished ended, so a blank there is a box
+       * being cleared to retype rather than an answer to be saved.
+       */
+      case 'startedAt':
+      case 'endedAt': {
+        const at = instantOf(draft[field]);
+        if (at) payload[field] = at;
+        break;
+      }
       default:
         payload[field] = asNumber(draft[field]);
     }

@@ -272,6 +272,78 @@ function hoursOf(run, payload) {
   return meterDiff(run.hour_start, payload.hourEnd);
 }
 
+/** An instant as milliseconds, or null for one that was never recorded. */
+const instant = (value) => {
+  if (value == null || value === '') return null;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+};
+
+/**
+ * The clock a run stood on, less every pause banked against it.
+ *
+ * How stop() times a machine that has no hour meter, and a function rather than
+ * two lines in each place because an autoclave is timed this way and no other:
+ * a correction to either end of a charge has to reach the same figure the
+ * discharge did, or the two disagree about the same charge.
+ */
+function clockMinutes(run) {
+  const started = instant(run.started_at);
+  const ended = instant(run.ended_at);
+  if (started == null || ended == null) return null;
+  return Math.round(Math.max(0, ended - started - Number(run.paused_ms || 0)) / 60000);
+}
+
+/**
+ * The two ends of a run, corrected after the fact.
+ *
+ * The autoclaves are what this is for. Neither end of a charge is stamped the
+ * way a refiner's is - the load sheet takes a loading time, and a charge pulled
+ * at 02:00 is discharged on the record when the crew get back to the office -
+ * so both are typed, and a typed time is a mistyped time. Until now the only
+ * screen that ever asked was the one that logged it, which is gone the moment
+ * the vessel is empty.
+ *
+ * Two rules, and a third thing that has to travel with them:
+ *
+ *   - a run cannot end before it started.
+ *   - a run still in progress has no end to correct. It has a stop, on the
+ *     Machines tab, and that does far more than write a time: it weighs the
+ *     firewood, releases the batch and marks the card. Dating an end onto the
+ *     row here would do none of it and leave a charge reading as finished that
+ *     is still in the vessel.
+ *   - and the vessel keeps its own copy of both, `loaded_at` and `unloaded_at`,
+ *     which the batch card reads before started_at/ended_at. Corrected without
+ *     them the run would move while the batch it opened went on showing the
+ *     time that was wrong - which is the shape of error this project keeps
+ *     refusing, invisible from both ends.
+ */
+function clockPatch(run, payload = {}) {
+  const patch = {};
+  if (payload.startedAt !== undefined) patch.started_at = payload.startedAt;
+  if (payload.endedAt !== undefined) patch.ended_at = payload.endedAt;
+  if (!Object.keys(patch).length) return patch;
+
+  if (payload.endedAt !== undefined && !run.ended_at) {
+    throw ApiError.conflict(
+      'That run is still in progress - stop it on the Machines tab rather than dating an end onto it',
+    );
+  }
+
+  const after = { ...run, ...patch };
+  const started = instant(after.started_at);
+  const ended = instant(after.ended_at);
+  if (started != null && ended != null && ended < started) {
+    throw ApiError.badRequest('That has the run ending before it started');
+  }
+
+  if (run.kind === 'autoclave') {
+    if (patch.started_at !== undefined) patch.loaded_at = patch.started_at;
+    if (patch.ended_at !== undefined) patch.unloaded_at = patch.ended_at;
+  }
+  return patch;
+}
+
 /**
  * The production line a machine's runs belong to. The back office's efficiency
  * figures are grouped by it - refiner passes as `special`, the grinders as
@@ -1413,12 +1485,17 @@ export const runService = {
       }
     }
 
+    // And the two ends of the run itself - see clockPatch(), which is also what
+    // carries the vessel's own copy of them along.
+    Object.assign(patch, clockPatch(run, payload));
+
     // Worked out against the run as it will read once this patch lands, not as
     // it reads now - an edit that moves only the start reading still has to
     // re-derive against the end that is already on the row.
     const after = { ...run, ...patch };
     const touchedElec = payload.elecStart !== undefined || payload.elecEnd !== undefined;
     const touchedHour = payload.hourStart !== undefined || payload.hourEnd !== undefined;
+    const touchedClock = payload.startedAt !== undefined || payload.endedAt !== undefined;
 
     if (payload.kwh !== undefined) {
       patch.kwh = payload.kwh == null ? null : round2(Number(payload.kwh));
@@ -1437,6 +1514,32 @@ export const runService = {
       // Keep the minutes in step, so the detail view cannot show an hours
       // figure and a run time that disagree.
       if (hours != null) patch.runtime_min = Math.round(hours * 60);
+    } else if (
+      touchedClock &&
+      after.kind !== 'press' &&
+      !isMoulding(after.kind) &&
+      meterDiff(after.hour_start, after.hour_end) == null
+    ) {
+      /*
+       * A vessel has no hour meter, so what a charge ran is the clock between
+       * the load and the discharge - which is how stop() timed it, and so how a
+       * correction to either end has to time it again. Otherwise a discharge put
+       * right at 11:20 leaves the charge still reading the length it was first
+       * mis-logged as, and every hour the reports add up carries the mistake the
+       * correction was meant to take out.
+       *
+       * Two runs are left out of it. One with both hour-meter readings, because
+       * the meter is the authority on its own machine's hours exactly as it is
+       * above; and a press or a bench, because those book no run hours at all -
+       * they have none of the figures hours are read for, and stop() is careful
+       * not to give them any. Correcting when one started should not be what
+       * finally does.
+       */
+      const mins = clockMinutes(after);
+      if (mins != null) {
+        patch.runtime_min = mins;
+        patch.hours_run = round2(mins / 60);
+      }
     }
 
     if (!Object.keys(patch).length) return decorate(run);

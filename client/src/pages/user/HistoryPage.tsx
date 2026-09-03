@@ -40,7 +40,7 @@ import {
 import { useSupervisor } from '@/hooks/useSupervisor';
 import { useToast } from '@/hooks/useToast';
 import { dayMonth } from '@/utils/date';
-import { hours, kwhOf, num, rupees } from '@/utils/format';
+import { hours, kwhOf, minutes, num, rupees } from '@/utils/format';
 import type { DispatchSummary, Run } from '@/types/models';
 
 /** "9.3 h" the way the prototype's history column reads it. */
@@ -67,7 +67,9 @@ const minutesOf = (hoursText: string) => {
  * The fields on offer follow what was actually recorded. A shiftwise run - the
  * grinding and coarse lines, measured by the shift rather than by the batch -
  * has no batch or grade to correct, so it is not asked for one; an autoclave is
- * timed by its charge rather than by a meter, so it gets neither meter group.
+ * timed by its charge rather than by a meter, so it gets neither meter group -
+ * and gets instead the two ends of the charge itself, which is what times it,
+ * and which nothing else on the record can put right once the vessel is empty.
  *
  * Both writes rewrite the plant's record, so the sheet is what stands in for
  * the role check the API used to make: what a reading works out to is shown
@@ -228,6 +230,7 @@ function RunSheet({
     const math = runMath(run, draft);
     const { isAuto, isPress, elecPair, hourPair, elecDelta, hourDelta } = math;
     const { isCracker, pickingLabourHours } = math;
+    const { clockMin, clockTimesRun, cycleAdrift, issues } = math;
     // Shiftwise: the lines whose output is measured by the shift rather than by
     // the batch, so there is no batch or grade against the run to correct.
     const isShiftwise = run.line === 'grind' || run.line === 'coarse';
@@ -255,6 +258,13 @@ function RunSheet({
       />
     );
 
+    /* Typed in minutes, the way the sheet asks for it; kept in hours. */
+    const setRuntime = (value: string) => {
+      const typed = value.trim();
+      const mins = Number(typed);
+      set('hoursRun', !typed ? '' : Number.isNaN(mins) ? typed : String(round2(mins / 60)));
+    };
+
     const runtimeField = (
       <TextField
         label="Run time"
@@ -263,11 +273,41 @@ function RunSheet({
         placeholder="—"
         value={hourPair ? String(Math.round((hourDelta ?? 0) * 60)) : minutesOf(draft.hoursRun)}
         disabled={hourPair}
-        onChange={(e) => {
-          const typed = e.target.value.trim();
-          const mins = Number(typed);
-          set('hoursRun', !typed ? '' : Number.isNaN(mins) ? typed : String(round2(mins / 60)));
-        }}
+        onChange={(e) => setRuntime(e.target.value)}
+      />
+    );
+
+    /*
+     * The same box on a vessel, which is timed by the clock rather than by a
+     * meter - there is no hour meter on an autoclave, and the discharge worked
+     * the figure out the same way. So once an end below is corrected this
+     * follows it, exactly as a complete meter pair closes off its own figure.
+     *
+     * It stays open the rest of the time, and that is not a detail: the tablets
+     * stamped both ends of some old rows at the moment they flushed them, which
+     * makes the clock on those a few seconds and the figure typed by hand the
+     * only record of what the vessel actually ran.
+     */
+    const chargeTimeField = (
+      <TextField
+        label="Run time"
+        note={clockTimesRun ? '(min) — from the two times below' : '(min)'}
+        inputMode="decimal"
+        placeholder="—"
+        value={clockTimesRun ? String(clockMin) : minutesOf(draft.hoursRun)}
+        disabled={clockTimesRun}
+        onChange={(e) => setRuntime(e.target.value)}
+      />
+    );
+
+    /* One end of the run, with the date it fell on as well as the clock. */
+    const moment = (field: keyof Draft, label_: ReactNode, note?: ReactNode) => (
+      <TextField
+        label={label_}
+        note={note}
+        type="datetime-local"
+        value={draft[field]}
+        onChange={(e) => set(field, e.target.value)}
       />
     );
 
@@ -351,12 +391,50 @@ function RunSheet({
         {isAuto ? (
           <>
             <SheetLabel>Charge</SheetLabel>
+            {/*
+              The two ends of the charge, and the only screen that can still be
+              asked about them.
+
+              Neither is stamped the way a refiner's start is: the load sheet
+              takes a loading time, and a charge pulled at 02:00 is discharged on
+              the record when the crew get back to the office. Both are typed,
+              both get mistyped, and the sheet that asks is gone the moment the
+              vessel is empty - so a charge logged an hour late stayed an hour
+              long, and the run time under it was worked out from the mistake.
+
+              Each box carries its date as well as its clock, because a charge
+              put in at 22:00 comes out on the next day and a time on its own
+              would file the discharge before the load.
+            */}
             <FieldRow className="mb-3.5">
-              {runtimeField}
+              {moment('startedAt', 'Started at', '— loaded')}
+              {moment('endedAt', 'Ended at', '— discharged')}
+            </FieldRow>
+            <div className={`diffout show${(clockMin ?? 0) < 0 ? ' bad' : ''}`}>
+              {clockMin == null
+                ? 'When the charge went into the vessel, and when it came back out.'
+                : clockMin < 0
+                  ? 'That has the charge coming out before it went in.'
+                  : `In the vessel: ${minutes(clockMin)}${
+                      clockTimesRun ? ' — the run time below follows this.' : ''
+                    }`}
+            </div>
+            <FieldRow className="mb-3.5 mt-2.5">
+              {chargeTimeField}
               {number('workers', 'Workers')}
             </FieldRow>
             {number('capacity', 'Charge', '(kg)')}
             {number('firewoodKg', 'Firewood', '(kg)')}
+            {/* A time taken inside the charge that the corrected ends no longer
+                contain. Said rather than refused: those two are recorded at the
+                discharge and are not on this form, so refusing would leave a
+                charge nobody could correct at all. */}
+            {cycleAdrift && (
+              <div className="sub mt-1">
+                The 21 bar or door time recorded on this charge now falls outside
+                it — check them under Full record.
+              </div>
+            )}
           </>
         ) : isPress ? (
           /* A press: what came out of the mould, and what it was moulded at. No
@@ -456,6 +534,24 @@ function RunSheet({
           value={draft.remarks}
           onChange={(e) => set('remarks', e.target.value)}
         />
+
+        {/*
+          What cannot be right about the correction as it stands, in the words
+          the screen shows them in.
+
+          Save refuses on any of these, and until now refused silently: a
+          discharge dated before its load simply did nothing when the button was
+          pressed, which on a tablet reads as a sheet that has stopped working.
+          The back office's modal has always said so, and so has the app's port
+          of this sheet.
+        */}
+        {issues.length > 0 && (
+          <FormWarning>
+            {issues.map((issue) => (
+              <div key={issue}>{issue}</div>
+            ))}
+          </FormWarning>
+        )}
 
         <SheetLabel>Full record</SheetLabel>
         {/* The record itself, shared with the back office and the managing

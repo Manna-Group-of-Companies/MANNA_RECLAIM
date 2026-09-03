@@ -120,6 +120,17 @@ export interface UpdateRunPayload {
    * that is what `batchNo` already says.
    */
   sources?: string[] | null;
+  /**
+   * The two ends of the run itself, for the machine that is timed by them.
+   *
+   * Neither end of an autoclave charge is stamped the way a refiner's is - the
+   * load sheet takes a loading time, and a charge pulled at 02:00 is discharged
+   * on the record when the crew reach the office - so both are typed, and a
+   * typed time is a mistyped time. Moving either moves the charge time with it,
+   * a vessel having no hour meter to be timed by instead.
+   */
+  startedAt?: string;
+  endedAt?: string;
   /** A press run's own figures - its compound rate is not correctable. */
   product?: string | null;
   cavities?: number | null;

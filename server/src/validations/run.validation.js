@@ -152,6 +152,20 @@ export const updateRunSchema = z
      * which is a shape no report can read. An empty list takes a mix back off.
      */
     sources: z.array(z.string().max(60)).max(4).optional().nullable(),
+    /**
+     * The two ends of the run itself.
+     *
+     * An autoclave is the machine this is for. A charge is timed by the clock
+     * rather than by a meter, and neither end of it is stamped by the tablet the
+     * way a refiner's is: the load sheet takes a loading time, and a charge
+     * pulled at 02:00 is discharged on the record when the crew get back to the
+     * office. Both are typed, and a typed time is a mistyped time.
+     *
+     * Neither takes a null. A run went in and one that is on record as finished
+     * came back out - a blank is a box being cleared to retype, not an answer.
+     */
+    startedAt: z.string().datetime().optional(),
+    endedAt: z.string().datetime().optional(),
     // A press run's own figures. The compound rate is left out: it is what the
     // product cost when this was moulded, not something to correct afterwards.
     product: z.string().max(40).optional().nullable(),

@@ -19,7 +19,7 @@ import {
 import { RunRecord } from '@/features/history/RunRecord';
 import { QUALITIES, SHIFTS, isMoulding, isReadOnly } from '@/config/constants';
 import { clock, dayLong, lastNDays, todayISO } from '@/utils/date';
-import { hours, kwhOf, num } from '@/utils/format';
+import { hours, kwhOf, minutes, num } from '@/utils/format';
 import { cn } from '@/utils/cn';
 import type { Run } from '@/types/models';
 
@@ -69,6 +69,7 @@ function RunDetail({
 
   const math = runMath(run, draft);
   const { isAuto, isPress, isCracker, pickingLabourHours } = math;
+  const { clockMin, clockTimesRun, cycleAdrift } = math;
   /*
    * Whether this run could have had a second batch going through it: the
    * refining passes, which is where the plant mixes. A shift on the grinding or
@@ -149,6 +150,11 @@ function RunDetail({
       value={draft[f]}
       onChange={(e) => set(f, e.target.value)}
     />
+  );
+
+  /* One end of the run, with the date it fell on as well as the clock. */
+  const momentInput = (f: keyof Draft) => (
+    <input type="datetime-local" value={draft[f]} onChange={(e) => set(f, e.target.value)} />
   );
 
   return (
@@ -243,6 +249,48 @@ function RunDetail({
           </>
         )}
         {isAuto && field(<>Charge <span className="muted font-normal">(kg)</span></>, numberInput('capacity'))}
+
+        {/*
+          The two ends of the charge, which is what times it - a vessel has no
+          hour meter, and the discharge worked the run time out from the clock
+          between them.
+
+          Neither is stamped the way a refiner's start is: the load sheet takes a
+          loading time, and a charge pulled at 02:00 is discharged on the record
+          when the crew get back to the office. Both are typed, both get
+          mistyped, and the sheet that asks is gone once the vessel is empty.
+        */}
+        {isAuto && (
+          <>
+            <div className="grouphead">In the vessel</div>
+            {field(
+              <>Started at <span className="muted font-normal">(loaded)</span></>,
+              momentInput('startedAt'),
+            )}
+            {field(
+              <>Ended at <span className="muted font-normal">(discharged)</span></>,
+              momentInput('endedAt'),
+              <div className={cn('diffout show mt-1.5', (clockMin ?? 0) < 0 && 'bad')}>
+                {clockMin == null ? (
+                  'When the charge went into the vessel, and when it came back out.'
+                ) : clockMin < 0 ? (
+                  'That has the charge coming out before it went in.'
+                ) : (
+                  <>
+                    In the vessel: <b>{minutes(clockMin)}</b>
+                    {clockTimesRun && ' — the run time below is worked out from it.'}
+                  </>
+                )}
+              </div>,
+            )}
+            {cycleAdrift && (
+              <div className="sub mt-1">
+                The 21 bar or door time recorded on this charge now falls outside it — check
+                them in the record below.
+              </div>
+            )}
+          </>
+        )}
 
         <div className="grouphead">Shift</div>
         {field(
