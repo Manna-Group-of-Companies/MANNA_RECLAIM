@@ -218,9 +218,28 @@ alter table public.cost_rates add column if not exists updated_by text;
 -- The lab bench signs in as its own role: Quality is the only tab it gets, and
 -- the only one anybody else does not. Without this the check constraint written
 -- by the original schema.sql rejects a lab account outright.
+--
+-- 'md' is in the list for a reason worth reading before anybody trims it back.
+-- This statement drops the constraint and writes a new one, so the set here is
+-- not "the roles this file adds" - it is every role the column is allowed to
+-- hold afterwards. Leaving one out does not leave that role alone; it makes
+-- every account already holding it illegal, and Postgres refuses the whole
+-- statement:
+--
+--   ERROR: 23514: check constraint "users_role_check" of relation "users"
+--   is violated by some row
+--
+-- Which is what a plant with a managing director's account got, because this
+-- file was written before migrations/0016 added that role and was never brought
+-- forward. The drop lands before the failing add, so on a run that is not
+-- wrapped in a transaction the table is left with no role check at all until
+-- this is run again.
+--
+-- So it is the same six as supabase/schema.sql and migrations/0016_md_role.sql.
+-- A role added to either of those belongs here in the same commit.
 alter table public.users drop constraint if exists users_role_check;
 alter table public.users add constraint users_role_check
-  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin'));
+  check (role in ('worker', 'supervisor', 'lab', 'manager', 'admin', 'md'));
 
 -- What it cost to load a truck. A whole table rather than a column, so it is
 -- here in full: the API verifies it at boot and a project without it reports
