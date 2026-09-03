@@ -7,7 +7,7 @@ import axios, {
 } from 'axios';
 import { appEnv, storageKeys } from '@/config/env';
 import { requestLog } from './requestLog';
-import type { ApiEnvelope, RequestError } from '@/types/api';
+import type { ApiEnvelope, FieldError, RequestError } from '@/types/api';
 
 export const tokenStore = {
   get: () => localStorage.getItem(storageKeys.accessToken),
@@ -90,11 +90,35 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshing;
 }
 
+/**
+ * The server's refusal as one line somebody can act on.
+ *
+ * A rejected body comes back as "Validation failed" with the fields that failed
+ * in a separate array, and every screen here shows the message on its own - so
+ * a sheet that would not save named nothing that was wrong with it. On a tablet
+ * that reads as a screen that has stopped working, and the crew's next move is
+ * to try the same thing again.
+ *
+ * The wrapper is dropped once the fields have spoken: "Nothing to change" is
+ * the useful half, and "Validation failed - Nothing to change" is not a
+ * sentence anybody is helped by. A message the server wrote itself keeps its
+ * words and gains the fields after a dash.
+ */
+const spelledOut = (message: string, errors?: FieldError[]) => {
+  const said = (errors ?? [])
+    .map(({ field, message: why }) =>
+      field && field !== 'body' ? `${field}: ${why}` : why,
+    )
+    .filter(Boolean);
+  if (!said.length) return message;
+  return message === 'Validation failed' ? said.join(' · ') : `${message} — ${said.join(' · ')}`;
+};
+
 export const toRequestError = (error: unknown): RequestError => {
   const err = error as AxiosError<ApiEnvelope<unknown>>;
   if (err?.response) {
     return {
-      message: err.response.data?.message || err.message,
+      message: spelledOut(err.response.data?.message || err.message, err.response.data?.errors),
       status: err.response.status,
       errors: err.response.data?.errors,
     };
