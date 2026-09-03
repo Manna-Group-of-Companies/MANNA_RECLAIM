@@ -21,16 +21,20 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts || true
 
       - name: Upload build
-        run: rsync -az --delete client/dist/ ${{ secrets.USER }}@${{ secrets.HOST }}:/tmp/dist/
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20" \
+            client/dist/ ${{ secrets.USER }}@${{ secrets.HOST }}:/tmp/dist/
 
       - name: Publish and restart
         run: |
-          ssh ${{ secrets.USER }}@${{ secrets.HOST }} '
-            sudo rsync -a --delete /tmp/dist/ /var/www/html/ &&
-            cd ~/MANNA_RECLAIM && git pull &&
-            cd server && npm ci --omit=dev &&
-            pm2 restart manna-api --update-env
-          '
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
+            ${{ secrets.USER }}@${{ secrets.HOST }} '
+              sudo rsync -a --delete /tmp/dist/ /var/www/html/ &&
+              cd ~/MANNA_RECLAIM && git pull &&
+              cd server && npm ci --omit=dev &&
+              pm2 restart manna-api --update-env
+            '
